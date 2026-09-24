@@ -1332,7 +1332,7 @@ final class SigningSessionStore {
                 try asicData.write(to: reservation.temporaryURL, options: [.atomic])
                 try outputService.finalize(reservation)
             } catch {
-                try? FileManager.default.removeItem(at: reservation.temporaryURL)
+                outputService.discard(reservation)
                 throw error
             }
 
@@ -1618,7 +1618,7 @@ final class SigningSessionStore {
             try checkBatchGeneration(generation)
             try outputService.finalize(reservation)
         } catch {
-            try? FileManager.default.removeItem(at: reservation.temporaryURL)
+            outputService.discard(reservation)
             throw error
         }
         return BatchSigningOutput(

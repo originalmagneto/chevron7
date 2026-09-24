@@ -112,9 +112,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     }
 
     func inspect(files: [PDFItemDescriptor]) async throws -> [PDFInspection] {
-        let machineFiles = try files.map { file in
-            let reservation = try reservation(for: file.id, sourceURL: file.sourceURL)
-            return machineFile(id: file.id, sourceURL: file.sourceURL, targetURL: reservation.temporaryURL)
+        let machineFiles = files.map { file in
+            machineFile(id: file.id, sourceURL: file.sourceURL, targetURL: Self.unusedTarget(for: file.sourceURL))
         }
         let request = MachineRequest(
             protocolVersion: 1,
@@ -169,9 +168,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     }
 
     func validate(files: [PDFItemDescriptor]) async throws -> [PDFInspection] {
-        let machineFiles = try files.map { file in
-            let reservation = try reservation(for: file.id, sourceURL: file.sourceURL)
-            return machineFile(id: file.id, sourceURL: file.sourceURL, targetURL: reservation.temporaryURL)
+        let machineFiles = files.map { file in
+            machineFile(id: file.id, sourceURL: file.sourceURL, targetURL: Self.unusedTarget(for: file.sourceURL))
         }
         let requestID = UUID().uuidString
         let request = MachineV2Request(protocolVersion: 2, requestID: requestID, operation: .validate, payload: [
@@ -211,6 +209,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                             if usesMachineV2 {
                                 try await signWithMachineV2(request: request, timestamp: timestamp,
                                     continuation: continuation)
+                                discardTemporaryOutputs(for: request.files.map(\.id))
                                 continuation.finish()
                                 return
                             }
@@ -275,12 +274,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                                     break
                                 }
                             }
-                            do {
-                                try validateTerminalEvent(in: machineEvents)
-                            } catch {
-                                discardTemporaryOutputs(for: request.files.map(\.id))
-                                throw error
-                            }
+                            try validateTerminalEvent(in: machineEvents)
                             for fileID in completedFileIDs {
                                 do {
                                     let outputURL = try finalizeOutput(for: fileID)
@@ -289,6 +283,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                                     continuation.yield(.failed(fileID, .fileFailed(fileID)))
                                 }
                             }
+                            // Files the engine failed on were never finalized.
+                            discardTemporaryOutputs(for: request.files.map(\.id))
                             continuation.finish()
                         } onCancel: {
                             Task { await self.runner.cancel() }
@@ -410,7 +406,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
             if reservation.finalURL.pathExtension.caseInsensitiveCompare(expectedExtension) == .orderedSame {
                 return reservation
             }
-            try? FileManager.default.removeItem(at: reservation.temporaryURL)
+            outputService.discard(reservation)
             reservations.removeValue(forKey: fileID)
         }
         let reservation = try outputService.reserve(for: sourceURL, outputExtension: outputExtension)
@@ -423,7 +419,12 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         let reservation = reservations.removeValue(forKey: fileID)
         lock.unlock()
         guard let reservation else { throw OutputServiceError.unableToFinalize }
-        try outputService.finalize(reservation)
+        do {
+            try outputService.finalize(reservation)
+        } catch {
+            outputService.discard(reservation)
+            throw error
+        }
         return reservation.finalURL
     }
 
@@ -432,8 +433,20 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         let outputReservations = fileIDs.compactMap { reservations.removeValue(forKey: $0) }
         lock.unlock()
         for reservation in outputReservations {
-            try? FileManager.default.removeItem(at: reservation.temporaryURL)
+            outputService.discard(reservation)
         }
+    }
+
+    /// INSPECT and VALIDATE read only `source`, yet the protocol still requires a
+    /// `target`. They get a path inside a folder that is never created, so a
+    /// read-only check writes nothing next to the user's document. Reserving a real
+    /// output here used to leave a hidden zero-byte `.<name>_signed.pdf.<UUID>.XXXXXX`
+    /// beside every inspected document.
+    private static func unusedTarget(for sourceURL: URL) -> URL {
+        FileManager.default.temporaryDirectory
+            .appending(path: "Chevron7-UnusedTargets", directoryHint: .isDirectory)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            .appending(path: sourceURL.lastPathComponent)
     }
 
     private func run(_ request: MachineRequest) async throws -> [MachineEvent] {
