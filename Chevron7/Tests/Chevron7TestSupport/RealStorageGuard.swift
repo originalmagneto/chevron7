@@ -136,7 +136,8 @@ public final class RealStorageGuard: NSObject, XCTestObservation, @unchecked Sen
             messages.append("The test changed UserDefaults.standard, the test runner's domain "
                 + "\(Self.standardDefaultsDomain) that stays in ~/Library/Preferences and is read by later tests; "
                 + "pass a MemoryUserDefaults() to the code's defaults: parameter (makeSettingsStore() already "
-                + "does for AppSettingsStore):\n"
+                + "does for AppSettingsStore), or wait for another checkout's test run to finish if one was "
+                + "writing there at the same time:\n"
                 + Self.list(standardDefaultsChanges))
         }
         return messages
