@@ -32,6 +32,21 @@ final class RealStorageGuardTests: XCTestCase {
         }
     }
 
+    /// `UserDefaults.standard` under XCTest is the runner's own domain, kept in
+    /// `~/Library/Preferences`; the guard watches exactly that domain.
+    func testGuardWatchesTheRunnersStandardDefaultsDomain() {
+        XCTAssertEqual(RealStorageGuard.standardDefaultsDomain, Bundle.main.bundleIdentifier)
+        XCTAssertFalse(RealStorageGuard.standardDefaultsDomain.isEmpty)
+    }
+
+    func testChangedKeysComparesPropertyListValuesByContent() {
+        let old: [String: Any] = ["same": Data([1, 2]), "nested": ["a": [1, 2]], "changed": 1, "removed": "x"]
+        let new: [String: Any] = ["same": Data([1, 2]), "nested": ["a": [1, 2]], "changed": 2, "added": true]
+
+        XCTAssertEqual(RealStorageGuard.changedKeys(old, new), ["added", "changed", "removed"])
+        XCTAssertEqual(RealStorageGuard.changedKeys(new, new), [])
+    }
+
     /// The guard sees writes only, and a named `UserDefaults` suite only once it has leaked; a store opened on a default root would still read the
     /// real evidence register. Every store a test builds must name its own directory.
     func testNoTestOpensAStoreOnTheRealDataRoot() throws {
@@ -47,7 +62,9 @@ final class RealStorageGuardTests: XCTestCase {
             #"SignaturePlacementState\(\s*\)"#,
             #"VisibleSignatureRenderer\((?![^)]*cacheRoot)"#,
             // A named suite is written to ~/Library/Preferences for good; use MemoryUserDefaults().
-            #"UserDefaults\(suiteName:"#
+            #"UserDefaults\(suiteName:"#,
+            // UserDefaults.standard is the test runner's shared domain; pass defaults: MemoryUserDefaults().
+            #"AppSettings\.load\(\s*\)"#
         ].map { try NSRegularExpression(pattern: $0) }
 
         var offenders: [String] = []

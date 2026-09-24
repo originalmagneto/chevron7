@@ -10,7 +10,7 @@ import Chevron7Kit
 final class AppSettingsStore {
     var settings: AppSettings {
         didSet {
-            settings.save()
+            settings.save(to: defaults)
         }
     }
 
@@ -28,12 +28,17 @@ final class AppSettingsStore {
     /// Root for every file the app keeps: evidence register, vision bank, output,
     /// templates and signature images.
     let storageRoot: URL
+    /// Where `settings` is loaded from and saved to.
+    private let defaults: UserDefaults
 
-    /// Tests pass a controller with in-memory credentials and a scripted transport, and a
-    /// temporary `storageRoot` so they never read or write the user's real evidence register.
+    /// Tests pass a controller with in-memory credentials and a scripted transport, a
+    /// temporary `storageRoot` so they never read or write the user's real evidence register,
+    /// and a `MemoryUserDefaults` so one test's saved settings never reach another test.
     init(ezzkAccountController: EZZKAccountController? = nil,
-         storageRoot: URL = ProductIdentity.applicationSupportDirectory()) {
-        let loaded = AppSettings.load()
+         storageRoot: URL = ProductIdentity.applicationSupportDirectory(),
+         defaults: UserDefaults = .standard) {
+        let loaded = AppSettings.load(defaults: defaults)
+        self.defaults = defaults
         self.settings = loaded
         self.storageRoot = storageRoot
         let controller = ezzkAccountController ?? EZZKAccountController(mode: loaded.ezzkMode)

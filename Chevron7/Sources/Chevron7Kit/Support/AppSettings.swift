@@ -344,17 +344,19 @@ public struct AppSettings: Codable, Sendable {
 
     public static let standard = AppSettings()
 
-    public static func load() -> AppSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+    /// Tests pass a `MemoryUserDefaults`: under XCTest `.standard` is the test runner's own
+    /// domain, kept in `~/Library/Preferences` and shared by every test run.
+    public static func load(defaults: UserDefaults = .standard) -> AppSettings {
+        guard let data = defaults.data(forKey: storageKey),
               let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
             return .standard
         }
         return settings
     }
 
-    public func save() {
+    public func save(to defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: Self.storageKey)
+            defaults.set(data, forKey: Self.storageKey)
         }
     }
 
