@@ -4,6 +4,7 @@
 import Foundation
 import PDFKit
 import XCTest
+import Chevron7TestSupport
 import Chevron7Kit
 @testable import Chevron7App
 
@@ -996,8 +997,7 @@ final class SigningBatchTests: XCTestCase {
 
     private func makeStore(provider: RecordingSigningProvider) -> SigningSessionStore {
         let settings = makeSettingsStore()
-        let defaults = UserDefaults(suiteName: "SigningBatchTests.\(UUID().uuidString)")!
-        let recent = RecentDocumentStore(settingsStore: settings, defaults: defaults)
+        let recent = RecentDocumentStore(settingsStore: settings, defaults: MemoryUserDefaults())
         let store = SigningSessionStore(
             signingProvider: provider,
             settingsStore: settings,

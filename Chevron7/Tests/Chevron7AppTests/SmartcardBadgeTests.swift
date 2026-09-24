@@ -3,6 +3,7 @@
 
 import Foundation
 import XCTest
+import Chevron7TestSupport
 import Chevron7Kit
 @testable import Chevron7App
 
@@ -190,7 +191,7 @@ final class SigningStoreReaderTests: XCTestCase {
             settingsStore: settings,
             recentDocumentStore: RecentDocumentStore(
                 settingsStore: settings,
-                defaults: UserDefaults(suiteName: "SigningStoreReaderTests.\(UUID().uuidString)")!))
+                defaults: MemoryUserDefaults()))
     }
 
     func testReaderSelectsTheInsertedCard() {
