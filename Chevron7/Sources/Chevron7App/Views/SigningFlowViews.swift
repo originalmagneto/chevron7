@@ -789,24 +789,17 @@ struct SigningPrepareView: View {
 
     @ViewBuilder
     private var signButton: some View {
-        Button {
+        AsyncActionButton(
+            phase: AsyncActionPhase.derive(
+                isSigning: store.isSigning, lastError: store.lastError, canSign: store.canSign),
+            title: store.existingSignatures.isEmpty ? "Podpísať KEP" : "Pridať podpis",
+            loadingText: store.statusText.isEmpty ? nil : store.statusText
+        ) {
             Task { await store.sign() }
-        } label: {
-            HStack(spacing: 8) {
-                if store.isSigning {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "signature.badge.checkmark")
-                }
-                Text(store.isSigning ? (store.statusText.isEmpty ? "Podpisujem…" : store.statusText) : (store.existingSignatures.isEmpty ? "Podpísať KEP" : "Pridať podpis"))
-                    .font(.body.weight(.semibold))
-            }
-            .padding(.horizontal, 10)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        // Eligibility stays independent of the visual error phase: an error remains
+        // visible even while the button is disabled.
         .disabled(!store.canSign)
-        .keyboardShortcut(.defaultAction)
     }
 
     @ViewBuilder

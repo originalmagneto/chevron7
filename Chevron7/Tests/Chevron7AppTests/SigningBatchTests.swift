@@ -634,6 +634,43 @@ final class SigningBatchTests: XCTestCase {
         XCTAssertTrue(request.signsExtraFilesAsDataObjects)
     }
 
+    /// Single-document fail, retry, success through the real `sign()`, with the
+    /// button phase derived at each rest state. Covers the visual idle, error,
+    /// retry, error path at store level; only rendering needs the GUI.
+    func testSingleSignFailureRetrySuccessDrivesButtonPhases() async throws {
+        let provider = RecordingSigningProvider(
+            failOnceNames: ["retry.pdf"], delayedNames: ["retry.pdf"])
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "retry.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.includeQualifiedTimestamp = false
+
+        func phase() -> AsyncActionPhase {
+            AsyncActionPhase.derive(
+                isSigning: store.isSigning, lastError: store.lastError, canSign: store.canSign)
+        }
+        XCTAssertEqual(phase(), .idle)
+
+        // First attempt fails while the button shows loading mid-flight.
+        let first = Task { await store.sign() }
+        var spins = 0
+        while !store.isSigning, spins < 1_000 { await Task.yield(); spins += 1 }
+        XCTAssertTrue(store.isSigning)
+        XCTAssertEqual(phase(), .loading)
+        await first.value
+        XCTAssertEqual(store.step, .prepare)
+        let message = try XCTUnwrap(store.lastError)
+        XCTAssertEqual(phase(), .error(message))
+
+        // Retry clears the error and navigates to Done.
+        await store.sign()
+        XCTAssertEqual(store.step, .done)
+        XCTAssertNil(store.lastError)
+        let signCount = await provider.signCount()
+        XCTAssertEqual(signCount, 2)
+    }
+
     func testCombinedASiCBatchSignsEveryPDFAsItsOwnDataObject() async throws {
         let provider = RecordingSigningProvider()
         let store = makeStore(provider: provider)

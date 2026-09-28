@@ -20,3 +20,10 @@ relay at autogram.slovensko.digital, both run by Slovensko.Digital.
 
 Chevron7 is not affiliated with or endorsed by Slovensko.Digital, and not
 affiliated with Chevron Corporation.
+
+The signing primary button's async phase choreography
+(Chevron7/Sources/Chevron7App/Theme/AsyncActionButton.swift) adapts the
+interaction pattern of SwiftPieces CommitButton by Saivion Hayes
+(https://github.com/Saivion/SwiftPieces), used under its MIT + Commons Clause
+License Condition v1.0; the upstream copyright and permission notice are
+reproduced in that file. No upstream source lines were copied.
