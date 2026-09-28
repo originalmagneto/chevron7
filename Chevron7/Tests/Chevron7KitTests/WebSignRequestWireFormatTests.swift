@@ -144,6 +144,42 @@ final class WebSignRequestWireFormatTests: XCTestCase {
         XCTAssertFalse(request.wantsASiCContainer)
     }
 
+    /// JSON exactly as `ditec.js` builds it for `addTxtObject` (no eform key:
+    /// `JSON.stringify` drops the undefined field, Swift decodes it as nil).
+    func testTxtDecodesWithoutEformAndAsksForAContainer() throws {
+        let request = try decode("""
+        {
+          "requestID": "ditec-1757600000006",
+          "filename": "poznamka.txt",
+          "content": "SGVsbG8gd29ybGQ=",
+          "payloadMimeType": "text/plain;base64",
+          "signatureLevel": "XAdES_BASELINE_B",
+          "container": "ASiC_E"
+        }
+        """)
+
+        XCTAssertNil(request.eform)
+        XCTAssertTrue(request.wantsASiCContainer)
+        XCTAssertEqual(Data(base64Encoded: request.content).flatMap({ String(data: $0, encoding: .utf8) }), "Hello world")
+    }
+
+    /// JSON exactly as `ditec.js` builds it for `addPngObject`.
+    func testPngDecodesWithoutEformAndAsksForAContainer() throws {
+        let request = try decode("""
+        {
+          "requestID": "ditec-1757600000007",
+          "filename": "obrazok.png",
+          "content": "aVBORw0KGgo=",
+          "payloadMimeType": "image/png;base64",
+          "signatureLevel": "XAdES_BASELINE_B",
+          "container": "ASiC_E"
+        }
+        """)
+
+        XCTAssertNil(request.eform)
+        XCTAssertTrue(request.wantsASiCContainer)
+    }
+
     func testEFormAlwaysAsksForAContainer() {
         let request = WebSignRequest(requestID: "r", filename: "f.xml", content: "PHgvPg==",
                                      payloadMimeType: "application/xml;base64",

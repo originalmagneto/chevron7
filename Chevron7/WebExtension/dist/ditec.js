@@ -68,6 +68,14 @@
     return base + ".xml";
   }
 
+  /// Same rule for plain documents: the app and the engine read the payload
+  /// type from the filename extension, so a TXT/PNG source must keep one.
+  function plainSourceName(objectId, fallback, extension) {
+    var base = String(objectId || fallback);
+    base = base.replace(/\.(txt|png)$/i, "");
+    return base + extension;
+  }
+
   function emptyToNull(value) {
     return value === undefined || value === null || value === "" ? null : value;
   }
@@ -118,6 +126,31 @@
         pdfRequest.container = options.container;
       }
       return pdfRequest;
+    }
+
+    // Plain text and images travel without eform attributes, exactly as
+    // upstream autogram-extension sends them: the payload mime tells the
+    // engine what they are, the ASiC-E container carries the signature.
+    if (object.type === "XadesBpTxt") {
+      return {
+        requestID: session.signatureId || ("ditec-" + Date.now()),
+        filename: plainSourceName(object.objectId, "dokument", ".txt"),
+        content: toBase64(object.sourceTxt),
+        payloadMimeType: "text/plain;base64",
+        signatureLevel: level,
+        container: options.container || "ASiC_E"
+      };
+    }
+
+    if (object.type === "XadesBpPng" || object.type === "XadesPng") {
+      return {
+        requestID: session.signatureId || ("ditec-" + Date.now()),
+        filename: plainSourceName(object.objectId, "obrazok", ".png"),
+        content: object.sourcePngBase64,
+        payloadMimeType: "image/png;base64",
+        signatureLevel: level,
+        container: options.container || "ASiC_E"
+      };
     }
 
     var isXdc = object.type === "XadesBpXml" || object.type === "XadesXml"
@@ -394,6 +427,44 @@
     }, callback);
   };
 
+  // Ported from upstream autogram-extension: plain text and images are stored
+  // with their own types and signed through the same ASiC getter as a PDF.
+  DSigXadesBpAdapter.prototype.addTxtObject = function (
+    objectId, objectDescription, sourceTxt, objectFormatIdentifier, callback
+  ) {
+    storeObject({
+      type: "XadesBpTxt",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      sourceTxt: sourceTxt,
+      objectFormatIdentifier: objectFormatIdentifier
+    }, callback);
+  };
+
+  DSigXadesBpAdapter.prototype.addPngObject = function (
+    objectId, objectDescription, sourcePngBase64, objectFormatIdentifier, callback
+  ) {
+    storeObject({
+      type: "XadesBpPng",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      sourcePngBase64: sourcePngBase64,
+      objectFormatIdentifier: objectFormatIdentifier
+    }, callback);
+  };
+
+  DSigXadesBpAdapter.prototype.getConvertedPDFA = function (callback) {
+    // Upstream answers with the original object; conversion itself is a no-op.
+    var object = session.object;
+    var original = object && (object.sourcePdfBase64 || object.sourcePngBase64
+      || object.xdcXMLData || object.sourceXml || object.sourceTxt);
+    if (original != null) {
+      if (callback && callback.onSuccess) callback.onSuccess(original);
+    } else if (callback && callback.onError) {
+      callback.onError("Nie je pripravený žiadny dokument.");
+    }
+  };
+
   DSigXadesBpAdapter.prototype.getSignatureWithASiCEnvelopeBase64 = function (callback) {
     performSignature({ container: "ASiC_E", packaging: "ENVELOPING", level: "XAdES_BASELINE_B" }, callback);
   };
@@ -418,7 +489,75 @@
     }, callback);
   };
 
+  // Ported from upstream autogram-extension, same signatures including the
+  // trailing transformType. Types match upstream exactly: Xades2Xml for the
+  // second XML form, XadesBpTxt for text, XadesPng for images.
+  DSigXadesAdapter.prototype.addXmlObject2 = function (
+    objectId, objectDescription, sourceXml, sourceXsd, namespaceUri,
+    xsdReference, sourceXsl, xslReference, transformType, callback
+  ) {
+    storeObject({
+      type: "Xades2Xml",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      sourceXml: sourceXml,
+      sourceXsd: sourceXsd,
+      namespaceUri: namespaceUri,
+      xsdReference: xsdReference,
+      sourceXsl: sourceXsl,
+      xslReference: xslReference,
+      transformType: transformType
+    }, callback);
+  };
+
+  DSigXadesAdapter.prototype.addTxtObject = function (
+    objectId, objectDescription, sourceTxt, objectFormatIdentifier, callback
+  ) {
+    storeObject({
+      type: "XadesBpTxt",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      sourceTxt: sourceTxt,
+      objectFormatIdentifier: objectFormatIdentifier
+    }, callback);
+  };
+
+  DSigXadesAdapter.prototype.addPngObject = function (
+    objectId, objectDescription, sourcePngBase64, objectFormatIdentifier, callback
+  ) {
+    storeObject({
+      type: "XadesPng",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      sourcePngBase64: sourcePngBase64,
+      objectFormatIdentifier: objectFormatIdentifier
+    }, callback);
+  };
+
+  // Old D.Signer calls upstream only stubs out; a missing method would throw
+  // a TypeError on the page instead.
+  DSigXadesAdapter.prototype.sign11 = function (
+    signatureId, digestAlgUri, signaturePolicyIdentifier, dataEnvelopeId,
+    dataEnvelopeURI, dataEnvelopeDescr, callback
+  ) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("sign11 is not supported, treating as sign.");
+    }
+    if (callback && callback.onSuccess) callback.onSuccess();
+  };
+
+  DSigXadesAdapter.prototype.sign20 = function (
+    signatureId, digestAlgUri, signaturePolicyIdentifier, dataEnvelopeId,
+    dataEnvelopeURI, dataEnvelopeDescr, callback
+  ) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("sign20 is not supported, treating as sign.");
+    }
+    if (callback && callback.onSuccess) callback.onSuccess();
+  };
+
   DSigXadesAdapter.prototype.addPdfObject = DSigXadesBpAdapter.prototype.addPdfObject;
+  DSigXadesAdapter.prototype.getConvertedPDFA = DSigXadesBpAdapter.prototype.getConvertedPDFA;
 
   DSigXadesAdapter.prototype.getSignedXmlWithEnvelope = function (callback) {
     performSignature({ level: "XAdES_BASELINE_B" }, callback);

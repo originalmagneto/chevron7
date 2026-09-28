@@ -44,7 +44,7 @@ CLASS=$(/usr/libexec/PlistBuddy -c "Print :NSExtension:NSExtensionPrincipalClass
 [[ "$CLASS" == "Chevron7WebExtensionHandler" ]] && ok "principal class: $CLASS" || bad "principal class: '$CLASS'"
 
 step "4. Sú web časti rozšírenia v Resources?"
-for file in manifest.json background.js content.js inject.js; do
+for file in manifest.json background.js content.js ditec.js inject.js; do
     [[ -f "$APPEX/Contents/Resources/$file" ]] && ok "$file" || bad "$file chýba"
 done
 

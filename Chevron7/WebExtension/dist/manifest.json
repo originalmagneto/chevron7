@@ -32,7 +32,10 @@
         "https://*.financnasprava.sk/*",
         "https://eformulare.socpoist.sk/*",
         "https://sluzby.orsr.sk/*",
-        "https://obcan.justice.sk/*"
+        "https://obcan.justice.sk/*",
+        "https://konto.bratislava.sk/*",
+        "https://city-account-next.dev.bratislava.sk/*",
+        "https://city-account-next.staging.bratislava.sk/*"
       ],
       "js": [
         "content.js"
@@ -55,7 +58,10 @@
         "https://*.financnasprava.sk/*",
         "https://eformulare.socpoist.sk/*",
         "https://sluzby.orsr.sk/*",
-        "https://obcan.justice.sk/*"
+        "https://obcan.justice.sk/*",
+        "https://konto.bratislava.sk/*",
+        "https://city-account-next.dev.bratislava.sk/*",
+        "https://city-account-next.staging.bratislava.sk/*"
       ]
     }
   ],

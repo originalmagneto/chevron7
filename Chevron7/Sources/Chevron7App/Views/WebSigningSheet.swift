@@ -139,8 +139,9 @@ struct WebSigningSheet: View {
 
             if let excerpt = pending.xmlExcerpt {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Ukážka obsahu formulára (čiastočný náhľad):")
-                        .font(.caption2.weight(.medium))
+                    Text(pending.request.eform != nil || pending.request.payloadMimeType.contains("xml")
+                        ? "Ukážka obsahu formulára (čiastočný náhľad):"
+                        : "Ukážka obsahu dokumentu (čiastočný náhľad):")
                         .foregroundStyle(.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(excerpt)

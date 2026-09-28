@@ -1565,6 +1565,136 @@ class MachineSigningServiceTest {
         void sign(MachineSigningService.SigningInput file, Runnable completed) throws Exception;
     }
 
+    @Test
+    void plainTextPassesTheMachineGateByExtension() {
+        var content = "Hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(MachineSigningService.isSupportedSource("poznamka.txt", content, false));
+        assertEquals(eu.europa.esig.dss.enumerations.MimeTypeEnum.TEXT,
+                MachineSigningService.detectMimeType("poznamka.txt", content));
+    }
+
+    @Test
+    void pngPassesTheMachineGateOnlyWithRealPngMagic() {
+        var png = new byte[] { (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00 };
+        assertTrue(MachineSigningService.isSupportedSource("obrazok.png", png, false));
+        assertEquals(eu.europa.esig.dss.enumerations.MimeTypeEnum.PNG,
+                MachineSigningService.detectMimeType("obrazok.png", png));
+        assertFalse(MachineSigningService.isSupportedSource("obrazok.png",
+                "not a png".getBytes(java.nio.charset.StandardCharsets.UTF_8), false));
+    }
+
+    @Test
+    void nonPdfBytesWithoutKnownExtensionStillFailTheGate() {
+        var content = "garbage".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertFalse(MachineSigningService.isSupportedSource("dokument.pdf", content, false));
+        assertEquals(eu.europa.esig.dss.enumerations.MimeTypeEnum.PDF,
+                MachineSigningService.detectMimeType("dokument.pdf", content));
+    }
+
+    @Test
+    void txtBuildsXadesAsicParametersThroughTheMachinePath() throws Exception {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var job = MachineSigningService.DefaultSigningSession.signingJob(
+                "Hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "poznamka.txt", mock(MachineFileResponder.class), settings);
+        assertEquals(SignatureLevel.XAdES_BASELINE_B, job.getParameters().getLevel());
+        assertEquals(ASiCContainerType.ASiC_E, job.getParameters().getContainer());
+        assertEquals(SignatureForm.XAdES, job.getParameters().getSignatureType());
+    }
+
+    @Test
+    void padesLevelRefusesPlainTextThroughTheMachinePath() {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_B);
+        assertThrows(java.io.IOException.class, () -> MachineSigningService.DefaultSigningSession.signingJob(
+                "Hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "poznamka.txt", mock(MachineFileResponder.class), settings));
+    }
+
+    /// The whole production path for a portal TXT: the prepare gate, the previous-signature
+    /// preflight (empty by construction for plain text), a real signature with the test token
+    /// and the output check of the one-object container, published to the target.
+    @Test
+    void signsAndPublishesPlainTextThroughTheService() throws Exception {
+        var writer = new RecordingWriter();
+        var source = Files.writeString(temporaryDirectory.resolve("poznamka.txt"), "Hello world").toRealPath();
+        var target = target("poznamka.asice");
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(input.sourceContent(), input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "XAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", source.toString(), target.toString()))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes());
+        var names = new ArrayList<String>();
+        String signature = null;
+        try (var zip = new ZipInputStream(Files.newInputStream(target))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                names.add(entry.getName());
+                var content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                if (entry.getName().startsWith("META-INF/signatures")) signature = content;
+            }
+        }
+        assertTrue(names.contains("poznamka.txt"), names.toString());
+        assertTrue(names.stream().noneMatch(name -> name.endsWith(".asice")), names.toString());
+        assertTrue(referencesFile(Objects.requireNonNull(signature), "poznamka.txt"), signature);
+    }
+
+    /// Same production path for a PNG: the gate checks the real PNG magic and the published
+    /// container carries the image as its single data object.
+    @Test
+    void signsAndPublishesPngThroughTheService() throws Exception {
+        var writer = new RecordingWriter();
+        var image = Files.copy(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.png").getFile()),
+                temporaryDirectory.resolve("obrazok.png")).toRealPath();
+        var target = target("obrazok.asice");
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(input.sourceContent(), input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "XAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", image.toString(), target.toString()))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes());
+        var names = new ArrayList<String>();
+        String signature = null;
+        try (var zip = new ZipInputStream(Files.newInputStream(target))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                names.add(entry.getName());
+                var content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                if (entry.getName().startsWith("META-INF/signatures")) signature = content;
+            }
+        }
+        assertTrue(names.contains("obrazok.png"), names.toString());
+        assertTrue(names.stream().noneMatch(name -> name.endsWith(".asice")), names.toString());
+        assertTrue(referencesFile(Objects.requireNonNull(signature), "obrazok.png"), signature);
+    }
+
     private static final class RecordingWriter {
         private final StringWriter output = new StringWriter();
 

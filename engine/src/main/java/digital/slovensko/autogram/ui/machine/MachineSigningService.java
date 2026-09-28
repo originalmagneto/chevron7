@@ -107,7 +107,7 @@ public final class MachineSigningService {
                 trustInitializer.run();
             }
             for (var prepared : preparedFiles) {
-                prepared.setPreviousSignatureIds(signatureIds(prepared.sourceContent()));
+                prepared.setPreviousSignatureIds(previousSignatureIds(prepared));
             }
             try (var session = sessionFactory.apply(request)) {
                 for (; processedFiles < preparedFiles.size(); processedFiles++) {
@@ -219,6 +219,21 @@ public final class MachineSigningService {
         } catch (Throwable exception) {
             throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
         }
+    }
+
+    private Set<String> previousSignatureIds(PreparedFile prepared) {
+        if (isPlainSource(prepared.file().source(), prepared.sourceContent())) {
+            // Plain text and images carry no DSS signatures, and DSS validation
+            // knows PDF/XML/ASiC/CMS only: inspecting them would fail the
+            // preflight, so their previous set is empty by construction. The
+            // prepare gate above already confirmed the plain source.
+            return Set.of();
+        }
+        return signatureIds(prepared.sourceContent());
+    }
+
+    private static boolean isPlainSource(String source, byte[] content) {
+        return hasPlainExtension(source) || isPngImage(source, content);
     }
 
     private String outputValidationFailure(byte[] content, Set<String> previousSignatureIds,
@@ -434,6 +449,20 @@ public final class MachineSigningService {
         return content.length >= 5 && "%PDF-".equals(new String(content, 0, 5, StandardCharsets.ISO_8859_1));
     }
 
+    private static boolean hasPngHeader(byte[] content) {
+        return content.length >= 8 && (content[0] & 0xFF) == 0x89 && content[1] == 0x50
+                && content[2] == 0x4E && content[3] == 0x47 && content[4] == 0x0D
+                && content[5] == 0x0A && content[6] == 0x1A && content[7] == 0x0A;
+    }
+
+    private static boolean hasPlainExtension(String source) {
+        return source.toLowerCase(java.util.Locale.ROOT).endsWith(".txt");
+    }
+
+    private static boolean isPngImage(String source, byte[] content) {
+        return source.toLowerCase(java.util.Locale.ROOT).endsWith(".png") && hasPngHeader(content);
+    }
+
     private static final String XDC_NAMESPACE = "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1";
 
     /// An `.xdcf` whose root element is an XMLDataContainer: the EZZK conversion record, signed alone.
@@ -454,9 +483,10 @@ public final class MachineSigningService {
         }
     }
 
-    private static boolean isSupportedSource(String source, byte[] content, boolean eformXmlAllowed) {
+    static boolean isSupportedSource(String source, byte[] content, boolean eformXmlAllowed) {
         return hasPdfHeader(content) || isAsic(source, content) || isRecordXdc(source, content)
-                || (eformXmlAllowed && isXmlForm(source, content));
+                || (eformXmlAllowed && isXmlForm(source, content))
+                || hasPlainExtension(source) || isPngImage(source, content);
     }
 
     /// A state-portal eForm: plain XML the engine wraps into an XMLDataContainer from the
@@ -479,7 +509,7 @@ public final class MachineSigningService {
         }
     }
 
-    private static MimeType detectMimeType(String filename, byte[] content) {
+    static MimeType detectMimeType(String filename, byte[] content) {
         if (isAsic(filename, content)) {
             return MimeTypeEnum.ASICE;
         }
@@ -489,6 +519,12 @@ public final class MachineSigningService {
         }
         if (lower.endsWith(".xml")) {
             return MimeTypeEnum.XML;
+        }
+        if (lower.endsWith(".txt")) {
+            return MimeTypeEnum.TEXT;
+        }
+        if (lower.endsWith(".png")) {
+            return MimeTypeEnum.PNG;
         }
         return MimeTypeEnum.PDF;
     }
@@ -774,9 +810,11 @@ public final class MachineSigningService {
                 // Baseline T, only without the timestamp the portal did not ask for.
                 return SigningParameters.buildForASiCWithXAdES(document, false, false, null, true);
             }
+            if (AutogramMimeType.isTxt(document.getMimeType()) || document.getMimeType().equals(MimeTypeEnum.PNG)) {
+                throw new IOException("Plain text and images are signed as XAdES in an ASiC-E");
+            }
             return SigningParameters.buildForPDF(document, false, false, settings.getTspSource());
         }
-
         @Override
         public void close() {
             try {

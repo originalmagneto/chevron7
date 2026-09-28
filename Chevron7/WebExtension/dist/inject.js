@@ -8,11 +8,10 @@
 // `window.ditec`. This file owns that surface and forwards to the content
 // script, which reaches the app through the background worker.
 //
-// Scope note: the full D.Signer surface (dSigXadesJs and dSigXadesBpJs with the
-// per-filetype strategies) is not ported yet. What is here is the transport and
-// the object shape; the adapters are the remaining task, and the upstream
+// Scope note: the D.Signer surface lives in ditec.js (dSigXadesJs and
+// dSigXadesBpJs with the per-filetype strategies, ported from the upstream
 // EUPL-1.2 implementations in slovensko-digital/autogram-extension under
-// src/dbridge_js/ditecx are the reference to port from.
+// src/dbridge_js/ditecx). What is here is the transport and the object shape.
 
 (function () {
   const CHANNEL_REQUEST = "chevron7-request";

@@ -145,7 +145,7 @@ final class WebSigningCoordinator {
             : URL(fileURLWithPath: (configured as NSString).expandingTildeInPath, isDirectory: true)
         let base = (request.filename as NSString).deletingPathExtension
         let stem = (base.isEmpty ? "dokument" : base) + "_podpisane"
-        let ext = request.wantsASiCContainer ? "asice" : "pdf"
+        let ext = Self.archiveExtension(for: request)
 
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -170,8 +170,12 @@ final class WebSigningCoordinator {
         return formatter
     }()
 
-    /// Whether signing with a phone is offered for this request.
-    var mobileSigningAvailable: Bool { settingsStore.settings.mobileSigningEnabled }
+    /// TXT/PNG over the phone relay is refused until a probe verifies the
+    /// relay accepts text/plain and image/png (card signing covers them).
+    var mobileSigningAvailable: Bool {
+        guard settingsStore.settings.mobileSigningEnabled else { return false }
+        return pending.map({ Self.plainFileExtension(for: $0.request) == nil }) ?? true
+    }
 
     private var provider: any QualifiedSigningProviding { settingsStore.signingProvider }
 
@@ -187,11 +191,17 @@ final class WebSigningCoordinator {
         var pdfThumb: NSImage?
         var pdfDocument: PDFDocument?
         var xmlPreview: String?
+        let plainExtension = Self.plainFileExtension(for: request)
         if request.eform != nil || request.payloadMimeType.contains("xml") {
             if let string = String(data: bytes.prefix(8192), encoding: .utf8) {
                 let lines = string.components(separatedBy: .newlines).prefix(10)
                 xmlPreview = lines.joined(separator: "\n")
             }
+        } else if plainExtension == "txt", let string = String(data: bytes, encoding: .utf8) {
+            let lines = string.components(separatedBy: .newlines).prefix(10)
+            xmlPreview = lines.joined(separator: "\n")
+        } else if plainExtension == "png", let image = NSImage(data: bytes) {
+            pdfThumb = image
         } else if let doc = PDFDocument(data: bytes), let page = doc.page(at: 0) {
             pdfThumb = page.thumbnail(of: CGSize(width: 140, height: 180), for: .mediaBox)
             pdfDocument = doc
@@ -313,6 +323,11 @@ final class WebSigningCoordinator {
     /// state-portal form works on this path too.
     func confirmViaMobile() async {
         guard let pending else { return }
+        guard Self.plainFileExtension(for: pending.request) == nil else {
+            // ponytail: mobile TXT/PNG refused until avm-probe verifies the relay accepts text/plain and image/png.
+            errorText = "Podpis textu a obrázkov mobilom zatiaľ nie je k dispozícii. Použite podpis kartou."
+            return
+        }
         isWorking = true
         errorText = nil
         defer { isWorking = false }
@@ -382,6 +397,10 @@ final class WebSigningCoordinator {
             let level = effectiveLevel(for: pending.request)
             let wantsTimestamp = level.hasSuffix("_T")
             let wantsContainer = pending.request.wantsASiCContainer
+            guard Self.plainFileExtension(for: pending.request) == nil || wantsContainer else {
+                errorText = "Text a obrázky sa podpisujú len do ASiC-E kontajnera."
+                return
+            }
             // The PDF goes to the engine as it is: XAdES on a PDF makes the engine
             // build the ASiC-E around it. A container packaged here first ended up
             // nested inside the signed one, which the portal could neither open nor join.
@@ -453,9 +472,30 @@ final class WebSigningCoordinator {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 
-    private static func describeKind(_ request: WebSignRequest) -> String {
+    nonisolated static func describeKind(_ request: WebSignRequest) -> String {
         if request.eform != nil { return "Elektronický formulár (XML Data Container)" }
+        if let plain = plainFileExtension(for: request) {
+            return plain == "txt" ? "Textový dokument (TXT)" : "Obrázok (PNG)"
+        }
         if request.payloadMimeType.contains("pdf") { return "Dokument PDF" }
         return request.payloadMimeType
+    }
+
+    /// Extension the browser payload really is when it is plain text or an
+    /// image, nil for PDF and eForms. ditec.js guarantees the filename carries
+    /// it; the engine and the archive read the type from the name, never from
+    /// `eform != nil`.
+    nonisolated static func plainFileExtension(for request: WebSignRequest) -> String? {
+        let fromName = (request.filename as NSString).pathExtension.lowercased()
+        if fromName == "txt" || fromName == "png" { return fromName }
+        let mime = request.payloadMimeType.replacingOccurrences(of: " ", with: "").lowercased()
+        if mime.hasPrefix("text/plain") { return "txt" }
+        if mime.hasPrefix("image/png") { return "png" }
+        return nil
+    }
+
+    nonisolated static func archiveExtension(for request: WebSignRequest) -> String {
+        if request.wantsASiCContainer { return "asice" }
+        return plainFileExtension(for: request) ?? "pdf"
     }
 }

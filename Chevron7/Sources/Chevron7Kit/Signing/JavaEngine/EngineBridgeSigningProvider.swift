@@ -266,6 +266,18 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return filename
     }
 
+    /// Real filename for a browser TXT/PNG payload, nil otherwise. Mirrors
+    /// `pdfSourceName`: the engine sniffs the payload type from the extension,
+    /// so under document.pdf it would misread the bytes.
+    static func plainSourceName(for request: SigningRequest) -> String? {
+        guard let filename = request.filename.map({ ($0 as NSString).lastPathComponent }),
+              ["txt", "png"].contains((filename as NSString).pathExtension.lowercased()),
+              filename.count > 4 else {
+            return nil
+        }
+        return filename
+    }
+
     /// Serial the engine reads as "the signing key on this token".
     static let signingKeyOnToken = "*"
     static let eidSignerLabel = "Občiansky preukaz (eID)"
@@ -404,6 +416,13 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             sourceURL = workDirectory.appendingPathComponent("kontajner.asice")
             try Self.packageContainer(entries: request.extraFiles)
                 .write(to: sourceURL, options: [.atomic])
+        } else if !wantsPAdES, let plainName = Self.plainSourceName(for: request) {
+            // Browser TXT/PNG: the engine reads the payload type from the
+            // extension, so they keep their real name instead of document.pdf.
+            sourceURL = workDirectory.appendingPathComponent(plainName)
+            try request.pdfData.write(to: sourceURL, options: [.atomic])
+        } else if wantsPAdES, Self.plainSourceName(for: request) != nil {
+            throw SigningError.signingFailed("Text a obrázky sa podpisujú len do ASiC-E kontajnera.")
         } else {
             sourceURL = workDirectory.appendingPathComponent(Self.pdfSourceName(for: request))
             try request.pdfData.write(to: sourceURL, options: [.atomic])
