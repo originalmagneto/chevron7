@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
 import Chevron7Kit
@@ -1666,7 +1667,15 @@ struct MobileSigningCard: View {
             }
         }
         .onAppear {
-            agpKeyStored = (try? AGPKeyStore().loadPrivateKey()) != nil
+            // Derive the display from the stored private key: regenerating would
+            // overwrite the key already registered with the portal.
+            if let raw = try? AGPKeyStore().loadPrivateKey(),
+               let key = try? P256.Signing.PrivateKey(rawRepresentation: raw) {
+                agpKeyStored = true
+                agpPublicPEM = AGPTokenMinter.spkiPEM(publicKey: key.publicKey)
+            } else {
+                agpKeyStored = false
+            }
         }
         .glassCard(cornerRadius: 12, padding: 12)
     }
