@@ -313,6 +313,12 @@ struct SigningPrepareView: View {
                     .interactiveDismissDisabled()
             }
         }
+        .sheet(isPresented: Bindable(store.mobileSigning).isEidentitaPresented) {
+            if let session = store.mobileSigning.eidentitaSession {
+                EidentitaSigningSheet(session: session) { store.mobileSigning.cancelEidentita() }
+                    .interactiveDismissDisabled()
+            }
+        }
         .task(id: store.document?.dataRepresentation()?.count ?? 0) {
             setupVisualComposition()
         }
@@ -805,8 +811,13 @@ struct SigningPrepareView: View {
     @ViewBuilder
     private var mobileSignButton: some View {
         if store.isMobileSigningAvailable {
-            Button {
-                Task { await store.sign(viaMobile: true) }
+            Menu {
+                Button("Autogram v mobile") {
+                    Task { await store.sign(viaMobile: true, mobileMethod: .autogramMobile) }
+                }
+                Button("eIdentita (štátna aplikácia)") {
+                    Task { await store.sign(viaMobile: true, mobileMethod: .eidentita) }
+                }
             } label: {
                 HStack(spacing: 8) {
                     if store.isSigning, store.isSigningViaMobile {
@@ -826,7 +837,7 @@ struct SigningPrepareView: View {
                   ? "Do kontajnera ASiC-E sa podpis mobilom pridať nedá."
                   : store.preservesSourceBytes && store.includeVisibleSignature
                   ? "Mobilom sa do podpísaného PDF pečiatka vložiť nedá. Vypnite pečiatku alebo podpíšte kartou."
-                  : "Podpis občianskym preukazom s NFC cez iPhone a aplikáciu Autogram v mobile")
+                  : "Podpis občianskym preukazom s NFC cez iPhone: Autogram v mobile alebo štátna aplikácia eIdentita")
         }
     }
 }

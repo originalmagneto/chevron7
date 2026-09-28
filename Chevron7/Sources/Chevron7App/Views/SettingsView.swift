@@ -1530,10 +1530,13 @@ struct WebSigningStorageCard: View {
 
 struct MobileSigningCard: View {
     @Bindable var settingsStore: AppSettingsStore
-
+    @State private var agpTokenField = ""
+    @State private var agpTokenStored = false
+    @State private var agpTokenError: String?
+    @State private var agpTokenBusy = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Podpisovanie mobilom (Autogram v mobile)", systemImage: "iphone.gen3.radiowaves.left.and.right")
+            Label("Podpisovanie mobilom", systemImage: "iphone.gen3.radiowaves.left.and.right")
                 .font(.headline)
 
             Toggle("Ponúkať podpis občianskym preukazom s NFC cez iPhone",
@@ -1556,6 +1559,70 @@ struct MobileSigningCard: View {
             Text("Aplikácia Autogram v mobile otvára len odkazy z autogram.slovensko.digital. Iný server je určený len na testovanie.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+
+            Label("eIdentita (štátna aplikácia)", systemImage: "person.badge.key")
+                .font(.callout.weight(.semibold))
+            Text("Podpis cez eIdentitu ide cez portál Autogram (agp.dev.slovensko.digital): dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Potrebujete účet na portáli a jeho API token.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow {
+                    Text("API token")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 140, alignment: .leading)
+                    SecureField(agpTokenStored ? "uložený v Keychaine" : "token z portálu",
+                                text: $agpTokenField)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!settingsStore.settings.mobileSigningEnabled || agpTokenBusy)
+                }
+            }
+            HStack(spacing: 8) {
+                Button {
+                    let token = agpTokenField.trimmingCharacters(in: .whitespacesAndNewlines)
+                    agpTokenBusy = true
+                    agpTokenError = nil
+                    Task {
+                        do {
+                            let client = AGPClient(token: token)
+                            guard try await client.verifyToken() else { throw AGPError.invalidResponse }
+                            try AGPTokenStore().save(token)
+                            agpTokenField = ""
+                            agpTokenStored = true
+                        } catch {
+                            agpTokenError = error.localizedDescription
+                        }
+                        agpTokenBusy = false
+                    }
+                } label: {
+                    Label("Uložiť a overiť", systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(settingsStore.settings.mobileSigningEnabled == false
+                          || agpTokenBusy || agpTokenField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if agpTokenStored {
+                    Button("Odstrániť", role: .destructive) {
+                        try? AGPTokenStore().delete()
+                        agpTokenStored = false
+                        agpTokenField = ""
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Text("Token sa uloží iba do Keychainu tohto Macu, a to až po úspešnom overení na portáli.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let agpTokenError {
+                Text(agpTokenError)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
+        .onAppear {
+            agpTokenStored = (try? AGPTokenStore().load()) != nil
         }
         .glassCard(cornerRadius: 12, padding: 12)
     }

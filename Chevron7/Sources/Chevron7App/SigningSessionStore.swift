@@ -439,9 +439,12 @@ final class SigningSessionStore {
     /// after the phone signs, so the baked stamp describes the channel instead of the card.
     static let mobileStampCertificateName = "Občiansky preukaz (eID) cez Autogram v mobile"
     static let qualifiedSignatureLabel = "Kvalifikovaný elektronický podpis"
-
-    func stampCertificateName(viaMobile: Bool) -> String? {
-        if viaMobile { return Self.mobileStampCertificateName }
+    static let eidentitaSignatureLabel = "Podpis z eIdentity"
+    static let eidentitaStampCertificateName = "Občiansky preukaz (eID) cez eIdentitu"
+    func stampCertificateName(viaMobile: Bool, mobileMethod: MobileSigningMethod = .autogramMobile) -> String? {
+        if viaMobile {
+            return mobileMethod == .eidentita ? Self.eidentitaStampCertificateName : Self.mobileStampCertificateName
+        }
         return identities.first(where: { $0.id == selectedIdentityID })?.label
     }
 
@@ -462,7 +465,7 @@ final class SigningSessionStore {
             && !(preservesSourceBytes && includeVisibleSignature)
     }
 
-    func sign(viaMobile: Bool = false) async {
+    func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
         guard let document else { return }
         // The panel switches this off too; a stamp that cannot be drawn must not
         // make signing wait for the card's certificate.
@@ -520,7 +523,7 @@ final class SigningSessionStore {
                     pageIndex: visualPlacement?.pageIndex ?? min(signaturePage, analysis.totalPages - 1),
                     normalizedRect: signatureRect,
                     imagePNG: imageData,
-                    certificateName: stampCertificateName(viaMobile: viaMobile),
+                    certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
                     timestampAuthorityName: includeQualifiedTimestamp ? settings.activeTSA.name : nil)
                 let stampedData = await Self.stampPDFData(
@@ -568,7 +571,7 @@ final class SigningSessionStore {
                     pageIndex: visualPlacement?.pageIndex ?? min(signaturePage, analysis.totalPages - 1),
                     normalizedRect: signatureRect,
                     imagePNG: imageData,
-                    certificateName: stampCertificateName(viaMobile: viaMobile),
+                    certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
                     timestampAuthorityName: includeQualifiedTimestamp ? settings.activeTSA.name : nil)
                 pdfData = await Self.stampPDFData(
@@ -604,19 +607,42 @@ final class SigningSessionStore {
             }
             let signed: SignedConversionResult
             if viaMobile {
-                // The phone signs on the AVM server; only the final step differs from the card path.
-                let level: AVMSignatureLevel = outputFormat == .embeddedPAdES
-                    ? .pades(timestamp: includeQualifiedTimestamp)
-                    : .xades(timestamp: includeQualifiedTimestamp)
-                let upload = AVMUploadRequest(filename: pdfName,
-                                              data: pdfData,
-                                              mimeType: AVMUploadRequest.pdfMimeType,
-                                              level: level,
-                                              container: outputFormat == .attachedASIC ? .asicE : nil)
-                let document = try await mobileSigning.sign(upload)
-                signed = try AVMResultMapper.conversionResult(from: document,
-                                                              outputFormat: outputFormat,
-                                                              uploadedPDF: pdfData)
+                switch mobileMethod {
+                case .autogramMobile:
+                    // The phone signs on the AVM server; only the final step differs from the card path.
+                    let level: AVMSignatureLevel = outputFormat == .embeddedPAdES
+                        ? .pades(timestamp: includeQualifiedTimestamp)
+                        : .xades(timestamp: includeQualifiedTimestamp)
+                    let upload = AVMUploadRequest(filename: pdfName,
+                                                  data: pdfData,
+                                                  mimeType: AVMUploadRequest.pdfMimeType,
+                                                  level: level,
+                                                  container: outputFormat == .attachedASIC ? .asicE : nil)
+                    let document = try await mobileSigning.sign(upload)
+                    signed = try AVMResultMapper.conversionResult(from: document,
+                                                                  outputFormat: outputFormat,
+                                                                  uploadedPDF: pdfData)
+                case .eidentita:
+                    // The phone signs on the portal; the QR comes from its eIdentita session page.
+                    let request = AGPSigningRequest(filename: pdfName,
+                                                    data: pdfData,
+                                                    mimeType: AVMUploadRequest.pdfMimeType,
+                                                    format: outputFormat == .embeddedPAdES ? .pades : .xades,
+                                                    level: includeQualifiedTimestamp ? .baselineT : .baselineB)
+                    let file = try await mobileSigning.signViaEidentita(request)
+                    // The portal validates the upload, so a returned file is a qualified signature.
+                    // No mandate check here: this is ordinary mobile signing, ZaKo keeps its own.
+                    switch outputFormat {
+                    case .embeddedPAdES:
+                        signed = SignedConversionResult(pdfData: file.data, asicData: nil, signedAt: Date(),
+                                                        signatureLabel: Self.eidentitaSignatureLabel,
+                                                        isLegallyBinding: true)
+                    case .attachedASIC:
+                        signed = SignedConversionResult(pdfData: pdfData, asicData: file.data, signedAt: Date(),
+                                                        signatureLabel: Self.eidentitaSignatureLabel,
+                                                        isLegallyBinding: true)
+                    }
+                }
             } else {
                 guard let identityID = selectedIdentityID else {
                     throw SigningError.identityUnavailable
@@ -696,7 +722,8 @@ final class SigningSessionStore {
             step = .done
         } catch {
             statusText = ""
-            if let avmError = error as? AVMError, avmError == .cancelled {
+            let wasCancelled = (error as? AVMError) == .cancelled || (error as? AGPError) == .cancelled
+            if wasCancelled {
                 // The user closed the QR sheet; the document stays ready for another attempt.
                 if let index = queue.firstIndex(where: { $0.id == selectedQueueID }),
                    queue[index].status == .signing {
