@@ -371,7 +371,7 @@ Riadok **Výstup** vždy povie, čo vznikne, napríklad „3 kontajnery, každý
 
 Bez čítačky kariet podpíšete dokument občianskym preukazom s NFC a iPhonom s aplikáciou [Autogram v mobile](https://sluzby.slovensko.digital/autogram-v-mobile/). Mac dokument zašifruje náhodným kľúčom, ktorý pozná len on, nahrá ho na server Slovensko.Digital, zobrazí QR kód a čaká. Po naskenovaní kódu telefón dokument podpíše a Mac si podpísaný súbor stiahne, overí a uloží rovnako ako pri karte.
 
-Druhá položka ponuky, **eIdentita (štátna aplikácia)**, ide cez portál Autogram ([agp.dev.slovensko.digital](https://agp.dev.slovensko.digital/)): dokument sa nahrá do vášho balíka na portáli, QR kód z jeho eIdentita session naskenujete mobilom a podpísaný dokument sa stiahne späť. Potrebujete účet na portáli a jeho API token (Nastavenia, žije iba v Keychaine). Na rozdiel od relay-a sa dokument drží ako vaša portálová história, nie 24 hodín.
+Druhá položka ponuky, **eIdentita (štátna aplikácia)**, ide cez portál Autogram ([agp.slovensko.digital](https://agp.slovensko.digital/)): dokument sa nahrá do vášho balíka na portáli, QR kód z jeho eIdentita session naskenujete mobilom a podpísaný dokument sa stiahne späť. Potrebujete účet na portáli, správcom zapnuté API s verejným kľúčom z Nastavení a číselné ID používateľa od správcu (súkromný kľúč žije iba v Keychaine). Na rozdiel od relay-a sa dokument drží ako vaša portálová história, nie 24 hodín.
 
 <p align="center">
   <img src="docs/diagrams/mobile-signing.svg" alt="Sekvencia podpisu mobilom cez Autogram v mobile" width="100%">
@@ -553,7 +553,7 @@ xattr -d com.apple.quarantine "/Applications/Chevron7.app"
 <details open>
 <summary><strong>v0.20.0 · aktuálne vydanie: podpis mobilom aj cez eIdentitu</strong></summary>
 <ul>
-<li>Ponuka <strong>Podpísať mobilom</strong> má druhú položku <strong>eIdentita (štátna aplikácia)</strong>; QR kód pochádza z portálu Autogram, podpis prebieha občianskym preukazom s NFC v mobile a výsledok sa uloží ako obvykle. Potrebný je účet na portáli a jeho API token v Nastaveniach.</li>
+<li>Ponuka <strong>Podpísať mobilom</strong> má druhú položku <strong>eIdentita (štátna aplikácia)</strong>; QR kód pochádza z portálu Autogram, podpis prebieha občianskym preukazom s NFC v mobile a výsledok sa uloží ako obvykle. Potrebný je účet na portáli so správcom zapnutým API, verejný kľúč v jeho profile a číselné ID používateľa v Nastaveniach.</li>
 <li>Vizuálna pečiatka pri eIdentite uvádza eIdentitu. Podrobnosti v poznámkach k vydaniu.</li>
 </ul>
 </details>

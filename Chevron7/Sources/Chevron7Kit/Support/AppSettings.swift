@@ -129,6 +129,10 @@ public struct AppSettings: Codable, Sendable {
     public var mobileSigningEnabled: Bool
     /// AVM server base URL. Only the public host works with the App Store app; kept configurable for testing.
     public var avmBaseURL: String
+    /// Autogram Portal base URL for eIdentita signing. Production by default; staging for testing.
+    public var agpBaseURL: String
+    /// Portal user id: the `sub` claim of the self-signed API JWT. Not secret.
+    public var agpUserID: String
     /// Keep a copy of documents signed from the browser. A browser signature has
     /// no original file to sit next to, the way an in-app signature does, so
     /// without this there is no local trace of what was signed.
@@ -149,6 +153,14 @@ public struct AppSettings: Codable, Sendable {
         return url
     }
 
+    public var agpBaseURLValue: URL {
+        let trimmed = agpBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), url.scheme?.lowercased() == "https",
+              url.host != nil else {
+            return AGPClient.productionBaseURL
+        }
+        return url
+    }
     private enum CodingKeys: String, CodingKey {
         case aiMode, aiPrompt
         case omlxURL, omlxModel
@@ -160,6 +172,7 @@ public struct AppSettings: Codable, Sendable {
         case retainRecentDocuments
         case useFoundationModelClassifier, learnFromReviews, detectorTrainingOffersEnabled
         case mobileSigningEnabled, avmBaseURL
+        case agpBaseURL, agpUserID
         case webSigningSavesLocally, webSigningOutputPath, webSigningRetentionDays
         case batchASiCPackaging
     }
@@ -189,6 +202,8 @@ public struct AppSettings: Codable, Sendable {
                 detectorTrainingOffersEnabled: Bool = true,
                 mobileSigningEnabled: Bool = true,
                 avmBaseURL: String = AVMClient.publicBaseURL.absoluteString,
+                agpBaseURL: String = AGPClient.productionBaseURL.absoluteString,
+                agpUserID: String = "",
                 webSigningSavesLocally: Bool = true,
                 webSigningOutputPath: String = "",
                 webSigningRetentionDays: Int = 0,
@@ -218,6 +233,8 @@ public struct AppSettings: Codable, Sendable {
         self.detectorTrainingOffersEnabled = detectorTrainingOffersEnabled
         self.mobileSigningEnabled = mobileSigningEnabled
         self.avmBaseURL = avmBaseURL
+        self.agpBaseURL = agpBaseURL
+        self.agpUserID = agpUserID
         self.webSigningSavesLocally = webSigningSavesLocally
         self.webSigningOutputPath = webSigningOutputPath
         self.webSigningRetentionDays = webSigningRetentionDays
@@ -270,6 +287,8 @@ public struct AppSettings: Codable, Sendable {
         self.detectorTrainingOffersEnabled = try container.decodeIfPresent(Bool.self, forKey: .detectorTrainingOffersEnabled) ?? true
         self.mobileSigningEnabled = try container.decodeIfPresent(Bool.self, forKey: .mobileSigningEnabled) ?? true
         self.avmBaseURL = try container.decodeIfPresent(String.self, forKey: .avmBaseURL) ?? AVMClient.publicBaseURL.absoluteString
+        self.agpBaseURL = try container.decodeIfPresent(String.self, forKey: .agpBaseURL) ?? AGPClient.productionBaseURL.absoluteString
+        self.agpUserID = try container.decodeIfPresent(String.self, forKey: .agpUserID) ?? ""
         self.webSigningSavesLocally = try container.decodeIfPresent(Bool.self, forKey: .webSigningSavesLocally) ?? true
         self.webSigningOutputPath = try container.decodeIfPresent(String.self, forKey: .webSigningOutputPath) ?? ""
         self.webSigningRetentionDays = try container.decodeIfPresent(Int.self, forKey: .webSigningRetentionDays) ?? 0
@@ -304,6 +323,8 @@ public struct AppSettings: Codable, Sendable {
         try container.encode(detectorTrainingOffersEnabled, forKey: .detectorTrainingOffersEnabled)
         try container.encode(mobileSigningEnabled, forKey: .mobileSigningEnabled)
         try container.encode(avmBaseURL, forKey: .avmBaseURL)
+        try container.encode(agpBaseURL, forKey: .agpBaseURL)
+        try container.encode(agpUserID, forKey: .agpUserID)
         try container.encode(webSigningSavesLocally, forKey: .webSigningSavesLocally)
         try container.encode(webSigningOutputPath, forKey: .webSigningOutputPath)
         try container.encode(webSigningRetentionDays, forKey: .webSigningRetentionDays)

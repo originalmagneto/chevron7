@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import CryptoKit
 import Foundation
 
 /// Client for the Autogram Portal bundle API (`POST/GET api/v1/bundles`,
@@ -13,19 +14,36 @@ import Foundation
 /// The portal owns `sourceUrl`/`destinationUrl`; a localhost linkUrl could
 /// never be fetched by the phone, so this feature cannot work offline.
 public struct AGPClient: Sendable {
-    /// Staging portal. The only public instance; override in tests.
+    /// Production portal. Override (e.g. staging) in settings and tests.
+    public static let productionBaseURL = URL(string: "https://agp.slovensko.digital")!
     public static let stagingBaseURL = URL(string: "https://agp.dev.slovensko.digital")!
 
     public let baseURL: URL
-    public let token: String
+    public let minter: AGPTokenMinter
     private let transport: any AVMHTTPTransport
 
-    public init(baseURL: URL = AGPClient.stagingBaseURL,
-                token: String,
+    public init(baseURL: URL = AGPClient.productionBaseURL,
+                minter: AGPTokenMinter,
                 transport: any AVMHTTPTransport = URLSessionAVMTransport()) {
         self.baseURL = baseURL
-        self.token = token
+        self.minter = minter
         self.transport = transport
+    }
+    /// Client from settings pieces: portal URL, user id and the Keychain key.
+    /// Missing pieces are a settings error (`.missingToken`), not a transport one.
+    public static func configured(userID: String, baseURL: URL,
+                                  keyStore: any AGPKeyStoring,
+                                  transport: any AVMHTTPTransport = URLSessionAVMTransport()) throws -> AGPClient {
+        let trimmed = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw AGPError.missingToken }
+        let minter = AGPTokenMinter(userID: trimmed) {
+            guard let raw = try keyStore.loadPrivateKey(),
+                  let key = try? P256.Signing.PrivateKey(rawRepresentation: raw) else {
+                throw AGPError.missingToken
+            }
+            return key
+        }
+        return AGPClient(baseURL: baseURL, minter: minter, transport: transport)
     }
 
     // MARK: - Bundle API (authenticated)
@@ -55,7 +73,7 @@ public struct AGPClient: Sendable {
         http.httpMethod = "POST"
         http.setValue("application/json", forHTTPHeaderField: "Content-Type")
         http.setValue("application/json", forHTTPHeaderField: "Accept")
-        authorize(&http)
+        try authorize(&http)
         http.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (payload, response) = try await send(http)
@@ -124,7 +142,7 @@ public struct AGPClient: Sendable {
     public func deleteBundle(bundleID: String) async throws {
         var http = URLRequest(url: baseURL.appendingPathComponent("api/v1/bundles/\(bundleID)"))
         http.httpMethod = "DELETE"
-        authorize(&http)
+        try authorize(&http)
         let (payload, response) = try await send(http)
         guard (200..<300).contains(response.statusCode) || response.statusCode == 404 else {
             throw Self.serverError(status: response.statusCode, body: payload)
@@ -205,12 +223,14 @@ public struct AGPClient: Sendable {
         http.httpMethod = "GET"
         http.setValue("application/json", forHTTPHeaderField: "Accept")
         http.cachePolicy = .reloadIgnoringLocalCacheData
-        authorize(&http)
+        try authorize(&http)
         return try await send(http)
     }
 
-    private func authorize(_ http: inout URLRequest) {
-        http.setValue("Token token=\"\(token)\"", forHTTPHeaderField: "Authorization")
+    // Fresh token per request: `jti` must stay unique and `exp` short-lived.
+    // The `Token` scheme is what the portal's Rails parser reads; `Bearer` would not match it.
+    private func authorize(_ http: inout URLRequest) throws {
+        http.setValue("Token token=\"\(try minter.mint())\"", forHTTPHeaderField: "Authorization")
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -304,7 +324,7 @@ public enum AGPError: Error, Equatable, LocalizedError {
         case .invalidResponse:
             return "Portál Autogram vrátil neočakávanú odpoveď."
         case .missingToken:
-            return "Chýba API token portálu Autogram. Zadajte ho v Nastaveniach."
+            return "Chýba kľúč alebo ID používateľa portálu Autogram. Nastavte ich v Nastaveniach."
         case .timeout:
             return "Podpis z mobilu neprišiel včas."
         case .cancelled:
@@ -312,7 +332,7 @@ public enum AGPError: Error, Equatable, LocalizedError {
         case .transport(let detail):
             return "Portál Autogram je nedostupný (\(detail))."
         case .unauthorized:
-            return "API token portál odmietol. Skontrolujte ho v Nastaveniach."
+            return "Portál podpis odmietol. Skontrolujte kľúč a ID používateľa v Nastaveniach."
         }
     }
 }

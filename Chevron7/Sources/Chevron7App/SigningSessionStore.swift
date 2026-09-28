@@ -45,6 +45,7 @@ final class SigningSessionStore {
     var outputDirectory: URL?
     var lastError: String?
     let mobileSigning: MobileSigningCoordinator
+    var agpKeyStore: any AGPKeyStoring = AGPKeyStore()
     /// Which path the current `sign` run uses; drives the button labels.
     private(set) var isSigningViaMobile = false
     var existingSignatures: [DocumentSignatureInfo] = []
@@ -465,6 +466,14 @@ final class SigningSessionStore {
             && !(preservesSourceBytes && includeVisibleSignature)
     }
 
+    /// Portal client for eIdentita signing, minted from the Keychain key and the
+    /// user id in settings. Missing pieces are a settings error, not a transport one.
+    private func eidentitaClient() throws -> AGPClient {
+        try AGPClient.configured(userID: settingsStore.settings.agpUserID,
+                                 baseURL: settingsStore.settings.agpBaseURLValue,
+                                 keyStore: agpKeyStore)
+    }
+
     func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
         guard let document else { return }
         // The panel switches this off too; a stamp that cannot be drawn must not
@@ -629,7 +638,7 @@ final class SigningSessionStore {
                                                     mimeType: AVMUploadRequest.pdfMimeType,
                                                     format: outputFormat == .embeddedPAdES ? .pades : .xades,
                                                     level: includeQualifiedTimestamp ? .baselineT : .baselineB)
-                    let file = try await mobileSigning.signViaEidentita(request)
+                    let file = try await mobileSigning.signViaEidentita(request, client: eidentitaClient())
                     // The portal validates the upload, so a returned file is a qualified signature.
                     // No mandate check here: this is ordinary mobile signing, ZaKo keeps its own.
                     switch outputFormat {

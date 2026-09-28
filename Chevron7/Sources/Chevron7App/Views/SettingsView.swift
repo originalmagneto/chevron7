@@ -1530,10 +1530,10 @@ struct WebSigningStorageCard: View {
 
 struct MobileSigningCard: View {
     @Bindable var settingsStore: AppSettingsStore
-    @State private var agpTokenField = ""
-    @State private var agpTokenStored = false
-    @State private var agpTokenError: String?
-    @State private var agpTokenBusy = false
+    @State private var agpKeyStored = false
+    @State private var agpPublicPEM = ""
+    @State private var agpError: String?
+    @State private var agpBusy = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Podpisovanie mobilom", systemImage: "iphone.gen3.radiowaves.left.and.right")
@@ -1564,65 +1564,109 @@ struct MobileSigningCard: View {
 
             Label("eIdentita (štátna aplikácia)", systemImage: "person.badge.key")
                 .font(.callout.weight(.semibold))
-            Text("Podpis cez eIdentitu ide cez portál Autogram (agp.dev.slovensko.digital): dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Potrebujete účet na portáli a jeho API token.")
+            Text("Podpis cez eIdentitu ide cez portál Autogram: dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Portál nepozná heslá pre integrácie: správcu portálu požiadajte o zapnutie API pre váš účet a o vaše číselné ID používateľa; verejný kľúč odtiaľto potom vložíte do profilu na portáli.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
-                    Text("API token")
+                    Text("Portál")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .frame(width: 140, alignment: .leading)
-                    SecureField(agpTokenStored ? "uložený v Keychaine" : "token z portálu",
-                                text: $agpTokenField)
+                    TextField("https://agp.slovensko.digital", text: $settingsStore.settings.agpBaseURL)
                         .textFieldStyle(.roundedBorder)
-                        .disabled(!settingsStore.settings.mobileSigningEnabled || agpTokenBusy)
+                        .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
+                }
+                GridRow {
+                    Text("ID používateľa")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 140, alignment: .leading)
+                    TextField("číslo z profilu na portáli", text: $settingsStore.settings.agpUserID)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
                 }
             }
             HStack(spacing: 8) {
                 Button {
-                    let token = agpTokenField.trimmingCharacters(in: .whitespacesAndNewlines)
-                    agpTokenBusy = true
-                    agpTokenError = nil
+                    agpBusy = true
+                    agpError = nil
                     Task {
                         do {
-                            let client = AGPClient(token: token)
-                            guard try await client.verifyToken() else { throw AGPError.invalidResponse }
-                            try AGPTokenStore().save(token)
-                            agpTokenField = ""
-                            agpTokenStored = true
+                            let key = AGPTokenMinter.generateKey()
+                            try AGPKeyStore().savePrivateKey(Data(key.rawRepresentation))
+                            agpPublicPEM = AGPTokenMinter.spkiPEM(publicKey: key.publicKey)
+                            agpKeyStored = true
                         } catch {
-                            agpTokenError = error.localizedDescription
+                            agpError = error.localizedDescription
                         }
-                        agpTokenBusy = false
+                        agpBusy = false
                     }
                 } label: {
-                    Label("Uložiť a overiť", systemImage: "checkmark.shield")
+                    Label(agpKeyStored ? "Vygenerovať nový kľúč" : "Vygenerovať kľúč", systemImage: "key")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(settingsStore.settings.mobileSigningEnabled == false
-                          || agpTokenBusy || agpTokenField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                if agpTokenStored {
-                    Button("Odstrániť", role: .destructive) {
-                        try? AGPTokenStore().delete()
-                        agpTokenStored = false
-                        agpTokenField = ""
+                .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
+                Button {
+                    agpBusy = true
+                    agpError = nil
+                    Task {
+                        do {
+                            let client = try AGPClient.configured(
+                                userID: settingsStore.settings.agpUserID,
+                                baseURL: settingsStore.settings.agpBaseURLValue,
+                                keyStore: AGPKeyStore())
+                            guard try await client.verifyToken() else { throw AGPError.invalidResponse }
+                        } catch {
+                            agpError = error.localizedDescription
+                        }
+                        agpBusy = false
+                    }
+                } label: {
+                    Label("Overiť", systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy || !agpKeyStored)
+                if agpKeyStored {
+                    Button("Odstrániť kľúč", role: .destructive) {
+                        try? AGPKeyStore().delete()
+                        agpKeyStored = false
+                        agpPublicPEM = ""
                     }
                     .controlSize(.small)
                 }
             }
-            Text("Token sa uloží iba do Keychainu tohto Macu, a to až po úspešnom overení na portáli.")
+            if !agpPublicPEM.isEmpty {
+                Text("Verejný kľúč do profilu na portáli:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(agpPublicPEM)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(agpPublicPEM, forType: .string)
+                } label: {
+                    Label("Skopírovať kľúč", systemImage: "doc.on.doc")
+                }
+                .controlSize(.small)
+            }
+            Text("Súkromný kľúč žije iba v Keychaine tohto Macu. Token sa razí nanovo pre každý request a platí pár minút.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let agpTokenError {
-                Text(agpTokenError)
+            if let agpError {
+                Text(agpError)
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
         }
         .onAppear {
-            agpTokenStored = (try? AGPTokenStore().load()) != nil
+            agpKeyStored = (try? AGPKeyStore().loadPrivateKey()) != nil
         }
         .glassCard(cornerRadius: 12, padding: 12)
     }

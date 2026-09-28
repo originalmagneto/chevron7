@@ -11,8 +11,12 @@ final class AGPClientTests: XCTestCase {
         return (Data(body.utf8), http)
     }
 
+    private func minter() -> AGPTokenMinter {
+        AGPTokenMinter(userID: "123") { AGPTokenMinter.generateKey() }
+    }
+
     private func client(_ transport: RecordingAGPTransport) -> AGPClient {
-        AGPClient(baseURL: URL(string: "https://agp.test")!, token: "jwt-token", transport: transport)
+        AGPClient(baseURL: URL(string: "https://agp.test")!, minter: minter(), transport: transport)
     }
 
     func testCreateBundleSendsQESContractWithBase64Document() async throws {
@@ -28,7 +32,10 @@ final class AGPClientTests: XCTestCase {
         let sent = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(sent.httpMethod, "POST")
         XCTAssertEqual(sent.url?.absoluteString, "https://agp.test/api/v1/bundles")
-        XCTAssertEqual(sent.value(forHTTPHeaderField: "Authorization"), #"Token token="jwt-token""#)
+        let auth = try XCTUnwrap(sent.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertTrue(auth.hasPrefix(#"Token token=""#), auth)
+        // Fresh ES256 JWT per request: three dot-separated segments.
+        XCTAssertEqual(auth.dropFirst(#"Token token=""#.count).dropLast().split(separator: ".").count, 3)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: sent.httpBody!) as? [String: Any])
         let contract = try XCTUnwrap((json["contracts"] as? [[String: Any]])?.first)
         XCTAssertEqual(contract["allowedMethods"] as? [String], ["qes"])

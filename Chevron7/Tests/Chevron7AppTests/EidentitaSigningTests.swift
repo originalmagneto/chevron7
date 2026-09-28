@@ -13,6 +13,20 @@ final class EidentitaSigningTests: XCTestCase {
                           format: .pades, level: .baselineB)
     }
 
+    private func minter() -> AGPTokenMinter {
+        AGPTokenMinter(userID: "123") { AGPTokenMinter.generateKey() }
+    }
+
+    private func coordinator(_ transport: QueueAGPTransport) -> MobileSigningCoordinator {
+        MobileSigningCoordinator(
+            clientFactory: { AVMClient(baseURL: URL(string: "https://avm.test/api/v1")!) },
+            eidentitaPollInterval: .milliseconds(5))
+    }
+
+    private func client(_ transport: QueueAGPTransport) -> AGPClient {
+        AGPClient(baseURL: URL(string: "https://agp.test")!, minter: minter(), transport: transport)
+    }
+
     func testSignViaEidentitaPresentsSheetAndReturnsFile() async throws {
         let info = #"{"download_url":"https://agp.test/f/s.pdf","content_type":"application/pdf","filename":"s.pdf","signed_at":"2026-09-28T12:00:00Z"}"#
         let transport = QueueAGPTransport(bodies: [
@@ -24,14 +38,9 @@ final class EidentitaSigningTests: XCTestCase {
             (200, info),
             (200, "SIGNED-BYTES"),
         ])
-        let coordinator = MobileSigningCoordinator(
-            clientFactory: { AVMClient(baseURL: URL(string: "https://avm.test/api/v1")!) },
-            agpBaseURL: URL(string: "https://agp.test")!,
-            agpTransport: transport,
-            tokenStore: StubAGPTokenStore(token: "jwt"),
-            eidentitaPollInterval: .milliseconds(5))
+        let coordinator = coordinator(transport)
 
-        let file = try await coordinator.signViaEidentita(request())
+        let file = try await coordinator.signViaEidentita(request(), client: client(transport))
 
         XCTAssertEqual(file.data, Data("SIGNED-BYTES".utf8))
         XCTAssertFalse(coordinator.isEidentitaPresented)
@@ -42,24 +51,6 @@ final class EidentitaSigningTests: XCTestCase {
         })
     }
 
-    func testSignViaEidentitaWithoutTokenThrowsMissingToken() async throws {
-        let transport = QueueAGPTransport(bodies: [])
-        let coordinator = MobileSigningCoordinator(
-
-            clientFactory: { AVMClient(baseURL: URL(string: "https://avm.test/api/v1")!) },
-            agpBaseURL: URL(string: "https://agp.test")!,
-            agpTransport: transport,
-            tokenStore: StubAGPTokenStore(token: nil),
-            eidentitaPollInterval: .milliseconds(5))
-        do {
-            _ = try await coordinator.signViaEidentita(request())
-            XCTFail("expected throw")
-        } catch let error as AGPError {
-            XCTAssertEqual(error, .missingToken)
-        }
-        XCTAssertTrue(transport.requests.isEmpty)
-        XCTAssertFalse(coordinator.isEidentitaPresented)
-    }
     func testIgnoresEchoedUploadBytesAndAcceptsPhoneSignature() async throws {
         // Baseline 404 (the portal's async copy job not finished yet), then a
         // signed version identical to the upload, then the phone's signature.
@@ -76,11 +67,8 @@ final class EidentitaSigningTests: XCTestCase {
             (200, signed),
             (200, "SIGNED"),
         ])
-        let client = AGPClient(baseURL: URL(string: "https://agp.test")!, token: "jwt", transport: transport)
-        let session = EidentitaSigningSession(client: client, pollInterval: .milliseconds(5))
-        let file = try await session.run(AGPSigningRequest(filename: "zmluva.pdf", data: Data("PDF".utf8),
-                                                           mimeType: "application/pdf;base64",
-                                                           format: .pades, level: .baselineB))
+        let session = EidentitaSigningSession(client: client(transport), pollInterval: .milliseconds(5))
+        let file = try await session.run(request())
         XCTAssertEqual(file.data, Data("SIGNED".utf8))
     }
 
@@ -91,13 +79,8 @@ final class EidentitaSigningTests: XCTestCase {
             (200, #"{"id":"contract-1"}"#),
             (200, #"<html><a href="sk.minv.sca://sign?qr=true&amp;linkUrl=https://agp.test/p?t=1">qr</a></html>"#),
         ])
-        let coordinator = MobileSigningCoordinator(
-            clientFactory: { AVMClient(baseURL: URL(string: "https://avm.test/api/v1")!) },
-            agpBaseURL: URL(string: "https://agp.test")!,
-            agpTransport: transport,
-            tokenStore: StubAGPTokenStore(token: "jwt"),
-            eidentitaPollInterval: .milliseconds(5))
-        let task = Task { try await coordinator.signViaEidentita(request()) }
+        let coordinator = coordinator(transport)
+        let task = Task { try await coordinator.signViaEidentita(request(), client: client(transport)) }
         while !coordinator.isEidentitaPresented { try await Task.sleep(for: .milliseconds(5)) }
 
         coordinator.cancelEidentita()
@@ -107,14 +90,6 @@ final class EidentitaSigningTests: XCTestCase {
         XCTAssertEqual(error, .cancelled)
         XCTAssertFalse(coordinator.isEidentitaPresented)
     }
-}
-
-private final class StubAGPTokenStore: AGPTokenStoring, @unchecked Sendable {
-    private let token: String?
-    init(token: String?) { self.token = token }
-    func load() throws -> String? { token }
-    func save(_ token: String) throws {}
-    func delete() throws {}
 }
 
 private final class QueueAGPTransport: AVMHTTPTransport, @unchecked Sendable {

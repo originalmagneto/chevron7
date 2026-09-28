@@ -13,6 +13,8 @@ public enum MobileSigningMethod: Sendable {
 }
 
 /// Owns one mobile session at a time and the presentation flag of the QR sheet.
+/// Credentials stay with the caller: the eIdentita client arrives built
+/// (portal URL, user id, Keychain key), the coordinator only presents and runs.
 @MainActor
 @Observable
 final class MobileSigningCoordinator {
@@ -22,26 +24,17 @@ final class MobileSigningCoordinator {
     private(set) var eidentitaSession: EidentitaSigningSession?
 
     private let clientFactory: @MainActor () -> AVMClient
-    private let agpBaseURL: URL
-    private let agpTransport: (any AVMHTTPTransport)?
-    private let tokenStore: any AGPTokenStoring
     private let pollInterval: Duration
     private let timeout: Duration
     private let eidentitaPollInterval: Duration
     private let eidentitaTimeout: Duration
 
     init(clientFactory: @escaping @MainActor () -> AVMClient,
-         agpBaseURL: URL = AGPClient.stagingBaseURL,
-         agpTransport: (any AVMHTTPTransport)? = nil,
-         tokenStore: any AGPTokenStoring = AGPTokenStore(),
          pollInterval: Duration = .seconds(1),
          timeout: Duration = .seconds(900),
          eidentitaPollInterval: Duration = .seconds(10),
          eidentitaTimeout: Duration = .seconds(600)) {
         self.clientFactory = clientFactory
-        self.agpBaseURL = agpBaseURL
-        self.agpTransport = agpTransport
-        self.tokenStore = tokenStore
         self.pollInterval = pollInterval
         self.timeout = timeout
         self.eidentitaPollInterval = eidentitaPollInterval
@@ -68,11 +61,8 @@ final class MobileSigningCoordinator {
         session?.cancel()
     }
 
-    func signViaEidentita(_ request: AGPSigningRequest) async throws -> AGPSignedFile {
-        let token = try Self.loadToken(from: tokenStore)
+    func signViaEidentita(_ request: AGPSigningRequest, client: AGPClient) async throws -> AGPSignedFile {
         if let eidentitaSession, eidentitaSession.isActive { eidentitaSession.cancel() }
-        let client = AGPClient(baseURL: agpBaseURL, token: token,
-                               transport: agpTransport ?? URLSessionAVMTransport())
         let session = EidentitaSigningSession(client: client,
                                              pollInterval: eidentitaPollInterval, timeout: eidentitaTimeout)
         self.eidentitaSession = session
@@ -86,18 +76,5 @@ final class MobileSigningCoordinator {
 
     func cancelEidentita() {
         eidentitaSession?.cancel()
-    }
-
-    private static func loadToken(from store: any AGPTokenStoring) throws -> String {
-        let token: String?
-        do {
-            token = try store.load()
-        } catch {
-            throw AGPError.transport(error.localizedDescription)
-        }
-        guard let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
-            throw AGPError.missingToken
-        }
-        return token
     }
 }
