@@ -54,7 +54,7 @@ Explicitly out of slice 1: `HoldToConfirm` on any EZZK path, `StatusMorph`, `Out
 
 ## Verification
 
-- Manual proof: Demo sign navigates to Done immediately (no bloom wait); failing provider shows error + retry; disabled gates unchanged; resend dialog text byte-identical (no resend file touched; assert via unchanged diff).
+- Owner checklist in the built app (unperformed, needs GUI session): Demo sign navigates to Done immediately (no bloom wait); failing provider shows error + retry; disabled gates unchanged; resend dialog text unchanged (no resend file touched).
 - Mapping tests for the derivation (pure function, no store write): loading despite `canSign == false`; error with eligibility; error without eligibility (still error, not disabled); retry path re-invokes `sign()`. No wiring tests, no snapshot tests.
 - Slice 1 completed 2026-09-28: full `swift test` green (259 AppTests, all suites pass), `swift build` + `build_app.sh` bundle green (0.14.2). Follow-up: `SigningBatchTests` 41/41 (incl. new `testSingleSignFailureRetrySuccessDrivesButtonPhases`: real `sign()` fail, retry, success with derived idle, loading, error phases and 2 provider calls), `AsyncActionButtonTests` 5/5 mapping, `EvidenceSubmissionFlowTests` + `EZZKRecordPresentationTests` 43/43 (resend gates + confirmation text unchanged). No view test added. Explicitly unperformed here (no GUI session): Demo sign of an unsigned PDF in the app, Demo sign of a signed PDF (nomenclature labels), failing-provider error + retry visual run, keyframe shake visual check, VoiceOver pass.
 
