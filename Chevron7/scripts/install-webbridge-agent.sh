@@ -67,13 +67,20 @@ if [[ -d "$APPEX" ]]; then
 </dict>
 </plist>
 ENTPLIST
-    codesign --force --sign - --entitlements "$APPEX_ENTITLEMENTS" "$APPEX" >/dev/null 2>&1 \
-        || echo "  (upozornenie: appex sa nepodarilo znova podpísať)" >&2
+    if ! codesign --force --sign - --entitlements "$APPEX_ENTITLEMENTS" "$APPEX"; then
+        echo "CHYBA: appex sa nepodarilo znova podpísať, registrácia sa preskakuje." >&2
+        rm -f "$APPEX_ENTITLEMENTS"
+        exit 1
+    fi
     rm -f "$APPEX_ENTITLEMENTS"
-    codesign --force --sign - "$APP" >/dev/null 2>&1 \
-        || echo "  (upozornenie: aplikáciu sa nepodarilo znova podpísať)" >&2
-    codesign --verify --deep --strict "$APP" >/dev/null 2>&1 \
-        || echo "  (upozornenie: podpis aplikácie neprešiel kontrolou)" >&2
+    if ! codesign --force --sign - "$APP"; then
+        echo "CHYBA: aplikáciu sa nepodarilo znova podpísať, registrácia sa preskakuje." >&2
+        exit 1
+    fi
+    if ! codesign --verify --deep --strict "$APP"; then
+        echo "CHYBA: podpis aplikácie neprešiel kontrolou, registrácia sa preskakuje." >&2
+        exit 1
+    fi
 
     # LaunchServices finds the appex on first app launch, but a freshly staged
     # copy can stay discovery-only, so register it explicitly.
