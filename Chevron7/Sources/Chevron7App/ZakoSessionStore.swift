@@ -40,6 +40,9 @@ final class ZakoSessionStore {
 
     var isAnalyzing = false
     var analysisProgressText = ""
+    /// Text-rule suggestion for the clause's document kind, from embedded text
+    /// or one scan OCR pass. Shown as a one-tap chip, never written without confirmation.
+    var suggestedDocumentKind: String?
 
     enum AIVisionReadiness: Equatable, Sendable {
         case builtInOnly(mode: AppSettings.AIMode)
@@ -518,6 +521,10 @@ final class ZakoSessionStore {
         sheetMethod = .duplexEstimate
         manualSheetCount = nil
         prepareAttestationPrefill()
+        await suggestDocumentKindFromScan(document: UncheckedSendable(document), recordID: analysisRecordID)
+        // The OCR above suspends: a newer document may have run meanwhile, so
+        // never touch shared state (not even .unavailable) when stale.
+        guard analysisRecordID == currentRecordID, !Task.isCancelled else { return }
         inputSignatureInspection = .unavailable(
             detail: "Kontrola vstupných elektronických podpisov prebieha.")
         if let sourceURL {
@@ -557,6 +564,7 @@ final class ZakoSessionStore {
         data.sheetCountingMethod = sheetMethod
         data.nonEmptyPageCount = analysis.nonEmptyPages
         data.originalDocumentTypeLabel = "Iný dokument"
+        suggestedDocumentKind = document.flatMap(DocumentKindClassifier.suggestKind(in:))
         data.newDocumentFormatLabel = "PDF/A-2"
         data.usedDeviceDescription = "Skenovanie / import do aplikácie Chevron7"
         var breakdown: [AttestationData.PaperSizeGroup] = []
@@ -565,6 +573,18 @@ final class ZakoSessionStore {
         }
         data.paperSizeBreakdown = breakdown
         attestation = data
+    }
+
+    /// Scan fallback for the kind suggestion: embedded text already ran in the
+    /// prefill, so this OCRs only when it stayed silent. Stale runs (a newer
+    /// document meanwhile) drop their result.
+    func suggestDocumentKindFromScan(document: UncheckedSendable<PDFDocument>, recordID: UUID) async {
+        guard suggestedDocumentKind == nil else { return }
+        guard let text = await DocumentKindClassifier.recognizedFirstPageText(in: document.value) else { return }
+        guard recordID == currentRecordID, !Task.isCancelled, self.document === document.value else { return }
+        if suggestedDocumentKind == nil {
+            suggestedDocumentKind = DocumentKindClassifier.suggestKind(firstPageText: text)
+        }
     }
 
     func applySheetMethodChange() {
@@ -1769,6 +1789,7 @@ func resetSession(keepingProfile: Bool) {
         isAuthorizing = false
         isAnalyzing = false
         analysisProgressText = ""
+        suggestedDocumentKind = nil
         preflightErrors = []
         validationErrors = []
         submissionStatus = nil

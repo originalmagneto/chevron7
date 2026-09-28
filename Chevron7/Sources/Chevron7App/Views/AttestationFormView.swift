@@ -150,6 +150,7 @@ struct AttestationFormView: View {
                 LabeledRow(label: "Názov dokumentu") {
                     TextField("Napr. Plná moc / Kúpna zmluva", text: $store.attestation.originalDocumentName)
                         .textFieldStyle(.roundedBorder)
+                        .help("Názov listiny do doložky. Predvypĺňa sa z mena súboru.")
                 }
                 LabeledRow(label: "Druh dokumentu") {
                     Picker("", selection: $store.attestation.originalDocumentTypeLabel) {
@@ -158,11 +159,29 @@ struct AttestationFormView: View {
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 220)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help("Druh listiny do doložky. Návrh podľa textu vždy skontrolujte, rozhoduje človek.")
+                }
+                if let suggestion = store.suggestedDocumentKind,
+                   suggestion != store.attestation.originalDocumentTypeLabel {
+                    LabeledRow(label: "") {
+                        HStack(spacing: 8) {
+                            Image(systemName: "sparkles")
+                                .foregroundStyle(.secondary)
+                            Text("Návrh podľa textu: \(suggestion)")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            Button("Použiť") {
+                                store.attestation.originalDocumentTypeLabel = suggestion
+                            }
+                            .buttonStyle(.link)
+                        }
+                    }
                 }
                 LabeledRow(label: "Počet listov / neprázdnych strán") {
                     Text("\(store.effectiveSheetCount) listov · \(store.analysis.nonEmptyPages) strán")
                         .font(.callout.monospacedDigit().weight(.medium))
+                        .help("Počíta sa z neprázdnych strán analýzy.")
                 }
                 LabeledRow(label: "Veľkosť listiny") {
                     Text(store.attestation.paperSizeBreakdown.isEmpty
@@ -171,6 +190,7 @@ struct AttestationFormView: View {
                              .map { "\($0.sizeClass.rawValue): \($0.sheets) listov" }
                              .joined(separator: ", "))
                         .font(.callout)
+                        .help("Formáty zistené z rozmerov strán.")
                 }
             }
             inlineError(.missingOriginalName)

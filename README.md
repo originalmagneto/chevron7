@@ -307,6 +307,10 @@ Sekcia bezpečnostných prvkov XML záznamu používa overenú štruktúru recor
 
 Podrobnosti: [pravidlá tréningového datasetu](Chevron7/docs/security-element-training.md) a [oficiálne formulárové podklady](Chevron7/docs/reference/security-elements/FINDINGS.md).
 
+### Doložka
+
+- **Druh dokumentu navrhne text.** Zmluva, plná moc, rozsudok, osvedčenie alebo rozhodnutie sa odvodí z textu prvej strany (pri skene jedným OCR prechodom); návrh sa ukáže ako jedno tlačidlo **Použiť** a do doložky sa nikdy nezapíše sám. Každé pole má nápovedu, čo do doložky vstupuje.
+- **Autorizácia sa drží, nie kliká.** Tlačidlo **Autorizovať konverziu** vyžaduje približne sekundové podržanie, lebo autorizácia spotrebuje platené evidenčné číslo a karta ostáva v čítačke. Skoré pustenie alebo odtiahnutie nič neurobí; klávesnica a VoiceOver potvrdzujú priamo.
 
 <table>
 <tr>
