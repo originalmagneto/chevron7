@@ -269,32 +269,22 @@ struct AuthorizeView: View {
         case .noMandate:
             ZakoSessionStore.noMandateMessage
         default:
-            "Po kliknutí na Autorizovať aplikácia skontroluje kartu, vyžiada PIN alebo BOK a načíta mandátny certifikát."
+            "Podržte Autorizovať: aplikácia skontroluje kartu, vyžiada PIN alebo BOK a načíta mandátny certifikát."
         }
     }
 
     @ViewBuilder
     private var authorizeButton: some View {
-        Button {
+        HoldToConfirmButton(
+            title: "Autorizovať konverziu",
+            systemImage: "signature.badge.checkmark",
+            workingText: store.analysisProgressText,
+            disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
+                || !store.canBeginAuthorization,
+            isWorking: store.isAuthorizing
+        ) {
             Task { await store.beginAuthorization() }
-        } label: {
-            HStack(spacing: 8) {
-                if store.isAuthorizing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "signature.badge.checkmark")
-                }
-                Text(store.isAuthorizing ? store.analysisProgressText : "Autorizovať konverziu")
-                    .font(.body.weight(.semibold))
-            }
-            .padding(.horizontal, 10)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .tint(.indigo)
-        .disabled(store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
-                  || !store.canBeginAuthorization)
-        .keyboardShortcut(.defaultAction)
     }
 
     @ViewBuilder
