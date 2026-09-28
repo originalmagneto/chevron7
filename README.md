@@ -329,7 +329,7 @@ Podrobnosti: [pravidlá tréningového datasetu](Chevron7/docs/security-element-
 
 <p>Prihlasovacie údaje sa zadávajú v <strong>Nastaveniach, karta EZZK</strong>, pre zvolené prostredie: Demo (lokálne), Test alebo Produkcia. Heslo sa uloží do Keychainu až vtedy, keď ho EZZK prijme; prihlasovací token existuje len v pamäti aplikácie. Testovacie prostredie má vlastný certifikát, ktorému aplikácia dôveruje len podľa pripnutého odtlačku.</p>
 
-<p><strong>Čo funguje kde:</strong> na Teste prihlásenie, čas servera, pridelenie evidenčných čísel, odoslanie podpísaného záznamu cez <code>ReceiveConversionRecord</code> aj overenie jeho stavu. Na Produkcii zatiaľ len prihlásenie, čas servera a verejné overenie záznamu. Celý postup kartou SAK na Teste prešiel; pridelenie čísla a odoslanie záznamu na Produkcii sa zapnú pre všetkých po prvej overenej ostrej konverzii. Bez evidenčného čísla aplikácia nepovolí autorizáciu, a číslo z iného dňa alebo z iného režimu odmietne ešte pred podpisom, lebo EZZK nepoužité čísla o polnoci spotrebuje.</p>
+<p><strong>Čo funguje kde:</strong> na Teste aj na Produkcii prihlásenie, čas servera, pridelenie evidenčných čísel, odoslanie podpísaného záznamu cez <code>ReceiveConversionRecord</code> aj overenie jeho stavu. Produkcia je otvorená pre všetkých od 24. 9. 2026. Bez evidenčného čísla aplikácia nepovolí autorizáciu, a číslo z iného dňa alebo z iného režimu odmietne ešte pred podpisom, lebo EZZK nepoužité čísla o polnoci spotrebuje.</p>
 
 <p><strong>Ochrany pred chybou:</strong> mimo režimu Demo aplikácia nepridelí evidenčné číslo ani neautorizuje, ak podpisuje iba ukážkovo (bez podpisového enginu alebo bez karty), lebo nepoužité číslo by o polnoci prepadlo bez záznamu. Riadok Registra, ktorého záznam sa práve podpisuje alebo odosiela, sa nedá vymazať. Ak EZZK pri overení odpovie, že pod číslom eviduje viac záznamov (kód 106), aplikácia sa spýta znova s časom konverzie, aby sa stav ustálil.</p>
 
@@ -541,7 +541,15 @@ xattr -d com.apple.quarantine "/Applications/Chevron7.app"
 </details>
 
 <details open>
-<summary><strong>v0.15.0 · aktuálne vydanie: vlastný detektor bezpečnostných prvkov a jeho prenos medzi Macmi</strong></summary>
+<summary><strong>v0.19.0 · aktuálne vydanie: návrh druhu dokumentu v doložke</strong></summary>
+<ul>
+<li>Druh dokumentu (zmluva, plná moc, rozsudok, osvedčenie, rozhodnutie) sa navrhne z textu prvej strany, pri skene jedným OCR prechodom; návrh sa prijíma tlačidlom <strong>Použiť</strong> a nikdy sa nezapíše sám.</li>
+<li>Tlačidlo <strong>Autorizovať konverziu</strong> vyžaduje približne sekundové podržanie, lebo autorizácia spotrebuje platené evidenčné číslo. Podrobnosti v poznámkach k vydaniu.</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.15.0 · predchádzajúce vydanie: vlastný detektor bezpečnostných prvkov a jeho prenos medzi Macmi</strong></summary>
 <ul>
 <li>Keď skontrolujete dosť strán (40 z 8 dokumentov, 15 príkladov na druh), aplikácia ponúkne natrénovanie vlastného detektora priamo na Macu; nový sa aktivuje, len keď na nepoznaných dokumentoch nájde aspoň o 5 % prvkov viac, a predchádzajúci ostáva na jedno vrátenie.</li>
 <li><strong>Exportovať detektor…</strong> v Nastaveniach uloží zip so samotným modelom, bez skenov; <strong>Importovať detektor zo súboru…</strong> v okne trénovania ho aktivuje, len keď prejde rovnakým overením na tamojších stranách. Poškodený balíček aplikácia odmietne a rozbehnuté overenie ide zrušiť.</li>
