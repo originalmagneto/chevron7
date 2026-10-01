@@ -56,4 +56,21 @@ class MachineInspectionTreeTest {
         assertFalse(payload.has("documents"));
         assertTrue(payload.getAsJsonArray("signatures").size() > 0);
     }
+
+    /// Byte inspection keeps today's flat payload: the per-signature coverage belongs to the
+    /// tree path only.
+    @Test
+    void byteInspectionOfAContainerHasNoPerSignatureDocuments() throws Exception {
+        var documents = new LinkedHashMap<String, byte[]>();
+        documents.put("report.pdf", TestContainers.resource("sample_signed.pdf"));
+
+        var payload = new MachineInspectionService().inspect(TestContainers.signedXadesContainer(documents));
+
+        var signatures = payload.getAsJsonArray("signatures");
+        assertTrue(signatures.size() > 0);
+        for (var signature : signatures) {
+            assertFalse(signature.getAsJsonObject().has("documents"));
+        }
+        assertFalse(document(payload, "report.pdf").has("nested"));
+    }
 }

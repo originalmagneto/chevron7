@@ -96,7 +96,7 @@ public final class MachineInspectionService {
         var validator = documentValidator(document);
         JsonObject payload;
         if (validatorReportReader == null) {
-            payload = inspectStructurally(document, validator);
+            payload = inspectStructurally(document, validator, true);
         } else {
             var trusted = mapAsicInspection(readTrustedInspection(document, validator));
             payload = mergeStructuralIntegrityIfAvailable(trusted, document);
@@ -305,21 +305,28 @@ public final class MachineInspectionService {
     }
 
     private JsonObject inspectStructurally(DSSDocument document) {
-        return inspectStructurally(document, documentValidator(document));
+        return inspectStructurally(document, documentValidator(document), false);
     }
 
-    private JsonObject inspectStructurally(DSSDocument document, SignedDocumentValidator validator) {
+    /// `withCoverage` adds each signature's covered data objects; only the tree path asks for it,
+    /// so byte inspection keeps its flat payload.
+    private JsonObject inspectStructurally(DSSDocument document, SignedDocumentValidator validator,
+            boolean withCoverage) {
         var asic = isAsic(validator);
         var payload = new JsonObject();
         var signaturePayloads = new com.google.gson.JsonArray();
         for (var signature : validator.getSignatures()) {
             var mapped = mapStructuralSignature(readStructuralSignature(signature));
-            if (asic) {
-                var covered = documentNames(validator.getOriginalDocuments(signature.getId()));
-                if (!covered.isEmpty()) {
-                    var names = new com.google.gson.JsonArray();
-                    covered.forEach(names::add);
-                    mapped.add("documents", names);
+            if (asic && withCoverage) {
+                try {
+                    var covered = documentNames(validator.getOriginalDocuments(signature.getId()));
+                    if (!covered.isEmpty()) {
+                        var names = new com.google.gson.JsonArray();
+                        covered.forEach(names::add);
+                        mapped.add("documents", names);
+                    }
+                } catch (RuntimeException exception) {
+                    // Coverage is optional here: omit it for a signature DSS cannot resolve.
                 }
             }
             signaturePayloads.add(mapped);
