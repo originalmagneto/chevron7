@@ -158,6 +158,15 @@ struct IntakeView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 500)
+
+                // Scope: paper to electronic only. An electronic original would need its
+                // qualified signatures checked by a qualified validation service.
+                Text("Chevron7 robí zaručenú konverziu len z listinnej do elektronickej podoby. Konverziu elektronického dokumentu nepodporuje.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 500)
+                    .help("Konverzia elektronického originálu by podľa § 3 ods. 4 vyhlášky č. 70/2021 Z. z. vyžadovala overenie jeho kvalifikovaných podpisov kvalifikovanou službou validácie.")
             }
 
             HStack(spacing: 12) {
