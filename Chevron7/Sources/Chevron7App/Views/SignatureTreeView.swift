@@ -59,6 +59,18 @@ enum SignatureTreePresentation {
         }
     }
 
+    /// What a DSS SignatureQualification means to the signer. Nil before full validation
+    /// (structural results carry none); anything but a qualified signature or seal is shown
+    /// as not qualified, so a valid advanced signature never reads as a KEP.
+    static func qualificationLabel(_ qualification: String?) -> String? {
+        switch qualification {
+        case nil: nil
+        case "QESIG": "KEP"
+        case "QESEAL": "Kvalifikovaná pečať"
+        default: "Nekvalifikovaný"
+        }
+    }
+
     static func tint(_ state: DocumentSignatureInfo.State) -> Color {
         switch state {
         case .valid: .green
@@ -81,6 +93,8 @@ enum SignatureTreePresentation {
 struct SignatureTreeView: View {
     let state: SignatureTreeState
     let emptyText: String
+    /// The store is signing; a revalidation now would compete with it for the engine.
+    let isBusy: Bool
     let onRevalidate: () -> Void
     @Environment(\.openURL) private var openURL
 
@@ -130,7 +144,7 @@ struct SignatureTreeView: View {
                 Button("Overiť znova", action: onRevalidate)
                     .font(.caption2)
                     .buttonStyle(.link)
-                    .disabled(state.isValidating)
+                    .disabled(state.isValidating || isBusy)
             }
         }
     }

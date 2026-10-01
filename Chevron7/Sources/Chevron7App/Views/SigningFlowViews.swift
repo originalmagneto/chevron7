@@ -515,6 +515,7 @@ struct SigningPrepareView: View {
             SignatureTreeView(
                 state: store.existingSignatureState,
                 emptyText: "Dokument zatiaľ neobsahuje elektronický podpis. Podpísanie pridá prvý KEP podpis.",
+                isBusy: store.isSigning,
                 onRevalidate: { Task { await store.revalidateExistingSignatures() } })
             if !store.existingSignatures.isEmpty {
                 Text("Pridá sa ďalší podpis k existujúcim podpisom v dokumente.")
@@ -853,6 +854,9 @@ struct SignatureInfoRow: View {
                     if let format = info.format {
                         Text(format).font(.caption2.monospaced())
                     }
+                    if let qualification = SignatureTreePresentation.qualificationLabel(info.certificateQualification) {
+                        Text(qualification).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     if info.hasQualifiedTimestamp {
                         Text("QTS").font(.caption2.weight(.semibold)).foregroundStyle(.green)
                     } else if info.hasTimestamp {
@@ -1035,6 +1039,7 @@ struct SigningDoneView: View {
                 SignatureTreeView(
                     state: store.resultSignatureState,
                     emptyText: "Podpísaný súbor je pripravený.",
+                    isBusy: store.isSigning,
                     onRevalidate: { Task { await store.revalidateResultSignatures() } })
                     .padding(4)
             }

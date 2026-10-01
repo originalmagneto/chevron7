@@ -211,7 +211,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             }
             return .tree(inspected.tree)
         } catch {
-            logger.info("Signature tree failed: \(error.localizedDescription, privacy: .public)")
+            // The user sees a Slovak reason; the log keeps the error's type and code.
+            logger.info("Signature tree failed: \(String(describing: error), privacy: .public) (\(error.localizedDescription, privacy: .public))")
             return .failed(Self.treeFailureReason(error))
         }
     }
@@ -242,10 +243,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         if text.contains("TRUSTED_LIST_UNAVAILABLE") {
             return "Dôveryhodné zoznamy nie sú dostupné. Výsledok je len štrukturálny."
         }
-        if text.contains("VALIDATION_FAILED") {
-            return "Overenie podpisov zlyhalo. Výsledok je len štrukturálny."
-        }
-        return error.localizedDescription
+        // Any other error (VALIDATION_FAILED, a helper that exited, ...) is never shown raw.
+        return "Overenie podpisov zlyhalo. Výsledok je len štrukturálny."
     }
 
     static func requireInspectableFile(in inspections: [PDFInspection]) throws -> InspectedPDF {

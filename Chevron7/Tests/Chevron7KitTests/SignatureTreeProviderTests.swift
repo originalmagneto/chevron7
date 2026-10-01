@@ -49,6 +49,23 @@ final class SignatureTreeProviderTests: XCTestCase {
         XCTAssertEqual(validated, .failed("Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."))
     }
 
+    /// An error without a known code never reaches the user as raw English.
+    func testUnknownValidationErrorIsReportedInSlovak() async throws {
+        let engine = TreeEngine(inspectTree: tree, validateError: MachineSessionProcessFailure.helperExited(status: 1))
+        let provider = EngineBridgeSigningProvider(engine: engine)
+
+        let validated = await provider.validateSignatureTree(in: try sourceFile())
+
+        XCTAssertEqual(validated, .failed("Overenie podpisov zlyhalo. Výsledok je len štrukturálny."))
+    }
+
+    func testUnknownErrorFallbackIsSlovak() {
+        let reason = EngineBridgeSigningProvider.treeFailureReason(
+            NSError(domain: "Test", code: 7, userInfo: [NSLocalizedDescriptionKey: "Something broke"]))
+
+        XCTAssertEqual(reason, "Overenie podpisov zlyhalo. Výsledok je len štrukturálny.")
+    }
+
     func testHungValidationTimesOut() async throws {
         executionTimeAllowance = 30
         let engine = TreeEngine(inspectTree: tree, validateHangs: true)

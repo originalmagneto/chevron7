@@ -79,4 +79,13 @@ final class SignatureTreePresentationTests: XCTestCase {
         XCTAssertTrue(SignatureTreePresentation.hasUnverifiedEntries(mixed))
         XCTAssertFalse(SignatureTreePresentation.hasUnverifiedEntries(clean))
     }
+
+    func testQualificationLabel() {
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("QESIG"), "KEP")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("QESEAL"), "Kvalifikovaná pečať")
+        XCTAssertNil(SignatureTreePresentation.qualificationLabel(nil))
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("ADESIG_QC"), "Nekvalifikovaný")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("ADESIG"), "Nekvalifikovaný")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("NA"), "Nekvalifikovaný")
+    }
 }
