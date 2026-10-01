@@ -300,9 +300,16 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
     public var signerDisplayName: String
     public var format: String?
     public var signingTime: Date?
+    /// True only when full validation confirmed a qualified timestamp.
     public var hasQualifiedTimestamp: Bool
+    /// A timestamp is present and cryptographically intact (structural knowledge only).
+    public var hasTimestamp: Bool
     public var state: State
     public var detail: String?
+    /// Names of the container's data objects this signature covers.
+    public var coveredDocuments: [String]
+    /// DSS SignatureQualification name from full validation, e.g. "QESIG".
+    public var certificateQualification: String?
 
     public enum State: String, Sendable, Equatable {
         case valid
@@ -313,14 +320,18 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
 
     public init(id: String, signerDisplayName: String, format: String? = nil,
                 signingTime: Date? = nil, hasQualifiedTimestamp: Bool = false,
-                state: State = .unknown, detail: String? = nil) {
+                hasTimestamp: Bool = false, state: State = .unknown, detail: String? = nil,
+                coveredDocuments: [String] = [], certificateQualification: String? = nil) {
         self.id = id
         self.signerDisplayName = signerDisplayName
         self.format = format
         self.signingTime = signingTime
         self.hasQualifiedTimestamp = hasQualifiedTimestamp
+        self.hasTimestamp = hasTimestamp || hasQualifiedTimestamp
         self.state = state
         self.detail = detail
+        self.coveredDocuments = coveredDocuments
+        self.certificateQualification = certificateQualification
     }
 }
 
