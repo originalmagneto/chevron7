@@ -151,6 +151,34 @@ class MachineV2CliAppTest {
         assertEquals("Certificate chain could not be built", validation.get("validationReason").getAsString());
     }
 
+    @Test
+    void validateReturnsTheNestedPdfSignatures() throws Exception {
+        var documents = new java.util.LinkedHashMap<String, byte[]>();
+        documents.put("report.pdf", digital.slovensko.autogram.ui.machine.TestContainers.resource("sample_signed.pdf"));
+        var source = Files.write(temporaryDirectory.resolve("report.asice"),
+                digital.slovensko.autogram.ui.machine.TestContainers.signedXadesContainer(documents));
+        var trusted = MachineInspectionService.forTrustedValidation(validator -> {
+            validator.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
+            return validator.validateDocument().getSimpleReport();
+        });
+        var input = "{\"protocolVersion\":2,\"requestId\":\"validate-tree\",\"operation\":\"VALIDATE\",\"payload\":{\"files\":[{\"id\":\"tree\",\"source\":\""
+                + source + "\",\"target\":\"/selected/tree.asice\"}]}}\n";
+        var output = new StringWriter();
+
+        var code = MachineV2CliApp.start(commandLine(), new StringReader(input), new PrintWriter(output),
+                new PrintWriter(new StringWriter()), new MachineDriverService(), new MachineInspectionService(),
+                trusted, () -> { });
+
+        assertEquals(0, code, output.toString());
+        var validation = Arrays.stream(output.toString().strip().split("\\n"))
+                .map(JsonParser::parseString).map(element -> element.getAsJsonObject())
+                .filter(event -> "validation.completed".equals(event.get("type").getAsString()))
+                .findFirst().orElseThrow().getAsJsonObject("payload");
+        var nested = validation.getAsJsonArray("documents").get(0).getAsJsonObject().getAsJsonObject("nested");
+        assertEquals("PDF", nested.get("kind").getAsString());
+        assertEquals(1, nested.getAsJsonArray("signatures").size());
+    }
+
     private static org.apache.commons.cli.CommandLine commandLine() throws Exception {
         var options = new Options()
                 .addOption(null, "machine-readable", false, "")

@@ -310,6 +310,31 @@ class MachineCliAppTest {
                 .getAsJsonObject("payload").get("code").getAsString());
     }
 
+    /// v1 INSPECT carries the signature tree of a container around a signed PDF.
+    @Test
+    void inspectReturnsTheNestedPdfSignatures() throws Exception {
+        var documents = new java.util.LinkedHashMap<String, byte[]>();
+        documents.put("report.pdf", TestContainers.resource("sample_signed.pdf"));
+        var source = Files.write(temporaryDirectory.resolve("report.asice"),
+                TestContainers.signedXadesContainer(documents)).toRealPath();
+        var stdout = new StringWriter();
+        var input = "{\"protocolVersion\":1,\"requestId\":\"r\",\"operation\":\"INSPECT\",\"payload\":{"
+                + "\"files\":[{\"id\":\"one\",\"source\":\"" + source + "\",\"target\":\""
+                + temporaryDirectory.resolve("unused.asice") + "\"}]}}";
+
+        var code = MachineCliApp.start(commandLine("INSPECT"), new StringReader(input), new PrintWriter(stdout),
+                new PrintWriter(new StringWriter()));
+
+        assertEquals(0, code, stdout.toString());
+        var inspection = java.util.Arrays.stream(stdout.toString().strip().split("\\n"))
+                .map(line -> JsonParser.parseString(line).getAsJsonObject())
+                .filter(event -> "inspection.completed".equals(event.get("type").getAsString()))
+                .findFirst().orElseThrow().getAsJsonObject("payload");
+        var nested = inspection.getAsJsonArray("documents").get(0).getAsJsonObject().getAsJsonObject("nested");
+        assertEquals("PDF", nested.get("kind").getAsString());
+        assertEquals(1, nested.getAsJsonArray("signatures").size());
+    }
+
     private static SimpleReport qualifiedReport(String... ids) {
         var report = mock(SimpleReport.class);
         when(report.getSignatureIdList()).thenReturn(List.of(ids));
