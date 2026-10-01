@@ -18,7 +18,36 @@ final class RealStorageGuardTests: XCTestCase {
                        [ProductIdentity.applicationSupportDirectory(), ProductIdentity.cachesDirectory()])
     }
 
-    /// The guard sees writes only; a store opened on a default root would still read the
+    func testGuardWatchesPreferenceFilesNamedAfterATestSuite() {
+        XCTAssertEqual(RealStorageGuard.preferencesDirectory.path,
+                       FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Preferences").path)
+        for name in ["SigningBatchTests.0D5E3F0A-7C44-4F7B-9A57-8E8C21B8C0A1.plist",
+                     "EZZKProductionPolicyTests-0D5E3F0A-7C44-4F7B-9A57-8E8C21B8C0A1.plist",
+                     "MemoryUserDefaultsTests-0D5E3F0A-7C44-4F7B-9A57-8E8C21B8C0A1.plist"] {
+            XCTAssertTrue(RealStorageGuard.isTestSuitePreferenceFile(name), name)
+        }
+        for name in ["app.slovensko.chevron7.plist", "com.apple.dt.xctest.tool.plist", "com.apple.finder.plist",
+                     "SigningBatchTests.plist.lockfile", "Tests.plist"] {
+            XCTAssertFalse(RealStorageGuard.isTestSuitePreferenceFile(name), name)
+        }
+    }
+
+    /// `UserDefaults.standard` under XCTest is the runner's own domain, kept in
+    /// `~/Library/Preferences`; the guard watches exactly that domain.
+    func testGuardWatchesTheRunnersStandardDefaultsDomain() {
+        XCTAssertEqual(RealStorageGuard.standardDefaultsDomain, Bundle.main.bundleIdentifier)
+        XCTAssertFalse(RealStorageGuard.standardDefaultsDomain.isEmpty)
+    }
+
+    func testChangedKeysComparesPropertyListValuesByContent() {
+        let old: [String: Any] = ["same": Data([1, 2]), "nested": ["a": [1, 2]], "changed": 1, "removed": "x"]
+        let new: [String: Any] = ["same": Data([1, 2]), "nested": ["a": [1, 2]], "changed": 2, "added": true]
+
+        XCTAssertEqual(RealStorageGuard.changedKeys(old, new), ["added", "changed", "removed"])
+        XCTAssertEqual(RealStorageGuard.changedKeys(new, new), [])
+    }
+
+    /// The guard sees writes only, and a named `UserDefaults` suite only once it has leaked; a store opened on a default root would still read the
     /// real evidence register. Every store a test builds must name its own directory.
     func testNoTestOpensAStoreOnTheRealDataRoot() throws {
         let thisFile = URL(fileURLWithPath: #filePath).standardizedFileURL
@@ -31,7 +60,11 @@ final class RealStorageGuardTests: XCTestCase {
             #"ExampleBank\(directory:\s*ExampleBank\.defaultDirectory"#,
             #"SignatureAssetStore\(\s*\)"#,
             #"SignaturePlacementState\(\s*\)"#,
-            #"VisibleSignatureRenderer\((?![^)]*cacheRoot)"#
+            #"VisibleSignatureRenderer\((?![^)]*cacheRoot)"#,
+            // A named suite is written to ~/Library/Preferences for good; use MemoryUserDefaults().
+            #"UserDefaults\(suiteName:"#,
+            // UserDefaults.standard is the test runner's shared domain; pass defaults: MemoryUserDefaults().
+            #"AppSettings\.load\(\s*\)"#
         ].map { try NSRegularExpression(pattern: $0) }
 
         var offenders: [String] = []
@@ -46,6 +79,7 @@ final class RealStorageGuardTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(offenders, [], "Pass a temporary directory (makeSettingsStore(), directory:, cacheRoot:, applicationSupportRoot:)")
+        XCTAssertEqual(offenders, [], "Pass a temporary directory (makeSettingsStore(), directory:, cacheRoot:, applicationSupportRoot:) "
+                           + "or a MemoryUserDefaults()")
     }
 }

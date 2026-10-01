@@ -5,6 +5,7 @@ import Foundation
 import XCTest
 import PDFKit
 import AppKit
+import Chevron7TestSupport
 @testable import Chevron7Kit
 
 final class EngineBridgeGeometryTests: XCTestCase {
@@ -788,7 +789,9 @@ final class EngineBridgeLiveSignTests: XCTestCase {
         guard liveTestEnabled else { throw XCTSkip("Vyžaduje CHEVRON7_ENGINE_LIVE_TEST=1.") }
         guard JavaEngineLocator().locate() != nil else { throw XCTSkip("Engine nie je nainštalovaný.") }
 
-        let engine = AutogramCLIEngine()
+        // The timestamp source is read on signing; the default store reads UserDefaults.standard.
+        let engine = AutogramCLIEngine(
+            timestampSourceProvider: TimestampSourcePreferencesStore(defaults: MemoryUserDefaults()))
         let work = try EngineBridgeSigningProvider.makeWorkspace()
         defer { try? FileManager.default.removeItem(at: work) }
         let source = work.appendingPathComponent("document.pdf")
@@ -827,7 +830,9 @@ final class EngineBridgeLiveSignTests: XCTestCase {
         guard liveTestEnabled else { throw XCTSkip("Vyžaduje CHEVRON7_ENGINE_LIVE_TEST=1.") }
         guard JavaEngineLocator().locate() != nil else { throw XCTSkip("Engine nie je nainštalovaný.") }
 
-        let engine = AutogramCLIEngine()
+        // The timestamp source is read on signing; the default store reads UserDefaults.standard.
+        let engine = AutogramCLIEngine(
+            timestampSourceProvider: TimestampSourcePreferencesStore(defaults: MemoryUserDefaults()))
         let work = try EngineBridgeSigningProvider.makeWorkspace()
         defer { try? FileManager.default.removeItem(at: work) }
         let source = work.appendingPathComponent("document.pdf")

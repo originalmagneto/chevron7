@@ -3,6 +3,7 @@
 
 import Foundation
 import XCTest
+import Chevron7TestSupport
 import Chevron7Kit
 @testable import Chevron7App
 
@@ -11,8 +12,7 @@ final class SignedDocumentStoreTests: XCTestCase {
     private var trashed: [URL] = []
 
     private func makeStore(now: @escaping () -> Date = Date.init) -> SignedDocumentStore {
-        let defaults = UserDefaults(suiteName: "SignedDocumentStoreTests-\(UUID().uuidString)")!
-        return SignedDocumentStore(defaults: defaults, now: now, trash: { [unowned self] url in
+        SignedDocumentStore(defaults: MemoryUserDefaults(), now: now, trash: { [unowned self] url in
             trashed.append(url)
         })
     }

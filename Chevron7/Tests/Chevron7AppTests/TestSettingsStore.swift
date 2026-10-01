@@ -18,6 +18,10 @@ extension XCTestCase {
     /// (`AppSettingsStore.init` otherwise defaults to `EZZKAccountController(mode:
     /// loaded.ezzkMode)`, which reads the real Keychain) must never reach a test. Its
     /// production policy is `.refused`, never the developer's real owner switch.
+    ///
+    /// Settings load from and save to a fresh `MemoryUserDefaults`, never `.standard`: under
+    /// XCTest that is `com.apple.dt.xctest.tool` in `~/Library/Preferences`, so every
+    /// `settings` change a test made would persist and be what the next test loads.
     @MainActor
     func makeSettingsStore(ezzkAccountController: EZZKAccountController? = nil) -> AppSettingsStore {
         let controller = ezzkAccountController ?? EZZKAccountController(
@@ -25,7 +29,8 @@ extension XCTestCase {
             credentialStore: MemoryCredentialStore(),
             transportFactory: { _ in ScriptedTransport([]) }, productionPolicy: .refused)
         return AppSettingsStore(ezzkAccountController: controller,
-                                 storageRoot: makeTemporaryDirectory("app-storage"))
+                                 storageRoot: makeTemporaryDirectory("app-storage"),
+                                 defaults: MemoryUserDefaults())
     }
 
     /// An `AppSettingsStore` whose register.json is unreadable from the start (a temporary
@@ -42,7 +47,8 @@ extension XCTestCase {
             mode: .demo,
             credentialStore: MemoryCredentialStore(),
             transportFactory: { _ in ScriptedTransport([]) }, productionPolicy: .refused)
-        return AppSettingsStore(ezzkAccountController: controller, storageRoot: storageRoot)
+        return AppSettingsStore(ezzkAccountController: controller, storageRoot: storageRoot,
+                                 defaults: MemoryUserDefaults())
     }
 }
 

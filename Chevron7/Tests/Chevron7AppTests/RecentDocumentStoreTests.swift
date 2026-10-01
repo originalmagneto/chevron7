@@ -3,6 +3,7 @@
 
 import Foundation
 import XCTest
+import Chevron7TestSupport
 import Chevron7Kit
 @testable import Chevron7App
 
@@ -247,8 +248,7 @@ final class RecentDocumentStoreTests: XCTestCase {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let suiteName = "RecentDocumentStoreTests.\(UUID().uuidString)"
-        return UserDefaults(suiteName: suiteName)!
+        MemoryUserDefaults()
     }
 
     private func makeDocument(named name: String) -> URL {
