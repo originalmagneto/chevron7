@@ -304,11 +304,17 @@ final class SigningSessionStore {
     func selectQueueItem(_ id: UUID) async {
         guard let item = queue.first(where: { $0.id == id }) else { return }
         selectedQueueID = id
+        // The previous document's validation must not land while this one is being opened:
+        // its own inspection (which issues the next token) comes after analysis and card refresh.
+        existingTreeRun = UUID()
+        existingSignatureState = SignatureTreeState()
+        existingValidationTask = nil
         lastError = item.errorMessage
         signedOutputURL = item.signedOutputURL
         signedPreviewDocument = item.signedOutputURL.flatMap { previewDocument(for: $0) }
         resultTreeRun = UUID()
         resultSignatureState = SignatureTreeState()
+        resultValidationTask = nil
         let secured = item.url.startAccessingSecurityScopedResource()
         defer { if secured { item.url.stopAccessingSecurityScopedResource() } }
         guard let document = previewDocument(for: item.url) else {
@@ -355,6 +361,9 @@ final class SigningSessionStore {
             selectedQueueID = nil
             document = nil
             sourceURL = nil
+            existingTreeRun = UUID()
+            existingSignatureState = SignatureTreeState()
+            existingValidationTask = nil
             if queue.isEmpty {
                 step = .intake
             }
