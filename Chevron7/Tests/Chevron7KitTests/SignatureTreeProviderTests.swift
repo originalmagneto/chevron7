@@ -40,6 +40,15 @@ final class SignatureTreeProviderTests: XCTestCase {
         XCTAssertEqual(reason, "Dôveryhodné zoznamy nie sú dostupné. Výsledok je len štrukturálny.")
     }
 
+    func testTimeoutIsReportedInSlovak() async throws {
+        let engine = TreeEngine(inspectTree: tree, validateError: CLIProcessFailure.timedOut)
+        let provider = EngineBridgeSigningProvider(engine: engine)
+
+        let validated = await provider.validateSignatureTree(in: try sourceFile())
+
+        XCTAssertEqual(validated, .failed("Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."))
+    }
+
     func testMissingFileFails() async {
         let provider = EngineBridgeSigningProvider(engine: TreeEngine(inspectTree: tree))
         let missing = URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString).pdf")

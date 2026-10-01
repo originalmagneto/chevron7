@@ -211,6 +211,9 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     static func treeFailureReason(_ error: Error) -> String {
+        if case CLIProcessFailure.timedOut = error {
+            return "Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."
+        }
         let text = "\(error) \(error.localizedDescription)"
         if text.contains("TRUSTED_LIST_UNAVAILABLE") {
             return "Dôveryhodné zoznamy nie sú dostupné. Výsledok je len štrukturálny."
