@@ -191,7 +191,13 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
 
     public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         await signatureTree(in: fileURL) { [engine, validationTimeout] files in
-            try await Self.withTimeLimit(validationTimeout) { try await engine.validate(files: files) }
+            do {
+                return try await Self.withTimeLimit(validationTimeout) { try await engine.validate(files: files) }
+            } catch CLIProcessFailure.timedOut {
+                // Only the time limit throws this; the engine still runs the hung request.
+                await engine.stopValidation()
+                throw CLIProcessFailure.timedOut
+            }
         }
     }
 
@@ -217,8 +223,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         }
     }
 
-    /// Races `operation` against `limit`. The loser is cancelled, so a hung engine request
-    /// is cancelled too (the machine session cancels a request on task cancellation).
+    /// Races `operation` against `limit`. The loser is cancelled, which only ends the Swift
+    /// side of a hung engine request; the caller stops the helper that still runs it.
     private static func withTimeLimit<T: Sendable>(
         _ limit: Duration,
         _ operation: @escaping @Sendable () async throws -> T

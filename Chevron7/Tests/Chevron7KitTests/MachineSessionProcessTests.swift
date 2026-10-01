@@ -104,6 +104,39 @@ final class MachineSessionProcessTests: XCTestCase {
         await engine.cancel()
     }
 
+    /// A validation that timed out keeps running in the helper, which answers a session's
+    /// requests one after another. The timeout must end that helper, so the next validation
+    /// starts a fresh one instead of queueing behind the hung request and timing out too.
+    func testValidationAfterATimeoutRunsOnAFreshHelper() async throws {
+        executionTimeAllowance = 60
+        let source = directory.appending(path: "dokument.pdf")
+        try Data("%PDF-1.7\n%%EOF\n".utf8).write(to: source)
+        let hung = directory.appending(path: "hung")
+        let configuration = try makeHelper(script: """
+            while IFS= read -r line; do
+              id=$(printf '%s' "$line" | /usr/bin/sed -E 's/.*"requestId":"([^"]+)".*/\\1/')
+              if [ ! -f '\(hung.path)' ]; then
+                : > '\(hung.path)'
+                /bin/sleep 30
+              fi
+              printf '{"protocolVersion":2,"requestId":"%s","type":"validation.completed","emittedAt":"2026-10-01T10:00:00Z","fileId":"tree","payload":{}}\\n' "$id"
+              printf '{"protocolVersion":2,"requestId":"%s","type":"request.completed","emittedAt":"2026-10-01T10:00:00Z","payload":{}}\\n' "$id"
+            done
+            """)
+        let engine = AutogramCLIEngine(configuration: configuration)
+        let provider = EngineBridgeSigningProvider(engine: engine, validationTimeout: .seconds(1))
+
+        let first = await provider.validateSignatureTree(in: source)
+        XCTAssertEqual(first, .failed("Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."))
+
+        let started = ContinuousClock.now
+        let second = await provider.validateSignatureTree(in: source)
+
+        XCTAssertEqual(second, .tree(SignatureTree(signatures: [], documents: [])))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(10))
+        await engine.cancel()
+    }
+
     // MARK: - Helpers
 
     private static func validate(_ requestID: String) -> MachineV2Request {

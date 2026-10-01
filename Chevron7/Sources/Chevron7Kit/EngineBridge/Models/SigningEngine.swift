@@ -11,6 +11,9 @@ protocol SigningEngine: Sendable {
     func inspect(files: [PDFItemDescriptor]) async throws -> [PDFInspection]
     func previewEmbeddedDocument(sourceURL: URL, named: String) async throws -> EmbeddedDocumentPreview
     func validate(files: [PDFItemDescriptor]) async throws -> [PDFInspection]
+    /// Gives up on a validation that timed out: ends whatever still runs it, so the next
+    /// validation does not queue behind the hung request.
+    func stopValidation() async
     func sign(request: EngineSigningRequest) -> AsyncThrowingStream<SigningEvent, Error>
     func cancel() async
 }
@@ -23,4 +26,6 @@ extension SigningEngine {
     func validate(files: [PDFItemDescriptor]) async throws -> [PDFInspection] {
         throw SigningFailure.engine("This signing engine does not support complete validation.")
     }
+
+    func stopValidation() async {}
 }

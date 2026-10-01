@@ -62,11 +62,16 @@ enum SignatureTreePresentation {
     /// What a DSS SignatureQualification means to the signer. Nil before full validation
     /// (structural results carry none); anything but a qualified signature or seal is shown
     /// as not qualified, so a valid advanced signature never reads as a KEP.
+    /// Label for a DSS `SignatureQualification` name. DSS reached no negative conclusion for
+    /// the INDETERMINATE_* and UNKNOWN* values (typically revocation or trust data was
+    /// unavailable), so only the ADES*, NOT_ADES* and NA family counts as unqualified.
     static func qualificationLabel(_ qualification: String?) -> String? {
         switch qualification {
         case nil: nil
         case "QESIG": "KEP"
         case "QESEAL": "Kvalifikovaná pečať"
+        case let name? where name.contains("INDETERMINATE") || name.contains("UNKNOWN"):
+            "Kvalifikácia neurčená"
         default: "Nekvalifikovaný"
         }
     }
