@@ -199,6 +199,13 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         })]
     }
 
+    /// The helper keeps running a validation the app gave up on and answers the session's
+    /// requests one after another, so the timed-out helper is ended and the next validation
+    /// starts a fresh one. Other validations still waiting on it fail as cancelled.
+    func stopValidation() async {
+        await validationSession.stop()
+    }
+
     func sign(request: EngineSigningRequest) -> AsyncThrowingStream<SigningEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {

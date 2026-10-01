@@ -87,5 +87,18 @@ final class SignatureTreePresentationTests: XCTestCase {
         XCTAssertEqual(SignatureTreePresentation.qualificationLabel("ADESIG_QC"), "Nekvalifikovaný")
         XCTAssertEqual(SignatureTreePresentation.qualificationLabel("ADESIG"), "Nekvalifikovaný")
         XCTAssertEqual(SignatureTreePresentation.qualificationLabel("NA"), "Nekvalifikovaný")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("ADESEAL_QC"), "Nekvalifikovaný")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("NOT_ADES"), "Nekvalifikovaný")
+        XCTAssertEqual(SignatureTreePresentation.qualificationLabel("NOT_ADES_QC_QSCD"), "Nekvalifikovaný")
+    }
+
+    /// DSS reached no negative conclusion for these (typically revocation or trust data was
+    /// unavailable), so the signature must not be called unqualified.
+    func testUndeterminedQualificationIsNotCalledUnqualified() {
+        for name in ["INDETERMINATE_QESIG", "INDETERMINATE_QESEAL", "INDETERMINATE_ADESIG_QC",
+                     "INDETERMINATE_UNKNOWN_QC_QSCD", "INDETERMINATE_ADESIG", "UNKNOWN_QC",
+                     "UNKNOWN_QC_QSCD", "UNKNOWN"] {
+            XCTAssertEqual(SignatureTreePresentation.qualificationLabel(name), "Kvalifikácia neurčená", name)
+        }
     }
 }
