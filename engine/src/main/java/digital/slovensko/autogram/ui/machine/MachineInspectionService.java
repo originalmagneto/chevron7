@@ -167,6 +167,41 @@ public final class MachineInspectionService {
         }
     }
 
+    /// True when the content is an ASiC container with at least one signature and every
+    /// signature covers a data object byte-identical to the document. Bytes decide, never
+    /// names: a signed PDF wrapped into a new container keeps its own signatures only when
+    /// the container carries it unchanged.
+    static boolean signaturesCoverDocument(byte[] container, byte[] document) {
+        try {
+            var validator = documentValidator(new InMemoryDocument(container));
+            if (!isAsic(validator)) {
+                return false;
+            }
+            var signatures = validator.getSignatures();
+            if (signatures.isEmpty()) {
+                return false;
+            }
+            for (var signature : signatures) {
+                var covered = validator.getOriginalDocuments(signature.getId()).stream()
+                        .anyMatch(original -> java.util.Arrays.equals(readOriginalBytes(original), document));
+                if (!covered) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static byte[] readOriginalBytes(DSSDocument document) {
+        try (var stream = document.openStream()) {
+            return stream.readAllBytes();
+        } catch (IOException exception) {
+            throw new java.io.UncheckedIOException(exception);
+        }
+    }
+
     static int readStructuralSignatureCount(Path path) {
         return documentValidator(new FileDocument(path.toFile())).getSignatures().size();
     }

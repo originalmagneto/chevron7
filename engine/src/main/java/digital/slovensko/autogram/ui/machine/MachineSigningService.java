@@ -182,8 +182,11 @@ public final class MachineSigningService {
             }
             progress(requestId, file, "validating");
             var signedContent = prepared.readSignedContent();
-            var validationFailure = outputValidationFailure(signedContent, previousSignatureIds,
-                    prepared.hasVisibleAppearance(), requestedLevel);
+            var validationFailure = wrapsSignedSource(prepared, previousSignatureIds, signedContent)
+                    ? wrappedSourceValidationFailure(signedContent, prepared.sourceContent(),
+                            prepared.hasVisibleAppearance(), requestedLevel)
+                    : outputValidationFailure(signedContent, previousSignatureIds,
+                            prepared.hasVisibleAppearance(), requestedLevel);
             if (validationFailure != null) {
                 throw new MachineProtocolException(validationFailure);
             }
@@ -240,6 +243,24 @@ public final class MachineSigningService {
             boolean visibleAppearance, String requestedLevel) {
         try {
             return outputValidator.validationFailure(content, previousSignatureIds, visibleAppearance, requestedLevel);
+        } catch (Throwable exception) {
+            throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
+        }
+    }
+
+    /// A signed source that is not a container (a PDF with PAdES signatures) wrapped into a
+    /// new ASiC container. The container lists only its own signatures, never those inside
+    /// its data objects, so the source's signatures cannot be found among them; they
+    /// survive only if the container carries the source unchanged.
+    private static boolean wrapsSignedSource(PreparedFile prepared, Set<String> previousSignatureIds,
+            byte[] signedContent) {
+        return !previousSignatureIds.isEmpty() && !isZip(prepared.sourceContent()) && isZip(signedContent);
+    }
+
+    private String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
+            String requestedLevel) {
+        try {
+            return outputValidator.wrappedSourceValidationFailure(content, source, visibleAppearance, requestedLevel);
         } catch (Throwable exception) {
             throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
         }
@@ -596,6 +617,13 @@ public final class MachineSigningService {
         default String validationFailure(byte[] content, Set<String> previousSignatureIds,
                 boolean visibleAppearance, String requestedLevel) throws Exception {
             return validationFailure(content, previousSignatureIds, visibleAppearance);
+        }
+
+        /// A signed source wrapped into a new container must come back byte-identical as the
+        /// container's signed data object. A validator that cannot prove that refuses.
+        default String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
+                String requestedLevel) throws Exception {
+            return "OUTPUT_VALIDATION_FAILED";
         }
     }
 
@@ -1009,6 +1037,25 @@ public final class MachineSigningService {
             }
             return !visibleAppearance || hasQualifiedTimestamp(added.getFirst())
                     ? null : "TIMESTAMP_QUALIFICATION_FAILED";
+        }
+
+        /**
+         * The container holds no signature of its own before this one, so exactly one new
+         * signature is required as for any fresh container (Baseline B or qualified Baseline T
+         * as requested), and that signature must cover the source byte-identical, which keeps
+         * the source's own signatures intact.
+         */
+        @Override
+        public String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
+                String requestedLevel) {
+            if (visibleAppearance || !isAsic("output.asice", content)) {
+                return "OUTPUT_VALIDATION_FAILED";
+            }
+            var failure = validationFailure(content, Set.of(), false, requestedLevel);
+            if (failure != null) {
+                return failure;
+            }
+            return MachineInspectionService.signaturesCoverDocument(content, source) ? null : "OUTPUT_VALIDATION_FAILED";
         }
 
         @Override

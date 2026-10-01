@@ -534,6 +534,36 @@ class MachineSigningServiceTest {
                 validator.validationFailure(asice, java.util.Set.of(), false, "XAdES_BASELINE_T"));
     }
 
+    /// The qualified Baseline T route around a signed PDF: one new qualified signature in
+    /// the container, which must carry the source unchanged. A second container signature
+    /// or another document is refused.
+    @Test
+    void wrappedSignedSourceKeepsTheQualifiedBaselineTChecks() throws Exception {
+        var container = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_pdf_xades.asice").getFile()));
+        var unsigned = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.pdf").getFile()));
+        var signed = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()));
+        var one = qualifiedReport("new");
+        when(one.getSignatureFormat("new")).thenReturn(SignatureLevel.XAdES_BASELINE_T);
+        var two = qualifiedReport("other", "new");
+        var validator = new MachineSigningService.PdfOutputValidator(MachineInspectionService.forTrustedValidation(
+                ignored -> one));
+        var twoSignatures = new MachineSigningService.PdfOutputValidator(MachineInspectionService.forTrustedValidation(
+                ignored -> two));
+
+        assertEquals(null, validator.wrappedSourceValidationFailure(container, unsigned, false, "XAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.wrappedSourceValidationFailure(container, signed, false, "XAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.wrappedSourceValidationFailure(container, unsigned, true, "XAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                twoSignatures.wrappedSourceValidationFailure(container, unsigned, false, "XAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.wrappedSourceValidationFailure(signed, signed, false, "XAdES_BASELINE_T"));
+    }
+
     @Test
     void portalBaselineBOutputStillRejectsABrokenSignature() {
         var report = mock(SimpleReport.class);
@@ -1693,6 +1723,101 @@ class MachineSigningServiceTest {
         assertTrue(names.contains("obrazok.png"), names.toString());
         assertTrue(names.stream().noneMatch(name -> name.endsWith(".asice")), names.toString());
         assertTrue(referencesFile(Objects.requireNonNull(signature), "obrazok.png"), signature);
+    }
+
+    /// A PDF that already carries a PAdES signature, wrapped into a new ASiC-E: the
+    /// container lists only its own signature, so the PDF's signatures survive as the
+    /// unchanged signed data object instead of as container signatures.
+    @Test
+    void signsAndPublishesAnAlreadySignedPdfIntoANewContainerThroughTheService() throws Exception {
+        var writer = new RecordingWriter();
+        var source = Files.copy(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()),
+                temporaryDirectory.resolve("dokument.pdf")).toRealPath();
+        var sourceBytes = Files.readAllBytes(source);
+        var target = target("dokument.asice");
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(input.sourceContent(), input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "XAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", source.toString(), target.toString()))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes(), writer.serialized());
+        byte[] embedded = null;
+        String signature = null;
+        try (var zip = new ZipInputStream(Files.newInputStream(target))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                var content = zip.readAllBytes();
+                if (entry.getName().equals("dokument.pdf")) embedded = content;
+                if (entry.getName().startsWith("META-INF/signatures")) {
+                    signature = new String(content, java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        }
+        assertArrayEquals(sourceBytes, embedded);
+        assertTrue(referencesFile(Objects.requireNonNull(signature), "dokument.pdf"), signature);
+    }
+
+    /// The relaxed previous-signature check never lets a container around another document
+    /// through: the signed source must be the signed data object, byte for byte.
+    @Test
+    void refusesANewContainerThatDoesNotCarryTheSignedSourceUnchanged() throws Exception {
+        var writer = new RecordingWriter();
+        var source = Files.copy(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()),
+                temporaryDirectory.resolve("dokument.pdf")).toRealPath();
+        var other = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.pdf").getFile()));
+        var target = target("dokument.asice");
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(other, input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "XAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", source.toString(), target.toString()))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.failed", "session.completed"),
+                writer.lifecycleEventTypes());
+        assertEquals("OUTPUT_VALIDATION_FAILED", writer.payloadCode(2));
+        assertFalse(Files.exists(target));
+    }
+
+    /// A wrapped signed PDF must come back byte-identical inside the container; a
+    /// container around any other document cannot stand in for it.
+    @Test
+    void wrappedSignedSourceMustBeTheContainersSignedDataObject() throws Exception {
+        var container = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_pdf_xades.asice").getFile()));
+        var unsigned = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.pdf").getFile()));
+        var signed = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()));
+
+        assertTrue(MachineInspectionService.signaturesCoverDocument(container, unsigned));
+        assertFalse(MachineInspectionService.signaturesCoverDocument(container, signed));
+        assertFalse(MachineInspectionService.signaturesCoverDocument(signed, signed));
     }
 
     private static final class RecordingWriter {
