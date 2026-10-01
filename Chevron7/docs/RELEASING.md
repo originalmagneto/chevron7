@@ -60,7 +60,13 @@ When Apple refuses a submission, `notarize-release.sh` prints the notary log, wh
 
 An Admin can create the API key without the Account Holder: App Store Connect, Users and Access, Integrations, App Store Connect API, Team Keys, access "Developer". Apple offers the `.p8` for download only once. The workflow imports the identity into a temporary keychain and deletes it, the `.p12` and the `.p8` at the end of the job.
 
+## Download link and version
+
+- Every release also uploads the DMG as `Chevron7.dmg`, so https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg always serves the newest release. The website and the README link there.
+- The version comes from the Conventional Commits since the last tag (`scripts/next-version.sh`). A `Release-As: X.Y.Z` footer in any of those commits sets it outright, for a milestone the rules would not reach from 0.x (1.0.0). A hand-written `docs/releases/vX.Y.Z.md` replaces the generated notes.
+
 ## Effects of the Developer ID signature
 
-- `Install Safari Bridge.command` (`scripts/install-webbridge-agent.sh`) leaves a Developer ID signed app untouched. It clears extended attributes and signs ad hoc again only for ad hoc builds, where Safari otherwise hid the extension.
+- The Safari bridge agent (`chevron7-webbridge-agent`, which owns the Mach service `app.slovensko.chevron7.webbridge`) is registered by the app itself: `build_app.sh` puts `Contents/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist` (`BundleProgram`, `MachServices`) into the bundle and `WebBridgeAgentService` calls `SMAppService.agent(plistName:).register()` on a regular launch of a Developer ID build. The DMG ships no script: a `.command` cannot be notarized and Gatekeeper refuses it. A plist the old installer left in `~/Library/LaunchAgents` (label ours, program `.../Contents/Helpers/chevron7-webbridge-agent`) is booted out and moved to the Trash first. A launch for a portal request (`--web-signing`) never touches the registration, because the agent is waiting for that app. Settings show the state in "Podpisovanie z prehliadača".
+- Ad hoc builds cannot use `SMAppService`; `scripts/install-webbridge-agent.sh` stays for them and for development.
 - The app's designated requirement changes from the ad hoc hash to the team. Keychain items saved by an ad hoc build (the EZZK SOAP password, the eIdentita portal key) ask once for access on the first run of the signed build; "Always Allow" settles it.

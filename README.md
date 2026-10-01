@@ -426,7 +426,7 @@ Rozšírenie do Safari podpisuje priamo na slovensko.sk, financnasprava.sk, sluz
 <tr><td>Časová pečiatka</td><td>Portály pýtajú úroveň Baseline B, teda bez pečiatky, a aplikácia im pošle presne to. Na slovensko.sk sa prepínač pečiatky neponúka vôbec, lebo nove.slovensko.sk podpis s nevyžiadanou pečiatkou odmietne (overené porovnaním s oficiálnym Autogramom). Na ostatných weboch prepínač úroveň povýši na Baseline T a pri každej požiadavke začína vypnutý. Autogram v mobile ponúkne pri Baseline B vlastnoručný podpis, pri Baseline T osvedčený.</td></tr>
 <tr><td>Ukladanie</td><td>Podpis z prehliadača sa vracia stránke. Kópiu si aplikácia predvolene odkladá do vlastného priečinka, ktorý sa dá zmeniť alebo ukladanie vypnúť; v nastaveniach sa dá zapnúť presun kópií do Koša po 7, 30 alebo 90 dňoch.</td></tr>
 <tr><td>Návrat k pôvodnému</td><td>Prepínač v rozšírení vráti konkrétnu stránku jej pôvodnému podpisovaču, napríklad D.Bridge 2, bez vypínania celého rozšírenia. Rozšírenie potom stránku obnoví, lebo voľba musí padnúť skôr, než sa načíta podpisovač stránky.</td></tr>
-<tr><td>Hranice</td><td>Rozšírenie nie je podpísané Developer ID, takže Safari ho načíta len pri zapnutom <strong>Develop &gt; Allow Unsigned Extensions</strong>, a to po každom štarte. Po reinštalácii aplikácie treba Safari ukončiť (⌘Q) a otvoriť znova. Podporované sú formuláre XAdES s XML Data Containerom, PDF a od tohto vydania aj plain text a obrázky PNG (kartou ako XAdES v ASiC-E; mobilom zatiaľ nie, relay text a obrázky neprešiel overením). Portálové integrácie mimo slovensko.sk a finančnej správy sa ešte overujú.</td></tr>
+<tr><td>Hranice</td><td>Aplikácia aj rozšírenie sú podpísané Developer ID a notarizované, takže Safari rozšírenie načíta bez <strong>Develop &gt; Allow Unsigned Extensions</strong>. Prepojenie so Safari (launchd agent) si aplikácia zaregistruje sama pri prvom spustení; jeho stav ukazujú Nastavenia v karte Podpisovanie z prehliadača. Po reinštalácii aplikácie treba Safari ukončiť (⌘Q) a otvoriť znova. Podporované sú formuláre XAdES s XML Data Containerom, PDF a od tohto vydania aj plain text a obrázky PNG (kartou ako XAdES v ASiC-E; mobilom zatiaľ nie, relay text a obrázky neprešiel overením). Portálové integrácie mimo slovensko.sk a finančnej správy sa ešte overujú.</td></tr>
 </table>
 
 <details>
@@ -512,25 +512,18 @@ Podpis bez Safari sa dá vyskúšať priamo:
 
 ### Stiahnutie
 
-Aktuálny macOS build je v [GitHub Releases](https://github.com/originalmagneto/chevron7/releases/latest) ako DMG. Vydania vznikajú automaticky: každý push do `main` s commitom `feat`, `fix` alebo `perf` zostaví a zverejní novú verziu (podrobnosti v sekcii Vydania).
+Najnovšia verzia: **[Chevron7.dmg](https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg)** (odkaz vždy vedie na posledné vydanie). Všetky vydania sú v [GitHub Releases](https://github.com/originalmagneto/chevron7/releases). Vydania vznikajú automaticky: každý push do `main` s commitom `feat`, `fix` alebo `perf` zostaví, podpíše Developer ID, notarizuje a zverejní novú verziu (podrobnosti v sekcii Vydania).
 
 <details open>
-<summary><strong>Prvé spustenie (aplikácia nie je notarizovaná)</strong></summary>
-
-<p>Build je podpísaný lokálne, nie Apple Developer ID, takže Gatekeeper ho pri prvom spustení zastaví. Toto je štandardný postup, žiadne nastavenia sa nemenia natrvalo:</p>
+<summary><strong>Inštalácia</strong></summary>
 
 <ol>
 <li>Otvorte DMG a presuňte <code>Chevron7.app</code> do priečinka <strong>Applications</strong>.</li>
-<li>Spustite aplikáciu. macOS ohlási, že ju nemôže overiť, a ponúkne len "Presunúť do koša" alebo "Hotovo". Zvoľte <strong>Hotovo</strong>.</li>
-<li>Otvorte <strong>Systémové nastavenia ▸ Súkromie a bezpečnosť</strong>, zrolujte nadol k hláseniu o aplikácii Chevron7 a kliknite na <strong>Aj tak otvoriť</strong>. Potvrďte heslom alebo Touch ID.</li>
-<li>Od tejto chvíle sa aplikácia spúšťa normálne.</li>
+<li>Spustite aplikáciu. macOS sa raz opýta, či chcete otvoriť aplikáciu stiahnutú z internetu, a uvedie, že ju Apple skontroloval. Zvoľte <strong>Otvoriť</strong>.</li>
+<li>Pri prvom spustení si aplikácia zaregistruje prepojenie so Safari; macOS to oznámi ako pridanú položku na pozadí. Potom v Safari zapnite rozšírenie <strong>Chevron7</strong> v <strong>Settings &gt; Extensions</strong>.</li>
 </ol>
 
-<p>Alternatíva z Terminálu, ktorá zruší karanténny príznak stiahnutého súboru:</p>
-
-```bash
-xattr -d com.apple.quarantine "/Applications/Chevron7.app"
-```
+<p>Od v0.22.2 je každé vydanie podpísané Developer ID tímu the Software s.r.o. (Q7AU96CW7H) a notarizované Apple. Staršie vydania boli podpísané ad hoc a pri prvom spustení ich bolo treba povoliť v <strong>Systémové nastavenia ▸ Súkromie a bezpečnosť ▸ Aj tak otvoriť</strong>.</p>
 
 <p>Overenie stiahnutého DMG: v poznámkach k vydaniu je SHA-256 odtlačok; porovnajte ho s výstupom <code>shasum -a 256 &lt;stiahnutý súbor&gt;.dmg</code>. Vydania do v0.4.0 vrátane vyšli ešte pod názvom Autogram macOS.</p>
 </details>
@@ -817,10 +810,9 @@ Aplikácia je open source a zostane zadarmo. Dobrovoľný príspevok cez
 členstvo v Apple Developer Program. V aplikácii je rovnaké žlté tlačidlo dole v
 bočnom paneli a odkaz **Podporiť vývoj…** aj v ponuke **Pomoc**.
 
-Bez neho sa buildy podpisujú ad-hoc, a Safari načíta rozšírenie len pri zapnutom
-**Develop > Allow Unsigned Extensions**, ktoré si navyše nepamätá po reštarte.
-S ním je aplikácia podpísaná Developer ID a notarizovaná, takže rozšírenie sa
-načíta bez tohto kroku a inštalácia nevyžaduje obchádzanie Gatekeepera.
+Vďaka nemu je aplikácia od v0.22.2 podpísaná Developer ID a notarizovaná, takže
+rozšírenie sa v Safari načíta bez **Develop > Allow Unsigned Extensions** a
+inštalácia nevyžaduje obchádzanie Gatekeepera.
 
 ## Právne a bezpečnostné upozornenie
 
