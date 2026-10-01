@@ -27,6 +27,9 @@ import java.util.List;
 import java.util.Map;
 
 public final class MachineInspectionService {
+    static final long DEFAULT_NESTED_SIZE_LIMIT = 100L * 1024 * 1024;
+    private long nestedSizeLimit = DEFAULT_NESTED_SIZE_LIMIT;
+
     private final ReportReader reportReader;
     private final ByteReportReader byteReportReader;
     private final TimestampQualificationEvaluator timestampQualificationEvaluator;
@@ -73,15 +76,93 @@ public final class MachineInspectionService {
         this.validatorReportReader = validatorReportReader;
     }
 
+    /// Test hook: a smaller limit for the TOO_LARGE case without a 100 MB fixture.
+    MachineInspectionService withNestedSizeLimit(long bytes) {
+        nestedSizeLimit = bytes;
+        return this;
+    }
+
     public JsonObject inspect(Path path) {
         if (genericPathInspection) {
-            if (validatorReportReader == null) {
-                return inspectStructurally(new FileDocument(path.toFile()));
-            }
-            var trusted = mapAsicInspection(readTrustedInspection(path));
-            return mergeStructuralIntegrityIfAvailable(trusted, new FileDocument(path.toFile()));
+            return inspectTree(new FileDocument(path.toFile()), 0);
         }
         return mapReport(reportReader.read(path));
+    }
+
+    /// One level of the signature tree: this document's own signatures and, for an ASiC
+    /// container, its data objects. Data objects of the top document (depth 0) that are a
+    /// PDF or an ASiC are inspected the same way; deeper ones are only marked.
+    private JsonObject inspectTree(DSSDocument document, int depth) {
+        var validator = documentValidator(document);
+        JsonObject payload;
+        if (validatorReportReader == null) {
+            payload = inspectStructurally(document, validator);
+        } else {
+            var trusted = mapAsicInspection(readTrustedInspection(document, validator));
+            payload = mergeStructuralIntegrityIfAvailable(trusted, document);
+        }
+        if (isAsic(validator) && payload.has("documents")) {
+            addNestedContent(payload.getAsJsonArray("documents"), extractedDocuments(document, validator), depth);
+        }
+        return payload;
+    }
+
+    private void addNestedContent(com.google.gson.JsonArray entries, List<DSSDocument> extracted, int depth) {
+        var byName = new LinkedHashMap<String, DSSDocument>();
+        for (var candidate : extracted) {
+            if (candidate.getName() != null) {
+                byName.putIfAbsent(candidate.getName(), candidate);
+            }
+        }
+        for (var element : entries) {
+            var entry = element.getAsJsonObject();
+            var source = byName.get(entry.get("name").getAsString());
+            if (source == null) {
+                continue;
+            }
+            try {
+                var bytes = readOriginalBytes(source);
+                var pdf = isPdf(bytes);
+                if (!pdf && !isZip(bytes)) {
+                    continue;
+                }
+                if (bytes.length > nestedSizeLimit) {
+                    entry.addProperty("nestedSkipped", "TOO_LARGE");
+                    continue;
+                }
+                var kind = pdf ? "PDF" : (isAsicContent(bytes, source.getName()) ? "ASIC" : null);
+                if (kind == null) {
+                    continue;
+                }
+                if (depth >= 1) {
+                    entry.addProperty("nestedSkipped", "DEPTH_LIMIT");
+                    continue;
+                }
+                var nested = inspectTree(new InMemoryDocument(bytes, source.getName()), depth + 1);
+                nested.addProperty("kind", kind);
+                entry.add("nested", nested);
+            } catch (RuntimeException exception) {
+                entry.addProperty("nestedError", "NESTED_INSPECTION_FAILED");
+            }
+        }
+    }
+
+    private static boolean isPdf(byte[] bytes) {
+        return bytes.length >= 5 && bytes[0] == '%' && bytes[1] == 'P' && bytes[2] == 'D' && bytes[3] == 'F'
+                && bytes[4] == '-';
+    }
+
+    private static boolean isZip(byte[] bytes) {
+        return bytes.length >= 4 && bytes[0] == 'P' && bytes[1] == 'K' && bytes[2] == 3 && bytes[3] == 4;
+    }
+
+    private static boolean isAsicContent(byte[] bytes, String name) {
+        try {
+            var validator = DSSUtils.createDocumentValidator(new InMemoryDocument(bytes, name));
+            return validator != null && isAsic(validator);
+        } catch (RuntimeException exception) {
+            return false;
+        }
     }
 
     public JsonObject inspect(byte[] content) {
@@ -210,14 +291,11 @@ public final class MachineInspectionService {
         return SignatureValidator.getInstance().validate(validator).getSimpleReport();
     }
 
-    private AsicInspection readTrustedInspection(Path path) {
-        DSSDocument document = new FileDocument(path.toFile());
-        var validator = documentValidator(document);
+    private AsicInspection readTrustedInspection(DSSDocument document, SignedDocumentValidator validator) {
         var report = validatorReportReader.read(validator);
         if (!isAsic(validator)) {
             return new AsicInspection(report, null, Map.of());
         }
-
         var documents = asicDocuments(document, validator);
         var coverage = new LinkedHashMap<String, List<String>>();
         for (var signatureId : report.getSignatureIdList()) {
@@ -227,15 +305,27 @@ public final class MachineInspectionService {
     }
 
     private JsonObject inspectStructurally(DSSDocument document) {
-        var validator = documentValidator(document);
-        var signatures = validator.getSignatures().stream().map(MachineInspectionService::readStructuralSignature).toList();
+        return inspectStructurally(document, documentValidator(document));
+    }
+
+    private JsonObject inspectStructurally(DSSDocument document, SignedDocumentValidator validator) {
+        var asic = isAsic(validator);
         var payload = new JsonObject();
         var signaturePayloads = new com.google.gson.JsonArray();
-        for (var signature : signatures) {
-            signaturePayloads.add(mapStructuralSignature(signature));
+        for (var signature : validator.getSignatures()) {
+            var mapped = mapStructuralSignature(readStructuralSignature(signature));
+            if (asic) {
+                var covered = documentNames(validator.getOriginalDocuments(signature.getId()));
+                if (!covered.isEmpty()) {
+                    var names = new com.google.gson.JsonArray();
+                    covered.forEach(names::add);
+                    mapped.add("documents", names);
+                }
+            }
+            signaturePayloads.add(mapped);
         }
         payload.add("signatures", signaturePayloads);
-        if (isAsic(validator)) {
+        if (asic) {
             var documents = new com.google.gson.JsonArray();
             for (var name : asicDocuments(document, validator)) {
                 var item = new JsonObject();
