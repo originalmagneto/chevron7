@@ -1,6 +1,6 @@
 # Signature tree: container signatures and signatures inside embedded documents
 
-Date: 2026-10-01. Status: design approved in conversation by the owner on 2026-10-01; written spec awaiting review.
+Date: 2026-10-01. Status: approved by the owner on 2026-10-01. Revision 2 (while planning): `inspect(byte[])` stays flat; validation does not need cancelling when signing starts.
 Builds on: PR originalmagneto/chevron7#30 (a signed PDF wrapped into a new ASiC-E keeps its PAdES signatures inside the unchanged data object).
 
 ## Goal
@@ -45,7 +45,7 @@ Success means:
 
 ### 1. Engine: the tree
 
-`MachineInspectionService` gets one internal entry point, `inspectDocument(DSSDocument document, int depth)`, used by both modes (structural and trusted) and by `inspect(Path)` and `inspect(byte[])`. It returns the payload below. The mode decides only how a signature is mapped (`mapStructuralSignature` or `mapSignature`); the tree walk is shared.
+`MachineInspectionService` gets one internal entry point, `inspectTree(DSSDocument document, int depth)`, used by both modes (structural and trusted) through `inspect(Path)`, which is what INSPECT and VALIDATE call. `inspect(byte[])` keeps today's flat payload: it serves signing output validation, which must not pay for nested validation. It returns the payload below. The mode decides only how a signature is mapped (`mapStructuralSignature` or `mapSignature`); the tree walk is shared.
 
 ```json
 {
@@ -100,7 +100,7 @@ The machine protocol shape is additive: v1 INSPECT and v2 VALIDATE return the sa
 - Opening or selecting a source, and finishing a signature, run INSPECT, publish `structural`, then run VALIDATE and publish `validated` or `validationUnavailable`.
 - Each run carries a token; a result whose token no longer matches the current document (another document selected, document reset) is dropped.
 - "Overiť znova" reruns VALIDATE for the current tree and returns to `structural` meanwhile.
-- When signing starts, a running validation is cancelled so the signature does not wait for trusted list loading; the output is validated after signing.
+- Validation never blocks signing: VALIDATE runs in the persistent v2 session process (`MachineSessionProcess`, no token permit), while signing runs as a v1 process under `helperOperationGate`. The store starts validation as a background task, so `sign()` completes after the structural inspection of the output, not after its full validation.
 - The trusted tree replaces the structural one as a whole; signatures are matched by (path, id) only to keep the expansion state of the UI.
 
 ### 4. UI (`SignatureTreeView`)
@@ -153,7 +153,7 @@ Swift (`Chevron7KitTests`, `Chevron7AppTests`):
 - decoding a full tree payload (trusted and structural) into `SignatureTree`, the first test that decodes signature JSON end to end;
 - `SignatureTreeSummary` worst-of, with failed and skipped nodes as indeterminate;
 - `hasQualifiedTimestamp` only from `qualifiedTimestampValid`, `hasTimestamp` from intact timestamps;
-- store phases with a fake provider: structural then validated; validation unavailable keeps the structural tree; a stale result for a previous document is dropped; "Overiť znova" reruns; signing cancels a running validation; a failed inspection never reads as "no signature";
+- store phases with a fake provider: structural then validated; validation unavailable keeps the structural tree; a stale result for a previous document is dropped; "Overiť znova" reruns; a failed inspection never reads as "no signature";
 - `LiveEngineInspectionTests` (`CHEVRON7_ENGINE_LIVE_TEST=1`): the real engine on a container around a signed PDF.
 
 Manual: `report_podpisane_podpisane.asice` in the app, online and offline.
