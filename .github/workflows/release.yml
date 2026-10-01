@@ -150,6 +150,18 @@ jobs:
           codesign --force --timestamp --sign "$CODE_SIGN_IDENTITY" "$dmg"
           Chevron7/scripts/notarize-release.sh "$dmg"
 
+      - name: Generate the Sparkle appcast
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_ED_KEY" ]]; then
+            echo "::warning::No SPARKLE_PRIVATE_ED_KEY: this release has no appcast, installed apps will not be offered it."
+            exit 0
+          fi
+          Chevron7/scripts/generate-appcast.sh "$VERSION" "$RUNNER_TEMP/dist"
+
       # The same DMG under a fixed name, so that
       # https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg
       # always downloads the newest release (the website links to it).
@@ -169,13 +181,16 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           Chevron7/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes.md"
+          appcast=()
+          [[ -f "$RUNNER_TEMP/dist/appcast.xml" ]] && appcast=("$RUNNER_TEMP/dist/appcast.xml")
           gh release create "native-v$VERSION" \
             --target "$GITHUB_SHA" \
             --title "Chevron7 v$VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "$RUNNER_TEMP/dist/Chevron7-v$VERSION.dmg" \
             "$RUNNER_TEMP/dist/Chevron7.dmg" \
-            "$RUNNER_TEMP/dist/SHA256SUMS.txt"
+            "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
+            "${appcast[@]}"
 
       - name: Remove the signing material
         if: always()

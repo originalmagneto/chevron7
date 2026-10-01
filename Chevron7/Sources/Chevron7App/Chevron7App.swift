@@ -15,6 +15,7 @@ final class Chevron7AppModel {
     let signedDocumentStore: SignedDocumentStore
     let webSigning: WebSigningCoordinator
     let cardReader: CardReaderStatus
+    let updater: AppUpdater
 
     init() {
         let settings = AppSettingsStore()
@@ -34,6 +35,7 @@ final class Chevron7AppModel {
         cardReader = CardReaderStatus { [settings] in
             await settings.signingProvider.availableIdentities()
         }
+        updater = AppUpdater()
         let signing = signingStore
         let zako = zakoStore
         let browserSigning = webSigning
@@ -53,9 +55,17 @@ final class Chevron7AppModel {
         // Chevron7 runs (ruling R13); a web-signing launch starts the check only once the
         // app becomes regular. The process ending stops it.
         let checker = settings.statusChecker
+        // Sparkle follows the same rule: a portal request must not raise an
+        // update prompt, so a web-signing launch starts it only once the app
+        // becomes regular.
+        let appUpdater = updater
         checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: false)
+        if AppLaunchMode.current != .webSigning {
+            appUpdater.startIfNeeded()
+        }
         AppDelegate.onBecomeRegular = {
             checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: true)
+            appUpdater.startIfNeeded()
         }
 
         // Browser requests reach the app through the Safari extension and the
@@ -107,7 +117,7 @@ struct Chevron7App: App {
         // Window restoration would reopen the last main window despite the suppression.
         .restorationBehavior(AppLaunchMode.current == .webSigning ? .disabled : .automatic)
         .commands {
-            Chevron7Commands()
+            Chevron7Commands(updater: model.updater)
         }
 
         // A regular window instead of the Settings scene: the Settings scene sizes
@@ -128,6 +138,7 @@ struct Chevron7App: App {
 
 private struct Chevron7Commands: Commands {
     @FocusedValue(\.chevron7CommandActions) private var actions
+    let updater: AppUpdater
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -178,6 +189,13 @@ private struct Chevron7Commands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
             .disabled(actions == nil)
+        }
+
+        CommandGroup(after: .appInfo) {
+            Button("Skontrolovať aktualizácie…") {
+                updater.checkForUpdates()
+            }
+            .disabled(!updater.isConfigured)
         }
 
         CommandGroup(replacing: .appSettings) {
