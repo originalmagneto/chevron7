@@ -24,3 +24,24 @@ struct SignatureTreeState: Equatable {
 
     var isValidating: Bool { phase == .structural }
 }
+
+extension SignatureTree {
+    /// The tree as structural knowledge only, for when a validation that confirmed it can no
+    /// longer be relied on: every signature at every level becomes indeterminate and keeps no
+    /// qualification nor qualified timestamp, which only full validation can confirm.
+    func withoutValidationVerdicts() -> SignatureTree {
+        SignatureTree(
+            signatures: signatures.map { signature in
+                var signature = signature
+                signature.state = .indeterminate
+                signature.hasQualifiedTimestamp = false
+                signature.certificateQualification = nil
+                return signature
+            },
+            documents: documents.map { document in
+                guard case .signed(let kind, let nested) = document.content else { return document }
+                return SignedDataObject(name: document.name,
+                                        content: .signed(kind, nested.withoutValidationVerdicts()))
+            })
+    }
+}

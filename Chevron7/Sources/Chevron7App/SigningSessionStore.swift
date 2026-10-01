@@ -308,13 +308,13 @@ final class SigningSessionStore {
         // its own inspection (which issues the next token) comes after analysis and card refresh.
         existingTreeRun = UUID()
         existingSignatureState = SignatureTreeState()
-        existingValidationTask = nil
+        setValidationTask(nil, result: false)
         lastError = item.errorMessage
         signedOutputURL = item.signedOutputURL
         signedPreviewDocument = item.signedOutputURL.flatMap { previewDocument(for: $0) }
         resultTreeRun = UUID()
         resultSignatureState = SignatureTreeState()
-        resultValidationTask = nil
+        setValidationTask(nil, result: true)
         let secured = item.url.startAccessingSecurityScopedResource()
         defer { if secured { item.url.stopAccessingSecurityScopedResource() } }
         guard let document = previewDocument(for: item.url) else {
@@ -363,7 +363,7 @@ final class SigningSessionStore {
             sourceURL = nil
             existingTreeRun = UUID()
             existingSignatureState = SignatureTreeState()
-            existingValidationTask = nil
+            setValidationTask(nil, result: false)
             if queue.isEmpty {
                 step = .intake
             }
@@ -374,6 +374,7 @@ final class SigningSessionStore {
         guard let sourceURL else {
             existingTreeRun = UUID()
             existingSignatureState = SignatureTreeState()
+            setValidationTask(nil, result: false)
             return
         }
         await runSignatureTree(for: sourceURL, result: false)
@@ -403,11 +404,18 @@ final class SigningSessionStore {
             setTreeState(SignatureTreeState(tree: SignatureTree(), phase: .failed(reason)), result: result)
             setValidationTask(nil, result: result)
         case .tree(let tree):
+            let summary = SignatureTreeSummary(tree: tree)
+            guard summary.total > 0 || summary.unverifiedDocuments > 0 else {
+                // No signatures and nothing unverified: there is nothing to validate.
+                setTreeState(SignatureTreeState(tree: tree, phase: .validated), result: result)
+                setValidationTask(nil, result: result)
+                return
+            }
             setTreeState(SignatureTreeState(tree: tree, phase: .structural), result: result)
             let task = Task<Void, Never> { [weak self] in
-            guard let self else { return }
-            await self.validate(url: url, run: run, result: result)
-        }
+                guard let self else { return }
+                await self.validate(url: url, run: run, result: result, keptTreeWasValidated: false)
+            }
             setValidationTask(task, result: result)
         }
     }
@@ -416,17 +424,20 @@ final class SigningSessionStore {
         let run = UUID()
         setTreeRun(run, result: result)
         var state = treeState(result: result)
+        let wasValidated = state.phase == .validated
         state.phase = .structural
         setTreeState(state, result: result)
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            await self.validate(url: url, run: run, result: result)
+            await self.validate(url: url, run: run, result: result, keptTreeWasValidated: wasValidated)
         }
         setValidationTask(task, result: result)
         await task.value
     }
 
-    private func validate(url: URL, run: UUID, result: Bool) async {
+    /// `keptTreeWasValidated`: the tree shown while this runs came from an earlier validation,
+    /// so a failure must not leave its verdicts (green) under "the result is only structural".
+    private func validate(url: URL, run: UUID, result: Bool, keptTreeWasValidated: Bool) async {
         let validated = await signingProvider.validateSignatureTree(in: url)
         guard treeRun(result: result) == run else { return }
         switch validated {
@@ -434,6 +445,9 @@ final class SigningSessionStore {
             setTreeState(SignatureTreeState(tree: tree, phase: .validated), result: result)
         case .failed(let reason):
             var state = treeState(result: result)
+            if keptTreeWasValidated {
+                state.tree = state.tree.withoutValidationVerdicts()
+            }
             state.phase = .validationUnavailable(reason)
             setTreeState(state, result: result)
         }
@@ -449,7 +463,10 @@ final class SigningSessionStore {
     private func setTreeState(_ state: SignatureTreeState, result: Bool) {
         if result { resultSignatureState = state } else { existingSignatureState = state }
     }
+    /// Cancels the validation being replaced, which also ends its engine request.
     private func setValidationTask(_ task: Task<Void, Never>?, result: Bool) {
+        let replaced = result ? resultValidationTask : existingValidationTask
+        if replaced != task { replaced?.cancel() }
         if result { resultValidationTask = task } else { existingValidationTask = task }
     }
 
@@ -458,8 +475,8 @@ final class SigningSessionStore {
         resultTreeRun = UUID()
         existingSignatureState = SignatureTreeState()
         resultSignatureState = SignatureTreeState()
-        existingValidationTask = nil
-        resultValidationTask = nil
+        setValidationTask(nil, result: false)
+        setValidationTask(nil, result: true)
     }
 
     private var isRefreshingIdentities = false

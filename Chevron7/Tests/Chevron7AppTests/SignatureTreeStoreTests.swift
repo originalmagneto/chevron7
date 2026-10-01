@@ -165,6 +165,107 @@ final class SignatureTreeStoreTests: XCTestCase {
         XCTAssertEqual(provider.validateCalls, 2)
         XCTAssertEqual(store.existingSignatureState.phase, .validated)
     }
+
+    /// Nothing to validate: the trusted lists are never consulted for an unsigned document.
+    func testEmptyStructuralTreeIsNeverValidated() async throws {
+        let provider = TreeProvider(inspect: .tree(SignatureTree()), validate: .tree(Self.validated))
+        let store = makeStore(provider)
+        store.sourceURL = try file()
+
+        await store.inspectExistingSignatures()
+
+        XCTAssertEqual(provider.validateCalls, 0)
+        XCTAssertNil(store.existingValidationTask)
+        XCTAssertEqual(store.existingSignatureState, SignatureTreeState(tree: SignatureTree(), phase: .validated))
+    }
+
+    /// A data object that could not be verified still deserves a validation run.
+    func testUnverifiedDocumentStillValidates() async throws {
+        let unverified = SignatureTree(documents: [SignedDataObject(name: "deep.asice", content: .skipped(.depthLimit))])
+        let provider = TreeProvider(inspect: .tree(unverified), validate: .tree(unverified))
+        let store = makeStore(provider)
+        store.sourceURL = try file()
+
+        await store.inspectExistingSignatures()
+        await provider.releaseValidation()
+        await store.existingValidationTask?.value
+
+        XCTAssertEqual(provider.validateCalls, 1)
+        XCTAssertEqual(store.existingSignatureState.phase, .validated)
+    }
+
+    /// A new run cancels the validation it replaces, so the engine request behind it ends.
+    func testANewRunCancelsTheValidationItReplaces() async throws {
+        let provider = TreeProvider(inspect: .tree(Self.structural), validate: .tree(Self.validated))
+        let store = makeStore(provider)
+        store.sourceURL = try file()
+        await store.inspectExistingSignatures()
+        let replaced = try XCTUnwrap(store.existingValidationTask)
+
+        await store.inspectExistingSignatures()
+        let current = try XCTUnwrap(store.existingValidationTask)
+
+        XCTAssertTrue(replaced.isCancelled)
+        XCTAssertFalse(current.isCancelled)
+        store.reset()
+        XCTAssertTrue(current.isCancelled)
+        await provider.releaseValidation()
+        await replaced.value
+        await current.value
+    }
+
+    /// Green must never show under a failed validation: a tree kept from an earlier validated
+    /// result is downgraded at every level when revalidation fails.
+    func testFailedRevalidationDowngradesTheEarlierValidatedTree() async throws {
+        let nested = SignatureTree(
+            signatures: [DocumentSignatureInfo(id: "S-top", signerDisplayName: "Top", hasQualifiedTimestamp: true,
+                                               state: .valid, certificateQualification: "QESIG")],
+            documents: [SignedDataObject(name: "report.pdf", content: .signed(.pdf, SignatureTree(signatures: [
+                DocumentSignatureInfo(id: "S-inner", signerDisplayName: "Inner", state: .valid,
+                                      certificateQualification: "QESIG"),
+                DocumentSignatureInfo(id: "S-bad", signerDisplayName: "Bad", state: .invalid)
+            ])))])
+        let provider = TreeProvider(inspect: .tree(Self.structural), validate: .tree(nested))
+        let store = makeStore(provider)
+        store.sourceURL = try file()
+        await store.inspectExistingSignatures()
+        await provider.releaseValidation()
+        await store.existingValidationTask?.value
+        XCTAssertEqual(store.existingSignatureState.phase, .validated)
+
+        provider.validateResult = .failed("offline")
+        await store.revalidateExistingSignatures()
+
+        let state = store.existingSignatureState
+        XCTAssertEqual(state.phase, .validationUnavailable("offline"))
+        let top = try XCTUnwrap(state.tree.signatures.first)
+        XCTAssertEqual(top.state, .indeterminate)
+        XCTAssertFalse(top.hasQualifiedTimestamp)
+        XCTAssertTrue(top.hasTimestamp)
+        XCTAssertNil(top.certificateQualification)
+        guard case .signed(.pdf, let inner)? = state.tree.documents.first?.content else {
+            return XCTFail("The nested document must be kept.")
+        }
+        XCTAssertEqual(inner.signatures.map(\.state), [.indeterminate, .indeterminate])
+        XCTAssertEqual(inner.signatures.map(\.certificateQualification), [nil, nil])
+        XCTAssertNotEqual(SignatureTreeSummary(tree: state.tree).overall, .valid)
+    }
+
+    /// A structural tree under a failed first validation stays as the engine reported it.
+    func testFailedFirstValidationKeepsTheStructuralStates() async throws {
+        let structural = SignatureTree(signatures: [
+            DocumentSignatureInfo(id: "S-1", signerDisplayName: "A", state: .unknown)])
+        let provider = TreeProvider(inspect: .tree(structural), validate: .failed("offline"))
+        let store = makeStore(provider)
+        store.sourceURL = try file()
+
+        await store.inspectExistingSignatures()
+        await provider.releaseValidation()
+        await store.existingValidationTask?.value
+
+        XCTAssertEqual(store.existingSignatureState.phase, .validationUnavailable("offline"))
+        XCTAssertEqual(store.existingSignatureState.tree, structural)
+    }
 }
 
 /// Validation waits until the test releases it, so phases can be observed in order.
