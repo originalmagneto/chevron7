@@ -46,6 +46,20 @@ Missing library validation entitlements do not fail notarization; they fail at r
 
 When Apple refuses a submission, `notarize-release.sh` prints the notary log, which names every rejected file and the reason.
 
+## Releases from GitHub Actions
+
+`.github/workflows/release.yml` signs and notarizes the app and the DMG when all five Actions secrets below are set, signs ad hoc with a warning when none is set, and fails when only some are set:
+
+| Secret | Content |
+|---|---|
+| `DEVELOPER_ID_APPLICATION_P12` | base64 of the `.p12` with the Developer ID Application certificate and its private key (`base64 -i developer-id.p12 \| pbcopy`) |
+| `DEVELOPER_ID_APPLICATION_P12_PASSWORD` | the `.p12` password |
+| `APPLE_API_KEY_P8` | base64 of an App Store Connect API key (`AuthKey_XXXX.p8`) |
+| `APPLE_API_KEY_ID` | that key's ID |
+| `APPLE_API_ISSUER_ID` | the team's issuer ID |
+
+An Admin can create the API key without the Account Holder: App Store Connect, Users and Access, Integrations, App Store Connect API, Team Keys, access "Developer". Apple offers the `.p8` for download only once. The workflow imports the identity into a temporary keychain and deletes it, the `.p12` and the `.p8` at the end of the job.
+
 ## Effects of the Developer ID signature
 
 - `Install Safari Bridge.command` (`scripts/install-webbridge-agent.sh`) leaves a Developer ID signed app untouched. It clears extended attributes and signs ad hoc again only for ad hoc builds, where Safari otherwise hid the extension.
