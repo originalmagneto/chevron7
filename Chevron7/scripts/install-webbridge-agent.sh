@@ -41,15 +41,22 @@ launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "✔ Agent zaregistrovaný: $LABEL"
 launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n '1,6p' || true
 
-# A DMG downloaded in a browser carries quarantine (and provenance) flags on
-# every file inside. Stripping just the quarantine was not enough: Safari kept
-# logging "Computing the code signing dictionary failed" for the appex and hid
-# its row until the flags were cleared everywhere and the appex was signed
-# again locally. Approving the app in Gatekeeper does not clean the appex.
-xattr -cr "$APP" 2>/dev/null || true
+# A release signed with Developer ID and notarized is left exactly as shipped:
+# clearing its flags or signing it again would throw the notarization away.
+TEAM_ID="$(codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+DEVELOPER_ID=false
+[[ -n "$TEAM_ID" && "$TEAM_ID" != "not set" ]] && DEVELOPER_ID=true
 
 APPEX="$APP/Contents/PlugIns/Chevron7WebExtension.appex"
-if [[ -d "$APPEX" ]]; then
+if [[ -d "$APPEX" && "$DEVELOPER_ID" == false ]]; then
+    # An ad hoc build from a DMG downloaded in a browser carries quarantine (and
+    # provenance) flags on every file inside. Stripping just the quarantine was
+    # not enough: Safari kept logging "Computing the code signing dictionary
+    # failed" for the appex and hid its row until the flags were cleared
+    # everywhere and the appex was signed again locally. Approving the app in
+    # Gatekeeper does not clean the appex.
+    xattr -cr "$APP" 2>/dev/null || true
+
     # The appex must keep its sandbox + Mach lookup exception: a bare
     # `codesign --sign -` would drop them and break the native bridge.
     APPEX_ENTITLEMENTS="$(mktemp -t chevron7-appex-entitlements).plist"
@@ -77,6 +84,9 @@ ENTPLIST
         echo "CHYBA: aplikáciu sa nepodarilo znova podpísať, registrácia sa preskakuje." >&2
         exit 1
     fi
+fi
+
+if [[ -d "$APPEX" ]]; then
     if ! codesign --verify --deep --strict "$APP"; then
         echo "CHYBA: podpis aplikácie neprešiel kontrolou, registrácia sa preskakuje." >&2
         exit 1
@@ -89,4 +99,8 @@ ENTPLIST
     pluginkit -a "$APPEX" >/dev/null 2>&1 || true
 fi
 
-echo "Safari: ukoncite ho (Cmd+Q), otvorte znova, zapnite Develop > Allow Unsigned Extensions a skontrolujte Settings > Extensions."
+if [[ "$DEVELOPER_ID" == true ]]; then
+    echo "Safari: ukoncite ho (Cmd+Q), otvorte znova a zapnite Chevron7 v Settings > Extensions."
+else
+    echo "Safari: ukoncite ho (Cmd+Q), otvorte znova, zapnite Develop > Allow Unsigned Extensions a skontrolujte Settings > Extensions."
+fi
