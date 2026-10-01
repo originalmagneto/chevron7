@@ -23,6 +23,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     // substitute a fake engine that captures the `EngineSigningRequest`.
     private let engine: any SigningEngine
     private let renderer: VisibleSignatureRenderer
+    /// Upper bound for full signature validation (trusted lists can hang on a bad network).
+    private let validationTimeout: Duration
     private let cachedCertificates = OSAllocatedUnfairLock<[SigningCertificate]>(initialState: [])
     /// Driver the cached certificates were read from, so signing can reuse them
     /// instead of asking the eID client for the BOK a second time.
@@ -35,9 +37,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     private let logger = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "EngineBridge")
 
     init(engine: any SigningEngine = AutogramCLIEngine(),
-         renderer: VisibleSignatureRenderer = VisibleSignatureRenderer()) {
+         renderer: VisibleSignatureRenderer = VisibleSignatureRenderer(),
+         validationTimeout: Duration = .seconds(90)) {
         self.engine = engine
         self.renderer = renderer
+        self.validationTimeout = validationTimeout
     }
 
     // MARK: - QualifiedSigningProviding
@@ -186,7 +190,9 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
-        await signatureTree(in: fileURL) { [engine] files in try await engine.validate(files: files) }
+        await signatureTree(in: fileURL) { [engine, validationTimeout] files in
+            try await Self.withTimeLimit(validationTimeout) { try await engine.validate(files: files) }
+        }
     }
 
     private func signatureTree(
@@ -207,6 +213,24 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         } catch {
             logger.info("Signature tree failed: \(error.localizedDescription, privacy: .public)")
             return .failed(Self.treeFailureReason(error))
+        }
+    }
+
+    /// Races `operation` against `limit`. The loser is cancelled, so a hung engine request
+    /// is cancelled too (the machine session cancels a request on task cancellation).
+    private static func withTimeLimit<T: Sendable>(
+        _ limit: Duration,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: limit)
+                throw CLIProcessFailure.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CLIProcessFailure.timedOut }
+            return first
         }
     }
 

@@ -49,6 +49,19 @@ final class SignatureTreeProviderTests: XCTestCase {
         XCTAssertEqual(validated, .failed("Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."))
     }
 
+    func testHungValidationTimesOut() async throws {
+        executionTimeAllowance = 30
+        let engine = TreeEngine(inspectTree: tree, validateHangs: true)
+        let provider = EngineBridgeSigningProvider(engine: engine, validationTimeout: .milliseconds(300))
+        let url = try sourceFile()
+
+        let started = ContinuousClock.now
+        let validated = await provider.validateSignatureTree(in: url)
+
+        XCTAssertEqual(validated, .failed("Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(10))
+    }
+
     func testMissingFileFails() async {
         let provider = EngineBridgeSigningProvider(engine: TreeEngine(inspectTree: tree))
         let missing = URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString).pdf")
@@ -69,8 +82,11 @@ private final class TreeEngine: SigningEngine, @unchecked Sendable {
     let inspectTree: SignatureTree
     let validateTree: SignatureTree?
     let validateError: Error?
+    let validateHangs: Bool
 
-    init(inspectTree: SignatureTree, validateTree: SignatureTree? = nil, validateError: Error? = nil) {
+    init(inspectTree: SignatureTree, validateTree: SignatureTree? = nil, validateError: Error? = nil,
+         validateHangs: Bool = false) {
+        self.validateHangs = validateHangs
         self.inspectTree = inspectTree
         self.validateTree = validateTree
         self.validateError = validateError
@@ -86,6 +102,7 @@ private final class TreeEngine: SigningEngine, @unchecked Sendable {
         [PDFInspection(files: files.map { InspectedPDF(id: $0.id, isSignable: true, tree: inspectTree) })]
     }
     func validate(files: [PDFItemDescriptor]) async throws -> [PDFInspection] {
+        if validateHangs { try await Task.sleep(for: .seconds(3600)) }
         if let validateError { throw validateError }
         return [PDFInspection(files: files.map { InspectedPDF(id: $0.id, isSignable: true, tree: validateTree!) })]
     }
