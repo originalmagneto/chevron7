@@ -130,7 +130,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 id: file.id,
                 isSignable: true,
                 signatures: signatures(in: event.payload["signatures"]),
-                documents: documents(in: event.payload["documents"])
+                documents: documents(in: event.payload["documents"]),
+                tree: SignatureTreeDecoder.tree(from: event.payload)
             )
         })]
     }
@@ -186,7 +187,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 id: file.id,
                 isSignable: true,
                 signatures: signatures(in: event.payload["signatures"]),
-                documents: documents(in: event.payload["documents"])
+                documents: documents(in: event.payload["documents"]),
+                tree: SignatureTreeDecoder.tree(from: event.payload)
             )
         })]
     }
@@ -662,10 +664,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 validationState: validationState,
                 signingTime: date(in: signature["signingTime"]),
                 format: string(in: signature["format"]),
-                hasQualifiedTimestamp: bool(in: signature["qualifiedTimestampValid"]) == true
-                    || (array(in: signature["timestamps"]) ?? []).contains {
-                        bool(in: $0["cryptographicIntegrity"]) == true
-                    },
+                hasQualifiedTimestamp: bool(in: signature["qualifiedTimestampValid"]) == true,
                 subIndication: string(in: signature["subIndication"]),
                 validationReason: string(in: signature["validationReason"]),
                 documents: strings(in: signature["documents"])

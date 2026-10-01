@@ -181,6 +181,46 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return (await inspectInputSignatures(in: [canonical])[canonical])?.signatures ?? []
     }
 
+    public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        await signatureTree(in: fileURL) { [engine] files in try await engine.inspect(files: files) }
+    }
+
+    public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        await signatureTree(in: fileURL) { [engine] files in try await engine.validate(files: files) }
+    }
+
+    private func signatureTree(
+        in fileURL: URL,
+        run: @Sendable ([PDFItemDescriptor]) async throws -> [PDFInspection]
+    ) async -> SignatureTreeResult {
+        let canonical = EnginePaths.canonical(fileURL)
+        guard FileManager.default.fileExists(atPath: canonical.path) else {
+            return .failed("Dokument nie je dostupný.")
+        }
+        do {
+            let inspections = try await run([PDFItemDescriptor(id: "tree", sourceURL: canonical)])
+            guard let inspected = inspections.flatMap(\.files).first(where: { $0.id == "tree" }),
+                  inspected.isSignable else {
+                return .failed("Engine nevrátil výsledok kontroly podpisov.")
+            }
+            return .tree(inspected.tree)
+        } catch {
+            logger.info("Signature tree failed: \(error.localizedDescription, privacy: .public)")
+            return .failed(Self.treeFailureReason(error))
+        }
+    }
+
+    static func treeFailureReason(_ error: Error) -> String {
+        let text = "\(error) \(error.localizedDescription)"
+        if text.contains("TRUSTED_LIST_UNAVAILABLE") {
+            return "Dôveryhodné zoznamy nie sú dostupné. Výsledok je len štrukturálny."
+        }
+        if text.contains("VALIDATION_FAILED") {
+            return "Overenie podpisov zlyhalo. Výsledok je len štrukturálny."
+        }
+        return error.localizedDescription
+    }
+
     static func requireInspectableFile(in inspections: [PDFInspection]) throws -> InspectedPDF {
         guard let inspected = inspections
             .flatMap(\.files)

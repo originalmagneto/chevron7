@@ -29,12 +29,16 @@ struct InspectedPDF: Sendable, Equatable, Identifiable {
     let isSignable: Bool
     let signatures: [ExistingPDFSignature]
     let documents: [String]
+    /// The whole signature tree, including signatures inside embedded documents.
+    let tree: SignatureTree
 
-    init(id: String, isSignable: Bool, signatures: [ExistingPDFSignature] = [], documents: [String] = []) {
+    init(id: String, isSignable: Bool, signatures: [ExistingPDFSignature] = [], documents: [String] = [],
+         tree: SignatureTree = SignatureTree()) {
         self.id = id
         self.isSignable = isSignable
         self.signatures = signatures
         self.documents = documents
+        self.tree = tree
     }
 }
 

@@ -342,6 +342,10 @@ public protocol QualifiedSigningProviding: Sendable {
     func inspectSignatures(in fileURL: URL) async -> [DocumentSignatureInfo]
     func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult
     func inspectInputSignatures(in fileURLs: [URL]) async -> [URL: InputSignatureInspectionResult]
+    /// Structural signature tree of the file: fast, no trusted lists.
+    func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult
+    /// The same tree validated against the EU trusted lists (informative validation).
+    func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult
     /// Whether `sign` adds a signature to an ASiC-E handed over as the source (named by
     /// `SigningRequest.filename`) instead of wrapping that container in a new one.
     var addsSignatureToExistingContainer: Bool { get }
@@ -351,6 +355,18 @@ extension QualifiedSigningProviding {
     public func inspectSignatures(in fileURL: URL) async -> [DocumentSignatureInfo] { [] }
 
     public var addsSignatureToExistingContainer: Bool { false }
+
+    public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        let result = await inspectInputSignatures(in: fileURL)
+        if result.state == .unavailable {
+            return .failed(result.detail)
+        }
+        return .tree(SignatureTree(signatures: result.signatures))
+    }
+
+    public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        .failed("Plné overenie vyžaduje podpisový engine.")
+    }
 
     public func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult {
         InputSignatureVerificationService.structuralInspection(at: fileURL)
