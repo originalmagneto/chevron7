@@ -39,6 +39,26 @@ enum SignatureTreePresentation {
         }
     }
 
+    /// Whether a data object's group should open by itself: it holds a signature that is not
+    /// valid, or it could not be verified at all.
+    static func needsAttention(_ content: SignedDataObject.Content) -> Bool {
+        switch content {
+        case .signed(_, let tree): SignatureTreeSummary(tree: tree).overall != .valid
+        case .skipped, .failed: true
+        case .plain: false
+        }
+    }
+
+    /// Whether any entry directly inside a nested container was skipped or failed.
+    static func hasUnverifiedEntries(_ tree: SignatureTree) -> Bool {
+        tree.documents.contains { document in
+            switch document.content {
+            case .skipped, .failed: true
+            case .signed, .plain: false
+            }
+        }
+    }
+
     static func tint(_ state: DocumentSignatureInfo.State) -> Color {
         switch state {
         case .valid: .green
@@ -163,13 +183,7 @@ private struct DataObjectGroup: View {
 
     init(document: SignedDataObject) {
         self.document = document
-        let needsAttention: Bool
-        switch document.content {
-        case .signed(_, let tree): needsAttention = SignatureTreeSummary(tree: tree).overall != .valid
-        case .skipped, .failed: needsAttention = true
-        case .plain: needsAttention = false
-        }
-        _isExpanded = State(initialValue: needsAttention)
+        _isExpanded = State(initialValue: SignatureTreePresentation.needsAttention(document.content))
     }
 
     var body: some View {
@@ -181,8 +195,8 @@ private struct DataObjectGroup: View {
                     if tree.isContainer {
                         let names = tree.documents.map(\.name).joined(separator: ", ")
                         Text("Obsahuje: " + names).font(.caption2).foregroundStyle(.secondary)
-                        if tree.documents.contains(where: { if case .skipped(.depthLimit) = $0.content { true } else { false } }) {
-                            Text("Podpisy v ďalšom vnorení sa neoverovali.")
+                        if SignatureTreePresentation.hasUnverifiedEntries(tree) {
+                            Text("Niektoré súbory vo vnútri sa neoverovali.")
                                 .font(.caption2).foregroundStyle(.orange)
                         }
                     }
@@ -207,6 +221,11 @@ private struct DataObjectGroup: View {
                 .truncationMode(.middle)
         }
         .font(.caption)
+        // Full validation can turn a group the user never opened into one that needs attention.
+        // Open it then, and never close one the user opened.
+        .onChange(of: SignatureTreePresentation.needsAttention(document.content)) { _, needs in
+            if needs { isExpanded = true }
+        }
     }
 
     private var label: String {

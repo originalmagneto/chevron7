@@ -46,4 +46,37 @@ final class SignatureTreePresentationTests: XCTestCase {
     func testFailedPhaseText() {
         XCTAssertEqual(SignatureTreePresentation.phaseText(.failed("x")), "Podpisy sa nepodarilo skontrolovať")
     }
+
+    func testNeedsAttentionForSignedTrees() {
+        let invalid = SignedDataObject.Content.signed(.pdf, SignatureTree(signatures: [signature(.invalid)]))
+        let valid = SignedDataObject.Content.signed(.pdf, SignatureTree(signatures: [signature(.valid)]))
+        XCTAssertTrue(SignatureTreePresentation.needsAttention(invalid))
+        XCTAssertFalse(SignatureTreePresentation.needsAttention(valid))
+    }
+
+    func testNeedsAttentionForUnverifiedAndPlainContent() {
+        XCTAssertTrue(SignatureTreePresentation.needsAttention(.skipped(.depthLimit)))
+        XCTAssertTrue(SignatureTreePresentation.needsAttention(.skipped(.tooLarge)))
+        XCTAssertTrue(SignatureTreePresentation.needsAttention(.failed))
+        XCTAssertFalse(SignatureTreePresentation.needsAttention(.plain))
+    }
+
+    func testNeedsAttentionForNestedContainerWithUnverifiedEntry() {
+        let inner = SignatureTree(signatures: [signature(.valid)], documents: [
+            SignedDataObject(name: "big.pdf", content: .skipped(.tooLarge))
+        ])
+        XCTAssertTrue(SignatureTreePresentation.needsAttention(.signed(.asic, inner)))
+    }
+
+    func testHasUnverifiedEntries() {
+        let mixed = SignatureTree(signatures: [signature(.valid)], documents: [
+            SignedDataObject(name: "a.xml", content: .plain),
+            SignedDataObject(name: "b.pdf", content: .failed)
+        ])
+        let clean = SignatureTree(signatures: [signature(.valid)], documents: [
+            SignedDataObject(name: "a.xml", content: .plain)
+        ])
+        XCTAssertTrue(SignatureTreePresentation.hasUnverifiedEntries(mixed))
+        XCTAssertFalse(SignatureTreePresentation.hasUnverifiedEntries(clean))
+    }
 }
