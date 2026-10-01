@@ -327,25 +327,9 @@ APPEXPLIST
         sed -i '' -E "s/(\"version\": \")[^\"]+/\1$VERSION/" "$APPEX/Contents/Resources/manifest.json"
     fi
 
-    APPEX_ENTITLEMENTS="$(mktemp -t chevron7-appex-entitlements).plist"
-    cat > "$APPEX_ENTITLEMENTS" <<'ENTPLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
-    <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
-    <array>
-        <string>app.slovensko.chevron7.webbridge</string>
-    </array>
-</dict>
-</plist>
-ENTPLIST
-
+    APPEX_ENTITLEMENTS="Config/Chevron7WebExtension.entitlements"
     codesign --force --sign - --entitlements "$APPEX_ENTITLEMENTS" "$APPEX" >/dev/null 2>&1 \
         || echo "  (upozornenie: appex sa nepodarilo podpísať)"
-    rm -f "$APPEX_ENTITLEMENTS"
     echo "▸ Safari rozšírenie: $APPEX"
 fi
 
