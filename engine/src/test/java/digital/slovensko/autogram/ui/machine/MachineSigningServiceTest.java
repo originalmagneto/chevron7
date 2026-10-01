@@ -1820,6 +1820,42 @@ class MachineSigningServiceTest {
         assertFalse(MachineInspectionService.signaturesCoverDocument(signed, signed));
     }
 
+    /// Being in the container is not enough: an entry the signature does not reference
+    /// is not covered, even when its bytes equal the source.
+    @Test
+    void anUnreferencedEntryWithTheSourceBytesIsNotCovered() throws Exception {
+        var container = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_pdf_xades.asice").getFile()));
+        var signed = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()));
+        var widened = new java.io.ByteArrayOutputStream();
+        try (var input = new ZipInputStream(new ByteArrayInputStream(container));
+                var output = new java.util.zip.ZipOutputStream(widened)) {
+            for (var entry = input.getNextEntry(); entry != null; entry = input.getNextEntry()) {
+                var content = input.readAllBytes();
+                var copy = new java.util.zip.ZipEntry(entry.getName());
+                if (entry.getName().equals("mimetype")) {
+                    var crc = new java.util.zip.CRC32();
+                    crc.update(content);
+                    copy.setMethod(java.util.zip.ZipEntry.STORED);
+                    copy.setSize(content.length);
+                    copy.setCrc(crc.getValue());
+                }
+                output.putNextEntry(copy);
+                output.write(content);
+                output.closeEntry();
+            }
+            output.putNextEntry(new java.util.zip.ZipEntry("extra.pdf"));
+            output.write(signed);
+            output.closeEntry();
+        }
+
+        var unsigned = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.pdf").getFile()));
+        assertTrue(MachineInspectionService.signaturesCoverDocument(widened.toByteArray(), unsigned));
+        assertFalse(MachineInspectionService.signaturesCoverDocument(widened.toByteArray(), signed));
+    }
+
     private static final class RecordingWriter {
         private final StringWriter output = new StringWriter();
 
