@@ -44,7 +44,8 @@ public struct OutputService {
 
     /// Reserves a unique sibling output using the supplied suffix.
     ///
-    /// The returned temporary file must be finalized with `finalize(_:)`.
+    /// The returned temporary file must be finalized with `finalize(_:)` or
+    /// removed with `discard(_:)`.
     /// Finalization uses an exclusive move, so an output created concurrently
     /// cannot be replaced. `stem` replaces the source's own name when given.
     public func reserveUniqueSibling(
@@ -114,6 +115,23 @@ public struct OutputService {
         guard moveWithoutReplacing(reservation.temporaryURL, to: reservation.finalURL) else {
             if pathExists(reservation.finalURL) { throw OutputServiceError.finalOutputAlreadyExists }
             throw OutputServiceError.unableToFinalize
+        }
+    }
+
+    /// Removes the temporary file of a reservation that will not be finalized.
+    ///
+    /// Every reservation must end in either `finalize(_:)` or this call, on
+    /// success, failure and cancellation alike, or a hidden `.<name>.<UUID>.XXXXXX`
+    /// file stays next to the user's document. Only the exact reserved temporary
+    /// URL is touched, and only while it is a regular file: a missing file (the
+    /// engine never wrote it) is fine, and anything else at that path, such as a
+    /// symbolic link, is not something this app created. The final URL is never
+    /// touched. Calling it twice is harmless.
+    public func discard(_ reservation: OutputReservation) {
+        var status = stat()
+        reservation.temporaryURL.withUnsafeFileSystemRepresentation { path in
+            guard let path, lstat(path, &status) == 0, (status.st_mode & S_IFMT) == S_IFREG else { return }
+            unlink(path)
         }
     }
 
