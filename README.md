@@ -296,6 +296,8 @@ Prenos na iný Mac: Nastavenia → Učenie → **Exportovať detektor…** ulož
 
 ## Zaručená konverzia
 
+**Rozsah:** Chevron7 robí zaručenú konverziu len z listinnej do elektronickej podoby (sken papierovej listiny na PDF/A s osvedčovacou doložkou). Konverziu elektronického dokumentu, napríklad do listinnej podoby, nepodporuje. Pri elektronickom origináli by podľa [§ 3 ods. 4 vyhlášky č. 70/2021 Z. z.](https://www.slov-lex.sk/ezbierky/pravne-predpisy/SK/ZZ/2021/70/) bolo treba jeho kvalifikované podpisy a pečate overiť kvalifikovanou službou validácie a jej výstup uchovať v zázname o konverzii. Overenie podpisov v aplikácii je informatívne (knižnica DSS a dôveryhodné zoznamy EÚ), nie kvalifikovaná služba validácie.
+
 ### Bezpečnostné prvky
 
 - Katalóg má 16 druhov. Rýchly výber obsahuje pečiatku, podpis, slepotlač, parafu, šnúrku a pásku/štítok; ďalšie možnosti sú zoskupené v menu.
