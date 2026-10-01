@@ -512,17 +512,12 @@ struct SigningPrepareView: View {
 
     private var existingSignaturesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if store.isInspectingSignatures {
-                ProgressView("Kontrolujem podpisy…")
-                    .font(.caption)
-            } else if store.existingSignatures.isEmpty {
-                Text("Dokument zatiaľ neobsahuje elektronický podpis. Podpísanie pridá prvý KEP podpis.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(store.existingSignatures) { signature in
-                    SignatureInfoRow(info: signature)
-                }
+            SignatureTreeView(
+                state: store.existingSignatureState,
+                emptyText: "Dokument zatiaľ neobsahuje elektronický podpis. Podpísanie pridá prvý KEP podpis.",
+                isBusy: store.isSigning,
+                onRevalidate: { Task { await store.revalidateExistingSignatures() } })
+            if !store.existingSignatures.isEmpty {
                 Text("Pridá sa ďalší podpis k existujúcim podpisom v dokumente.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -531,7 +526,8 @@ struct SigningPrepareView: View {
     }
 
     private var signatureSectionTitle: String {
-        "Podpisy v dokumente" + (store.existingSignatures.isEmpty ? "" : " · \(store.existingSignatures.count)")
+        let total = SignatureTreeSummary(tree: store.existingSignatureState.tree).total
+        return "Podpisy v dokumente" + (total == 0 ? "" : " · \(total)")
     }
 
     /// How the chosen format treats the signatures the document already has.
@@ -858,8 +854,13 @@ struct SignatureInfoRow: View {
                     if let format = info.format {
                         Text(format).font(.caption2.monospaced())
                     }
+                    if let qualification = SignatureTreePresentation.qualificationLabel(info.certificateQualification) {
+                        Text(qualification).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     if info.hasQualifiedTimestamp {
                         Text("QTS").font(.caption2.weight(.semibold)).foregroundStyle(.green)
+                    } else if info.hasTimestamp {
+                        Text("Časová pečiatka").font(.caption2).foregroundStyle(.secondary)
                     }
                     Text(stateLabel).font(.caption2).foregroundStyle(tint)
                 }
@@ -867,6 +868,13 @@ struct SignatureInfoRow: View {
                     Text(signingTime.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+                if !info.coveredDocuments.isEmpty {
+                    Text("Pokrýva: " + info.coveredDocuments.joined(separator: ", "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
                 }
                 if let detail = info.detail, !detail.isEmpty {
                     DisclosureGroup("Detail validácie") {
@@ -882,21 +890,9 @@ struct SignatureInfoRow: View {
         }
     }
 
-    private var icon: String {
-        switch info.state {
-        case .valid: "checkmark.seal.fill"
-        case .invalid: "xmark.seal.fill"
-        case .indeterminate, .unknown: "questionmark.seal.fill"
-        }
-    }
+    private var icon: String { SignatureTreePresentation.icon(info.state) }
 
-    private var tint: Color {
-        switch info.state {
-        case .valid: .green
-        case .invalid: .red
-        case .indeterminate, .unknown: .orange
-        }
-    }
+    private var tint: Color { SignatureTreePresentation.tint(info.state) }
 
     private var stateLabel: String {
         switch info.state {
@@ -1040,18 +1036,12 @@ struct SigningDoneView: View {
             }
 
             GroupBox("Overenie podpisov v súbore") {
-                VStack(alignment: .leading, spacing: 8) {
-                    if store.resultSignatures.isEmpty {
-                        Text("Podpísaný súbor je pripravený.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(store.resultSignatures) { signature in
-                            SignatureInfoRow(info: signature)
-                        }
-                    }
-                }
-                .padding(4)
+                SignatureTreeView(
+                    state: store.resultSignatureState,
+                    emptyText: "Podpísaný súbor je pripravený.",
+                    isBusy: store.isSigning,
+                    onRevalidate: { Task { await store.revalidateResultSignatures() } })
+                    .padding(4)
             }
             if let identity = store.identities.first(where: { $0.id == store.selectedIdentityID }) {
                 GroupBox("Použitý certifikát") {

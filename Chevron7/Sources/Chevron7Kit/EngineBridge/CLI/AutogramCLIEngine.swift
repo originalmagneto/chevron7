@@ -6,6 +6,9 @@ import Foundation
 final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     private let runner: CLIProcessRunner
     private let machineSession: MachineSessionProcess
+    /// VALIDATE only. The engine handles a session's requests one after another, so a slow
+    /// trusted-list validation on the signing session would hold up a v2 signature.
+    private let validationSession: MachineSessionProcess
     private let configuration: ProcessConfiguration
     private let driverResolver: DriverResolver
     private let outputService: OutputService
@@ -18,6 +21,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         configuration: ProcessConfiguration = .production,
         runner: CLIProcessRunner = .init(),
         machineSession: MachineSessionProcess = .init(),
+        validationSession: MachineSessionProcess = .init(),
         driverResolver: DriverResolver = .init(),
         outputService: OutputService = .init(),
         timestampSourceProvider: any TimestampSourceProviding = TimestampSourcePreferencesStore()
@@ -25,6 +29,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         self.configuration = configuration
         self.runner = runner
         self.machineSession = machineSession
+        self.validationSession = validationSession
         self.driverResolver = driverResolver
         self.outputService = outputService
         self.timestampSourceProvider = timestampSourceProvider
@@ -130,7 +135,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 id: file.id,
                 isSignable: true,
                 signatures: signatures(in: event.payload["signatures"]),
-                documents: documents(in: event.payload["documents"])
+                documents: documents(in: event.payload["documents"]),
+                tree: SignatureTreeDecoder.tree(from: event.payload)
             )
         })]
     }
@@ -175,7 +181,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         let request = MachineV2Request(protocolVersion: 2, requestID: requestID, operation: .validate, payload: [
             "files": .array(machineFiles)
         ])
-        let events = try await runV2(SecureMachineV2Request(envelope: request))
+        let events = try await validationSession.send(SecureMachineV2Request(envelope: request),
+                                                      configuration: configuration)
         return [PDFInspection(files: files.compactMap { file in
             guard let event = events.last(where: {
                 $0.type == .validationCompleted && $0.requestID == requestID && $0.fileID == file.id
@@ -186,7 +193,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 id: file.id,
                 isSignable: true,
                 signatures: signatures(in: event.payload["signatures"]),
-                documents: documents(in: event.payload["documents"])
+                documents: documents(in: event.payload["documents"]),
+                tree: SignatureTreeDecoder.tree(from: event.payload)
             )
         })]
     }
@@ -315,6 +323,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     func cancel() async {
         await runner.cancel()
         await machineSession.stop()
+        await validationSession.stop()
     }
 
     /// Machine protocol v2 signing. Carries the visible PAdES appearance and the
@@ -662,10 +671,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                 validationState: validationState,
                 signingTime: date(in: signature["signingTime"]),
                 format: string(in: signature["format"]),
-                hasQualifiedTimestamp: bool(in: signature["qualifiedTimestampValid"]) == true
-                    || (array(in: signature["timestamps"]) ?? []).contains {
-                        bool(in: $0["cryptographicIntegrity"]) == true
-                    },
+                hasQualifiedTimestamp: bool(in: signature["qualifiedTimestampValid"]) == true,
                 subIndication: string(in: signature["subIndication"]),
                 validationReason: string(in: signature["validationReason"]),
                 documents: strings(in: signature["documents"])

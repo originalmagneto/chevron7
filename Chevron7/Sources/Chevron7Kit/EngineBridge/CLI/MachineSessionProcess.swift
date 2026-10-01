@@ -29,6 +29,9 @@ actor MachineSessionProcess {
 
     private var activeProcess: ActiveProcess?
     private var pendingRequests: [String: PendingRequest] = [:]
+    /// Requests the app cancelled while the engine still runs them. Their late events are
+    /// dropped until the request's terminal event, instead of failing the whole session.
+    private var cancelledRequestIDs: Set<String> = []
     private var tokenOperationHeld = false
     private var tokenOperationWaiters: [CheckedContinuation<Void, Error>] = []
 
@@ -166,7 +169,14 @@ actor MachineSessionProcess {
     }
 
     private func route(_ event: MachineV2Event, processID: UUID) {
-        guard activeProcess?.id == processID, var pending = pendingRequests[event.requestID] else {
+        guard activeProcess?.id == processID else { return }
+        if cancelledRequestIDs.contains(event.requestID) {
+            if event.type.isTerminal {
+                cancelledRequestIDs.remove(event.requestID)
+            }
+            return
+        }
+        guard var pending = pendingRequests[event.requestID] else {
             failProcess(processID: processID, failure: .malformedOutput)
             return
         }
@@ -208,12 +218,16 @@ actor MachineSessionProcess {
 
     private func cancelRequest(id: String) {
         guard let pending = pendingRequests.removeValue(forKey: id) else { return }
+        cancelledRequestIDs.insert(id)
         pending.continuation.resume(throwing: MachineSessionProcessFailure.cancelled)
     }
 
+    /// Ends every request of the current helper process; a new process never emits events
+    /// for a request cancelled on the old one.
     private func finishPending(with failure: MachineSessionProcessFailure) {
         let pending = pendingRequests
         pendingRequests.removeAll()
+        cancelledRequestIDs.removeAll()
         for request in pending.values {
             request.continuation.resume(throwing: failure)
         }

@@ -23,6 +23,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     // substitute a fake engine that captures the `EngineSigningRequest`.
     private let engine: any SigningEngine
     private let renderer: VisibleSignatureRenderer
+    /// Upper bound for full signature validation (trusted lists can hang on a bad network).
+    private let validationTimeout: Duration
     private let cachedCertificates = OSAllocatedUnfairLock<[SigningCertificate]>(initialState: [])
     /// Driver the cached certificates were read from, so signing can reuse them
     /// instead of asking the eID client for the BOK a second time.
@@ -35,9 +37,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     private let logger = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "EngineBridge")
 
     init(engine: any SigningEngine = AutogramCLIEngine(),
-         renderer: VisibleSignatureRenderer = VisibleSignatureRenderer()) {
+         renderer: VisibleSignatureRenderer = VisibleSignatureRenderer(),
+         validationTimeout: Duration = .seconds(90)) {
         self.engine = engine
         self.renderer = renderer
+        self.validationTimeout = validationTimeout
     }
 
     // MARK: - QualifiedSigningProviding
@@ -179,6 +183,68 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     public func inspectSignatures(in fileURL: URL) async -> [DocumentSignatureInfo] {
         let canonical = EnginePaths.canonical(fileURL)
         return (await inspectInputSignatures(in: [canonical])[canonical])?.signatures ?? []
+    }
+
+    public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        await signatureTree(in: fileURL) { [engine] files in try await engine.inspect(files: files) }
+    }
+
+    public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
+        await signatureTree(in: fileURL) { [engine, validationTimeout] files in
+            try await Self.withTimeLimit(validationTimeout) { try await engine.validate(files: files) }
+        }
+    }
+
+    private func signatureTree(
+        in fileURL: URL,
+        run: @Sendable ([PDFItemDescriptor]) async throws -> [PDFInspection]
+    ) async -> SignatureTreeResult {
+        let canonical = EnginePaths.canonical(fileURL)
+        guard FileManager.default.fileExists(atPath: canonical.path) else {
+            return .failed("Dokument nie je dostupný.")
+        }
+        do {
+            let inspections = try await run([PDFItemDescriptor(id: "tree", sourceURL: canonical)])
+            guard let inspected = inspections.flatMap(\.files).first(where: { $0.id == "tree" }),
+                  inspected.isSignable else {
+                return .failed("Engine nevrátil výsledok kontroly podpisov.")
+            }
+            return .tree(inspected.tree)
+        } catch {
+            // The user sees a Slovak reason; the log keeps the error's type and code.
+            logger.info("Signature tree failed: \(String(describing: error), privacy: .public) (\(error.localizedDescription, privacy: .public))")
+            return .failed(Self.treeFailureReason(error))
+        }
+    }
+
+    /// Races `operation` against `limit`. The loser is cancelled, so a hung engine request
+    /// is cancelled too (the machine session cancels a request on task cancellation).
+    private static func withTimeLimit<T: Sendable>(
+        _ limit: Duration,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: limit)
+                throw CLIProcessFailure.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CLIProcessFailure.timedOut }
+            return first
+        }
+    }
+
+    static func treeFailureReason(_ error: Error) -> String {
+        if case CLIProcessFailure.timedOut = error {
+            return "Overenie podpisov trvalo príliš dlho. Výsledok je len štrukturálny."
+        }
+        let text = "\(error) \(error.localizedDescription)"
+        if text.contains("TRUSTED_LIST_UNAVAILABLE") {
+            return "Dôveryhodné zoznamy nie sú dostupné. Výsledok je len štrukturálny."
+        }
+        // Any other error (VALIDATION_FAILED, a helper that exited, ...) is never shown raw.
+        return "Overenie podpisov zlyhalo. Výsledok je len štrukturálny."
     }
 
     static func requireInspectableFile(in inspections: [PDFInspection]) throws -> InspectedPDF {

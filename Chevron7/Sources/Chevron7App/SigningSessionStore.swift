@@ -48,8 +48,16 @@ final class SigningSessionStore {
     var agpKeyStore: any AGPKeyStoring = AGPKeyStore()
     /// Which path the current `sign` run uses; drives the button labels.
     private(set) var isSigningViaMobile = false
-    var existingSignatures: [DocumentSignatureInfo] = []
-    var isInspectingSignatures = false
+    var existingSignatureState = SignatureTreeState()
+    var resultSignatureState = SignatureTreeState()
+    /// Top-level signatures, for callers that predate the tree.
+    var existingSignatures: [DocumentSignatureInfo] { existingSignatureState.tree.signatures }
+    var resultSignatures: [DocumentSignatureInfo] { resultSignatureState.tree.signatures }
+    var isInspectingSignatures: Bool { existingSignatureState.phase == .inspecting }
+    private(set) var existingValidationTask: Task<Void, Never>?
+    private(set) var resultValidationTask: Task<Void, Never>?
+    private var existingTreeRun = UUID()
+    private var resultTreeRun = UUID()
     /// Read from the loaded file's bytes, so it holds with every provider.
     private(set) var sourceSignatureKind: ExistingSignatureGuard.Source = .unsignedPDF
     /// A signed PDF or a container is signed as it is: no PDF/A and no stamp baked into it.
@@ -59,7 +67,6 @@ final class SigningSessionStore {
         preservesSourceBytes && outputFormat == .attachedASIC
     }
     var signedOutputURL: URL?
-    var resultSignatures: [DocumentSignatureInfo] = []
     var signedPreviewDocument: PDFDocument?
     var pdfaPrepared = false
     var pdfaAfterSign = false
@@ -297,10 +304,17 @@ final class SigningSessionStore {
     func selectQueueItem(_ id: UUID) async {
         guard let item = queue.first(where: { $0.id == id }) else { return }
         selectedQueueID = id
+        // The previous document's validation must not land while this one is being opened:
+        // its own inspection (which issues the next token) comes after analysis and card refresh.
+        existingTreeRun = UUID()
+        existingSignatureState = SignatureTreeState()
+        setValidationTask(nil, result: false)
         lastError = item.errorMessage
         signedOutputURL = item.signedOutputURL
         signedPreviewDocument = item.signedOutputURL.flatMap { previewDocument(for: $0) }
-        resultSignatures = []
+        resultTreeRun = UUID()
+        resultSignatureState = SignatureTreeState()
+        setValidationTask(nil, result: true)
         let secured = item.url.startAccessingSecurityScopedResource()
         defer { if secured { item.url.stopAccessingSecurityScopedResource() } }
         guard let document = previewDocument(for: item.url) else {
@@ -324,7 +338,7 @@ final class SigningSessionStore {
         if item.status == .signed, item.signedOutputURL != nil {
             step = .done
             if let signed = item.signedOutputURL {
-                resultSignatures = await signingProvider.inspectSignatures(in: signed)
+                await runSignatureTree(for: signed, result: true)
             }
             return
         }
@@ -347,6 +361,9 @@ final class SigningSessionStore {
             selectedQueueID = nil
             document = nil
             sourceURL = nil
+            existingTreeRun = UUID()
+            existingSignatureState = SignatureTreeState()
+            setValidationTask(nil, result: false)
             if queue.isEmpty {
                 step = .intake
             }
@@ -355,12 +372,111 @@ final class SigningSessionStore {
 
     func inspectExistingSignatures() async {
         guard let sourceURL else {
-            existingSignatures = []
+            existingTreeRun = UUID()
+            existingSignatureState = SignatureTreeState()
+            setValidationTask(nil, result: false)
             return
         }
-        isInspectingSignatures = true
-        existingSignatures = await signingProvider.inspectSignatures(in: sourceURL)
-        isInspectingSignatures = false
+        await runSignatureTree(for: sourceURL, result: false)
+    }
+
+    func revalidateExistingSignatures() async {
+        guard let sourceURL, existingSignatureState.phase != .inspecting else { return }
+        await revalidate(url: sourceURL, result: false)
+    }
+
+    func revalidateResultSignatures() async {
+        guard let signedOutputURL, resultSignatureState.phase != .inspecting else { return }
+        await revalidate(url: signedOutputURL, result: true)
+    }
+
+    /// Structural tree first (awaited), then full validation in the background, so signing
+    /// and document switches never wait for the trusted lists. A run token drops results
+    /// that arrive after the user moved to another document.
+    private func runSignatureTree(for url: URL, result: Bool) async {
+        let run = UUID()
+        setTreeRun(run, result: result)
+        setTreeState(SignatureTreeState(tree: SignatureTree(), phase: .inspecting), result: result)
+        let inspected = await signingProvider.inspectSignatureTree(in: url)
+        guard treeRun(result: result) == run else { return }
+        switch inspected {
+        case .failed(let reason):
+            setTreeState(SignatureTreeState(tree: SignatureTree(), phase: .failed(reason)), result: result)
+            setValidationTask(nil, result: result)
+        case .tree(let tree):
+            let summary = SignatureTreeSummary(tree: tree)
+            guard summary.total > 0 || summary.unverifiedDocuments > 0 else {
+                // No signatures and nothing unverified: there is nothing to validate.
+                setTreeState(SignatureTreeState(tree: tree, phase: .validated), result: result)
+                setValidationTask(nil, result: result)
+                return
+            }
+            setTreeState(SignatureTreeState(tree: tree, phase: .structural), result: result)
+            let task = Task<Void, Never> { [weak self] in
+                guard let self else { return }
+                await self.validate(url: url, run: run, result: result, keptTreeWasValidated: false)
+            }
+            setValidationTask(task, result: result)
+        }
+    }
+
+    private func revalidate(url: URL, result: Bool) async {
+        let run = UUID()
+        setTreeRun(run, result: result)
+        var state = treeState(result: result)
+        let wasValidated = state.phase == .validated
+        state.phase = .structural
+        setTreeState(state, result: result)
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.validate(url: url, run: run, result: result, keptTreeWasValidated: wasValidated)
+        }
+        setValidationTask(task, result: result)
+        await task.value
+    }
+
+    /// `keptTreeWasValidated`: the tree shown while this runs came from an earlier validation,
+    /// so a failure must not leave its verdicts (green) under "the result is only structural".
+    private func validate(url: URL, run: UUID, result: Bool, keptTreeWasValidated: Bool) async {
+        let validated = await signingProvider.validateSignatureTree(in: url)
+        guard treeRun(result: result) == run else { return }
+        switch validated {
+        case .tree(let tree):
+            setTreeState(SignatureTreeState(tree: tree, phase: .validated), result: result)
+        case .failed(let reason):
+            var state = treeState(result: result)
+            if keptTreeWasValidated {
+                state.tree = state.tree.withoutValidationVerdicts()
+            }
+            state.phase = .validationUnavailable(reason)
+            setTreeState(state, result: result)
+        }
+    }
+
+    private func treeRun(result: Bool) -> UUID { result ? resultTreeRun : existingTreeRun }
+    private func setTreeRun(_ run: UUID, result: Bool) {
+        if result { resultTreeRun = run } else { existingTreeRun = run }
+    }
+    private func treeState(result: Bool) -> SignatureTreeState {
+        result ? resultSignatureState : existingSignatureState
+    }
+    private func setTreeState(_ state: SignatureTreeState, result: Bool) {
+        if result { resultSignatureState = state } else { existingSignatureState = state }
+    }
+    /// Cancels the validation being replaced, which also ends its engine request.
+    private func setValidationTask(_ task: Task<Void, Never>?, result: Bool) {
+        let replaced = result ? resultValidationTask : existingValidationTask
+        if replaced != task { replaced?.cancel() }
+        if result { resultValidationTask = task } else { existingValidationTask = task }
+    }
+
+    private func resetSignatureTrees() {
+        existingTreeRun = UUID()
+        resultTreeRun = UUID()
+        existingSignatureState = SignatureTreeState()
+        resultSignatureState = SignatureTreeState()
+        setValidationTask(nil, result: false)
+        setValidationTask(nil, result: true)
     }
 
     private var isRefreshingIdentities = false
@@ -721,7 +837,7 @@ final class SigningSessionStore {
             if let signedURL = signedOutputURL {
                 signedPreviewDocument = PDFDocument(data: signed.pdfData)
                     ?? previewDocument(for: signedURL)
-                resultSignatures = await signingProvider.inspectSignatures(in: signedURL)
+                await runSignatureTree(for: signedURL, result: true)
                 pdfaAfterSign = PDFAValidator().validate(signed.pdfData).isValid
                     || (signed.asicData != nil && pdfaPrepared)
             }
@@ -1753,9 +1869,8 @@ final class SigningSessionStore {
         isAnalyzing = false
         visualArtworkOverride = nil
         visualPlacement = nil
-        existingSignatures = []
+        resetSignatureTrees()
         sourceSignatureKind = .unsignedPDF
-        resultSignatures = []
         signedOutputURL = nil
         signedPreviewDocument = nil
         pdfaPrepared = false
