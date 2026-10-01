@@ -27,6 +27,10 @@ enum WebBridgeAgentService {
         /// A portal request launched the app through the agent; touching the
         /// registration now would end the agent while it waits for this app.
         case skipWebSigningLaunch
+        /// Gatekeeper runs a quarantined app that was not moved into place from a
+        /// read-only copy (App Translocation), and `SMAppService` refuses to
+        /// register from there ("Operation not permitted").
+        case skipTranslocated
         case register(retireLegacyAgent: Bool)
     }
 
@@ -35,15 +39,22 @@ enum WebBridgeAgentService {
         case requiresApproval
         case notRegistered
         case unsignedBuild
+        case translocated
         case failed(String)
     }
 
     private static let log = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "web-bridge-agent")
 
-    static func plan(teamIdentifier: String?, launchMode: AppLaunchMode, legacyAgentInstalled: Bool) -> Plan {
+    static func plan(teamIdentifier: String?, launchMode: AppLaunchMode, translocated: Bool,
+                     legacyAgentInstalled: Bool) -> Plan {
         guard let teamIdentifier, !teamIdentifier.isEmpty else { return .skipUnsigned }
         guard launchMode != .webSigning else { return .skipWebSigningLaunch }
+        guard !translocated else { return .skipTranslocated }
         return .register(retireLegacyAgent: legacyAgentInstalled)
+    }
+
+    static func isTranslocated(bundlePath: String = Bundle.main.bundlePath) -> Bool {
+        bundlePath.contains("/AppTranslocation/")
     }
 
     /// True only for a plist the old installer wrote for this agent: it must
@@ -65,51 +76,66 @@ enum WebBridgeAgentService {
         return isLegacyAgentPlist(data)
     }
 
-    /// Unloads the job the old installer bootstrapped and moves its plist to the
-    /// Trash, so the bundled agent is the only job with this label.
+    /// Replaces the job the old installer bootstrapped with the bundled agent.
+    /// Both use the same label, so the old job is unloaded first; its plist goes
+    /// to the Trash only once the new registration has succeeded, and on failure
+    /// the old job is loaded again, so Safari never loses its bridge.
     @discardableResult
-    static func retireLegacyAgent(
+    static func migrateLegacyAgent(
         at url: URL = legacyPlistURL(),
         userID: uid_t = getuid(),
-        bootout: (String) -> Void = runLaunchctlBootout,
+        register: () throws -> Void,
+        launchctl: ([String]) -> Void = runLaunchctl,
         moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     ) -> Bool {
-        guard legacyAgentInstalled(at: url) else { return false }
-        bootout("gui/\(userID)/\(label)")
+        let domain = "gui/\(userID)"
+        launchctl(["bootout", "\(domain)/\(label)"])
         do {
-            try moveToTrash(url)
-            return true
+            try register()
         } catch {
-            log.error("Legacy web bridge agent plist not removed: \(error.localizedDescription, privacy: .public)")
+            log.error("Web bridge agent not registered, old agent restored: \(error.localizedDescription, privacy: .public)")
+            launchctl(["bootstrap", domain, url.path])
             return false
         }
+        do {
+            try moveToTrash(url)
+        } catch {
+            log.error("Old web bridge agent plist not removed: \(error.localizedDescription, privacy: .public)")
+        }
+        return true
     }
 
     /// Runs before `WebBridgeListener.start()`, which connects to the agent.
     static func ensureRegistered(launchMode: AppLaunchMode = .current) {
         let plan = plan(teamIdentifier: ownTeamIdentifier(), launchMode: launchMode,
-                        legacyAgentInstalled: legacyAgentInstalled())
-        guard case .register(let legacyAgentFound) = plan else { return }
+                        translocated: isTranslocated(), legacyAgentInstalled: legacyAgentInstalled())
+        guard case .register(let legacyAgentFound) = plan else {
+            log.info("Web bridge agent left alone: \(String(describing: plan), privacy: .public)")
+            return
+        }
         let service = SMAppService.agent(plistName: plistName)
-        do {
-            if legacyAgentFound, retireLegacyAgent() {
-                // The bootout above unloaded whichever job held the label, so a
-                // registration that already existed is renewed as well.
+        if legacyAgentFound {
+            migrateLegacyAgent(register: {
+                // The bootout unloaded whichever job held the label, so an existing
+                // registration is renewed as well.
                 if service.status == .enabled {
                     try? service.unregister()
                 }
-            }
-            if service.status != .enabled {
                 try service.register()
+            })
+        } else if service.status != .enabled {
+            do {
+                try service.register()
+            } catch {
+                log.error("Web bridge agent not registered: \(error.localizedDescription, privacy: .public)")
             }
-            log.info("Web bridge agent status: \(String(describing: service.status), privacy: .public)")
-        } catch {
-            log.error("Web bridge agent not registered: \(error.localizedDescription, privacy: .public)")
         }
+        log.info("Web bridge agent status: \(String(describing: service.status), privacy: .public)")
     }
 
     static func currentStatus() -> Status {
         guard ownTeamIdentifier() != nil else { return .unsignedBuild }
+        guard !isTranslocated() else { return .translocated }
         switch SMAppService.agent(plistName: plistName).status {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
@@ -147,17 +173,17 @@ enum WebBridgeAgentService {
         return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
     }
 
-    private static func runLaunchctlBootout(_ target: String) {
+    private static func runLaunchctl(_ arguments: [String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["bootout", target]
+        process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
             process.waitUntilExit()
         } catch {
-            log.error("launchctl bootout failed: \(error.localizedDescription, privacy: .public)")
+            log.error("launchctl \(arguments.first ?? "", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

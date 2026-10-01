@@ -1544,6 +1544,10 @@ struct WebSigningStorageCard: View {
                       systemImage: "xmark.octagon.fill")
                     .foregroundStyle(.red)
                 Button("Otvoriť Položky pri prihlásení…") { WebBridgeAgentService.openLoginItemsSettings() }
+            case .translocated:
+                Label("Chevron7 beží priamo z disku DMG alebo z neprenesenej kópie, odkiaľ macOS prepojenie so Safari nedovolí. Presuňte Chevron7 do priečinka Applications a spustite ho znova.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
             case .unsignedBuild:
                 Label("Vývojárska zostava bez Developer ID: prepojenie so Safari registruje scripts/install-webbridge-agent.sh.",
                       systemImage: "hammer")
