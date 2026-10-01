@@ -262,6 +262,33 @@ AGENT_BIN="$BIN_DIR/chevron7-webbridge-agent"
 if [[ -x "$AGENT_BIN" ]]; then
     cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent" 2>/dev/null \
         || { mkdir -p "$CONTENTS/Helpers" && cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent"; }
+
+    # A Developer ID build registers the agent itself through SMAppService
+    # (WebBridgeAgentService); launchd reads this plist from the bundle.
+    mkdir -p "$CONTENTS/Library/LaunchAgents"
+    cat > "$CONTENTS/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist" <<'AGENTPLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>app.slovensko.chevron7.webbridge</string>
+    <key>BundleProgram</key>
+    <string>Contents/Helpers/chevron7-webbridge-agent</string>
+    <key>MachServices</key>
+    <dict>
+        <key>app.slovensko.chevron7.webbridge</key>
+        <true/>
+    </dict>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>app.slovensko.chevron7</string>
+    </array>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+AGENTPLIST
 fi
 
 EXTENSION_BIN="$BIN_DIR/Chevron7WebExtensionHandler"
