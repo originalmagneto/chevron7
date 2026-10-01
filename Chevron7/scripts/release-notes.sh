@@ -47,8 +47,10 @@ cat <<NOTES
 ## Inštalácia
 
 1. Otvorte \`Chevron7-v$version.dmg\` a presuňte \`Chevron7.app\` do **Applications**.
-2. Aplikácia je podpísaná lokálne (ad hoc), bez Apple Developer ID a notarizácie. Ak macOS spustenie zablokuje, povoľte ju cez **Systémové nastavenia > Súkromie a bezpečnosť > Aj tak otvoriť**.
-3. Voliteľne na podpisovanie zo Safari spustite \`Install Safari Bridge.command\` z DMG, potom v Safari zapnite **Develop > Allow Unsigned Extensions** a rozšírenie **Chevron7** v **Settings > Extensions**.
+2. Aplikácia je podpísaná Developer ID (the Software s.r.o., Q7AU96CW7H) a notarizovaná Apple. Pri prvom spustení macOS raz potvrdí otvorenie aplikácie stiahnutej z internetu.
+3. Na podpisovanie zo Safari si aplikácia pri prvom spustení sama zaregistruje prepojenie (macOS ho ohlási ako položku na pozadí). Potom v Safari zapnite rozšírenie **Chevron7** v **Settings > Extensions**.
+
+Najnovšia verzia je vždy na https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg
 
 Kontrolné súčty sú v \`SHA256SUMS.txt\`. Web: https://chevron7.slovensko.app
 NOTES

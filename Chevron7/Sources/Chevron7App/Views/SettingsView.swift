@@ -1462,6 +1462,7 @@ struct LearningDatasetCard: View {
 /// local trace at all.
 struct WebSigningStorageCard: View {
     @Bindable var settingsStore: AppSettingsStore
+    @State private var agentStatus: WebBridgeAgentService.Status = .notRegistered
 
     private var resolvedFolder: String {
         let configured = settingsStore.settings.webSigningOutputPath
@@ -1476,6 +1477,8 @@ struct WebSigningStorageCard: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Podpisovanie z prehliadača", systemImage: "safari")
                 .font(.headline)
+
+            agentStatusRow
 
             Toggle("Ukladať podpísané dokumenty aj lokálne",
                    isOn: $settingsStore.settings.webSigningSavesLocally)
@@ -1515,6 +1518,43 @@ struct WebSigningStorageCard: View {
                 .foregroundStyle(.secondary)
         }
         .glassCard(cornerRadius: 12, padding: 12)
+        .onAppear { agentStatus = WebBridgeAgentService.currentStatus() }
+    }
+
+    /// The launchd agent the Safari extension reaches the app through; without it
+    /// a portal never gets an answer.
+    @ViewBuilder
+    private var agentStatusRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch agentStatus {
+            case .enabled:
+                Label("Prepojenie so Safari je zapnuté.", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            case .requiresApproval:
+                Label("Prepojenie so Safari čaká na povolenie v Položkách pri prihlásení.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Button("Otvoriť Položky pri prihlásení…") { WebBridgeAgentService.openLoginItemsSettings() }
+            case .notRegistered:
+                Label("Prepojenie so Safari nie je zaregistrované.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
+            case .failed(let message):
+                Label("Prepojenie so Safari sa nepodarilo zaregistrovať: \(message)",
+                      systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                Button("Otvoriť Položky pri prihlásení…") { WebBridgeAgentService.openLoginItemsSettings() }
+            case .translocated:
+                Label("Chevron7 beží priamo z disku DMG alebo z neprenesenej kópie, odkiaľ macOS prepojenie so Safari nedovolí. Presuňte Chevron7 do priečinka Applications a spustite ho znova.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            case .unsignedBuild:
+                Label("Vývojárska zostava bez Developer ID: prepojenie so Safari registruje scripts/install-webbridge-agent.sh.",
+                      systemImage: "hammer")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
     }
 
     private func chooseFolder() {

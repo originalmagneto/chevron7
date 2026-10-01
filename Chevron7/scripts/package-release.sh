@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Marián Čuprík
 # SPDX-License-Identifier: EUPL-1.2
-# Packs the release build of Chevron7.app into a DMG with the Safari bridge
-# installer, and writes SHA256SUMS.txt next to it. Run build-engine.sh and
+# Packs the release build of Chevron7.app into a DMG and writes SHA256SUMS.txt
+# next to it. A Developer ID build registers its Safari bridge agent itself
+# (WebBridgeAgentService); a shell script in the DMG could not be notarized. Run build-engine.sh and
 # CHEVRON7_VERSION=VERSION ../build_app.sh --release package first.
 # `package` keeps the Safari extension; a plain --release build strips it.
 #
@@ -34,10 +35,10 @@ trap 'rm -rf "$staging"' EXIT
 ditto "$app" "$staging/Chevron7.app"
 staged="$staging/Chevron7.app/Contents/PlugIns/Chevron7WebExtension.appex"
 [[ -d "$staged" ]] || { echo "Staged app has no Safari extension" >&2; exit 1; }
+[[ -f "$staging/Chevron7.app/Contents/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist" ]] \
+    || { echo "Staged app has no bundled web bridge agent plist" >&2; exit 1; }
 codesign --verify --strict "$staged"
 ln -s /Applications "$staging/Applications"
-cp "$script_dir/install-webbridge-agent.sh" "$staging/Install Safari Bridge.command"
-chmod 755 "$staging/Install Safari Bridge.command"
 
 dmg="$output_dir/Chevron7-v$version.dmg"
 rm -f "$dmg"

@@ -33,6 +33,7 @@ is_macho() {
 
 appex="$app/Contents/PlugIns/Chevron7WebExtension.appex"
 main_executable="$app/Contents/MacOS/Chevron7"
+sparkle="$app/Contents/Frameworks/Sparkle.framework"
 
 # 1. Native libraries inside JARs. The notary service opens the archives and
 #    rejects any Mach-O in them without a Developer ID signature. A signed JAR
@@ -58,12 +59,26 @@ while IFS= read -r -d '' jar; do
     echo "▸ $(basename "$jar"): $signed native libraries signed"
 done < <(find "$app/Contents" -type f -name '*.jar' -print0)
 
-# 2. Every loose Mach-O except the appex and the main executable, which their
+# 2. Sparkle's nested updater code, one piece at a time as Sparkle's own
+#    documentation prescribes; the Downloader keeps its entitlements.
+if [[ -d "$sparkle" ]]; then
+    version="$sparkle/Versions/B"
+    [[ -d "$version" ]] || { echo "Unexpected Sparkle.framework layout" >&2; exit 1; }
+    [[ ! -d "$version/XPCServices/Installer.xpc" ]] || sign "$version/XPCServices/Installer.xpc"
+    [[ ! -d "$version/XPCServices/Downloader.xpc" ]] \
+        || sign --preserve-metadata=entitlements "$version/XPCServices/Downloader.xpc"
+    [[ ! -e "$version/Autoupdate" ]] || sign "$version/Autoupdate"
+    [[ ! -d "$version/Updater.app" ]] || sign "$version/Updater.app"
+    sign "$sparkle"
+    echo "▸ Sparkle.framework signed"
+fi
+
+# 3. Every loose Mach-O except the appex and the main executable, which their
 #    bundles sign. The JVM and pkcs11-helper load card drivers signed by other
 #    teams, and the JVM needs JIT, so they get their own entitlements.
 while IFS= read -r -d '' file_path; do
     case "$file_path" in
-        "$appex"/*|"$main_executable") continue ;;
+        "$appex"/*|"$sparkle"/*|"$main_executable") continue ;;
     esac
     is_macho "$file_path" || continue
     case "$file_path" in
@@ -76,12 +91,12 @@ while IFS= read -r -d '' file_path; do
     esac
 done < <(find "$app/Contents" -type f -print0)
 
-# 3. The Safari extension keeps its sandbox and Mach lookup exception.
+# 4. The Safari extension keeps its sandbox and Mach lookup exception.
 if [[ -d "$appex" ]]; then
     sign --entitlements "$config/Chevron7WebExtension.entitlements" "$appex"
 fi
 
-# 4. The app bundle last; do not use --deep, it would drop the entitlements above.
+# 5. The app bundle last; do not use --deep, it would drop the entitlements above.
 sign "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 echo "✔ Developer ID signed: $app"

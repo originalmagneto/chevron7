@@ -39,6 +39,12 @@ VERSION="${CHEVRON7_VERSION:-$(git describe --tags --abbrev=0 --match 'native-v*
 VERSION="${VERSION:-0.0.0}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version: $VERSION" >&2; exit 2; }
 
+# Sparkle updates. The feed and the Ed25519 public key are public; the private key
+# signs the appcast in the release workflow (SPARKLE_PRIVATE_ED_KEY). Only release
+# builds carry the key, so a debug build never offers to replace itself.
+UPDATE_FEED_URL="${CHEVRON7_UPDATE_FEED_URL:-https://github.com/originalmagneto/chevron7/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-0VKcGhf6at6eeW1esfwLDtTkPTCfmV6hybTl6X2/1Bg=}"
+
 echo "▸ swift build -c $MODE"
 swift build -c "$MODE"
 
@@ -52,6 +58,16 @@ rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BIN_DIR/Chevron7" "$CONTENTS/MacOS/Chevron7"
+
+# SwiftPM links Sparkle dynamically; this hand-built bundle embeds the framework.
+# ditto keeps its symlinks and permissions.
+SPARKLE_FRAMEWORK="$(find .build/artifacts -type d -path '*macos*' -name Sparkle.framework -print -quit 2>/dev/null || true)"
+[[ -n "$SPARKLE_FRAMEWORK" ]] || { echo "Error: Sparkle.framework was not resolved by SwiftPM" >&2; exit 1; }
+mkdir -p "$CONTENTS/Frameworks"
+ditto "$SPARKLE_FRAMEWORK" "$CONTENTS/Frameworks/Sparkle.framework"
+if ! otool -l "$CONTENTS/MacOS/Chevron7" | grep -Fq "@executable_path/../Frameworks"; then
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/Chevron7"
+fi
 if [[ -x "$BIN_DIR/pkcs11-helper" ]]; then
     cp "$BIN_DIR/pkcs11-helper" "$CONTENTS/MacOS/pkcs11-helper"
 fi
@@ -134,6 +150,14 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <string>Chevron7</string>
     <key>CFBundleDisplayName</key>
     <string>Chevron7</string>
+    <!-- The interface is Slovak; this also makes Sparkle and the standard AppKit
+         items speak Slovak instead of following an English system language. -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>sk</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>sk</string>
+    </array>
     <key>CFBundleIdentifier</key>
     <string>app.slovensko.chevron7</string>
     <key>CFBundleURLTypes</key>
@@ -243,6 +267,13 @@ PKG
     -c "Set :CFBundleVersion $VERSION" \
     -c "Set :CFBundleShortVersionString $VERSION" \
     "$CONTENTS/Info.plist"
+if [[ "$MODE" == "release" ]]; then
+    /usr/libexec/PlistBuddy \
+        -c "Add :SUFeedURL string $UPDATE_FEED_URL" \
+        -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" \
+        -c "Add :SUEnableAutomaticChecks bool true" \
+        "$CONTENTS/Info.plist"
+fi
 
 # ---------------------------------------------------------------------------
 # Safari web extension: a hand-assembled .appex, because this project builds
@@ -262,6 +293,33 @@ AGENT_BIN="$BIN_DIR/chevron7-webbridge-agent"
 if [[ -x "$AGENT_BIN" ]]; then
     cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent" 2>/dev/null \
         || { mkdir -p "$CONTENTS/Helpers" && cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent"; }
+
+    # A Developer ID build registers the agent itself through SMAppService
+    # (WebBridgeAgentService); launchd reads this plist from the bundle.
+    mkdir -p "$CONTENTS/Library/LaunchAgents"
+    cat > "$CONTENTS/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist" <<'AGENTPLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>app.slovensko.chevron7.webbridge</string>
+    <key>BundleProgram</key>
+    <string>Contents/Helpers/chevron7-webbridge-agent</string>
+    <key>MachServices</key>
+    <dict>
+        <key>app.slovensko.chevron7.webbridge</key>
+        <true/>
+    </dict>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>app.slovensko.chevron7</string>
+    </array>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+AGENTPLIST
 fi
 
 EXTENSION_BIN="$BIN_DIR/Chevron7WebExtensionHandler"

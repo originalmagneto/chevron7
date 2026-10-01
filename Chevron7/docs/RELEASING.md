@@ -60,7 +60,22 @@ When Apple refuses a submission, `notarize-release.sh` prints the notary log, wh
 
 An Admin can create the API key without the Account Holder: App Store Connect, Users and Access, Integrations, App Store Connect API, Team Keys, access "Developer". Apple offers the `.p8` for download only once. The workflow imports the identity into a temporary keychain and deletes it, the `.p12` and the `.p8` at the end of the job.
 
+## Sparkle updates
+
+Chevron7 checks for updates with Sparkle 2 (`AppUpdater`, menu "Skontrolovať aktualizácie…"). Release builds carry `SUFeedURL` (`https://github.com/originalmagneto/chevron7/releases/latest/download/appcast.xml`), the Ed25519 public key `SUPublicEDKey` and `SUEnableAutomaticChecks`; debug builds carry none of them, so they never offer to replace themselves. A launch for a portal request starts the updater only once the app becomes regular, so a signing panel never meets an update prompt.
+
+- The key pair was made with Sparkle's `generate_keys --account chevron7` on the signing Mac; the private key lives in that login keychain and, exported with `-x`, in the Actions secret `SPARKLE_PRIVATE_ED_KEY`. The public key is in `build_app.sh`. Losing the private key means installed apps can no longer verify updates: keep an offline copy.
+- `scripts/sign-release.sh` signs Sparkle's Installer and Downloader XPC services (the Downloader keeps its entitlements), Autoupdate, Updater.app and the framework one by one before the rest.
+- `scripts/generate-appcast.sh` writes `appcast.xml` for the notarized DMG with the release notes embedded and the Ed25519 signature; the workflow uploads it with every release. Without the secret the release goes out without an appcast and with a warning.
+- Verified locally on 2026-10-01: a signed 1.0.0 reading a local feed offered 1.0.1, installed it, relaunched, and kept its Developer ID signature and the Safari bridge agent.
+
+## Download link and version
+
+- Every release also uploads the DMG as `Chevron7.dmg`, so https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg always serves the newest release. The website and the README link there.
+- The version comes from the Conventional Commits since the last tag (`scripts/next-version.sh`). A `Release-As: X.Y.Z` footer in any of those commits sets it outright, for a milestone the rules would not reach from 0.x (1.0.0). A hand-written `docs/releases/vX.Y.Z.md` replaces the generated notes.
+
 ## Effects of the Developer ID signature
 
-- `Install Safari Bridge.command` (`scripts/install-webbridge-agent.sh`) leaves a Developer ID signed app untouched. It clears extended attributes and signs ad hoc again only for ad hoc builds, where Safari otherwise hid the extension.
+- The Safari bridge agent (`chevron7-webbridge-agent`, which owns the Mach service `app.slovensko.chevron7.webbridge`) is registered by the app itself: `build_app.sh` puts `Contents/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist` (`BundleProgram`, `MachServices`) into the bundle and `WebBridgeAgentService` calls `SMAppService.agent(plistName:).register()` on a regular launch of a Developer ID build. The DMG ships no script: a `.command` cannot be notarized and Gatekeeper refuses it. A plist the old installer left in `~/Library/LaunchAgents` (label ours, program `.../Contents/Helpers/chevron7-webbridge-agent`) is booted out first and moved to the Trash only after the new registration succeeded; a refused registration bootstraps the old job again. A quarantined app run from the DMG or from a copy Finder did not move runs translocated (`/AppTranslocation/`), where `SMAppService` answers "Operation not permitted"; the app then leaves everything as it is and Settings ask to move Chevron7 into Applications. A launch for a portal request (`--web-signing`) never touches the registration, because the agent is waiting for that app. Settings show the state in "Podpisovanie z prehliadača".
+- Ad hoc builds cannot use `SMAppService`; `scripts/install-webbridge-agent.sh` stays for them and for development.
 - The app's designated requirement changes from the ad hoc hash to the team. Keychain items saved by an ad hoc build (the EZZK SOAP password, the eIdentita portal key) ask once for access on the first run of the signed build; "Always Allow" settles it.
