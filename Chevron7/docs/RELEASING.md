@@ -60,6 +60,15 @@ When Apple refuses a submission, `notarize-release.sh` prints the notary log, wh
 
 An Admin can create the API key without the Account Holder: App Store Connect, Users and Access, Integrations, App Store Connect API, Team Keys, access "Developer". Apple offers the `.p8` for download only once. The workflow imports the identity into a temporary keychain and deletes it, the `.p12` and the `.p8` at the end of the job.
 
+## Sparkle updates
+
+Chevron7 checks for updates with Sparkle 2 (`AppUpdater`, menu "Skontrolovať aktualizácie…"). Release builds carry `SUFeedURL` (`https://github.com/originalmagneto/chevron7/releases/latest/download/appcast.xml`), the Ed25519 public key `SUPublicEDKey` and `SUEnableAutomaticChecks`; debug builds carry none of them, so they never offer to replace themselves. A launch for a portal request starts the updater only once the app becomes regular, so a signing panel never meets an update prompt.
+
+- The key pair was made with Sparkle's `generate_keys --account chevron7` on the signing Mac; the private key lives in that login keychain and, exported with `-x`, in the Actions secret `SPARKLE_PRIVATE_ED_KEY`. The public key is in `build_app.sh`. Losing the private key means installed apps can no longer verify updates: keep an offline copy.
+- `scripts/sign-release.sh` signs Sparkle's Installer and Downloader XPC services (the Downloader keeps its entitlements), Autoupdate, Updater.app and the framework one by one before the rest.
+- `scripts/generate-appcast.sh` writes `appcast.xml` for the notarized DMG with the release notes embedded and the Ed25519 signature; the workflow uploads it with every release. Without the secret the release goes out without an appcast and with a warning.
+- Verified locally on 2026-10-01: a signed 1.0.0 reading a local feed offered 1.0.1, installed it, relaunched, and kept its Developer ID signature and the Safari bridge agent.
+
 ## Download link and version
 
 - Every release also uploads the DMG as `Chevron7.dmg`, so https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg always serves the newest release. The website and the README link there.
