@@ -62,7 +62,7 @@ Terminology: KEP (kvalifikovany elektronicky podpis), eIDAS, eID, BOK, ZaKo (zar
 
 Undecided or not yet true, and must not be claimed:
 
-- Support for other national eID cards (CZ, HU, PL, SI and others) is the stated direction, not shipped.
+- Support for other national eID cards (CZ, HU, PL, SI and others) is the stated direction, not shipped. Czechia is researched and planned (`Chevron7/docs/research/2026-10-02-czech-signing.md`, plan in `Chevron7/docs/superpowers/plans/2026-10-02-czech-signing.md`); claim it only once it ships. Czech guaranteed conversion (autorizovaná konverze) cannot be offered: it runs only inside Czech POINT.
 - Code signing and notarization status of the downloadable build is unverified; do not promise a Gatekeeper-clean install until confirmed.
 - GitHub repository is being renamed to `originalmagneto/chevron7`; release titles still read "Autogram macOS".
 - Hosting provider for the site.
