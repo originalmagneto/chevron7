@@ -54,20 +54,23 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
 
     func drivers() async throws -> [SigningDriver] {
         let events = try await run(MachineRequest(protocolVersion: 1, requestID: UUID().uuidString, operation: .drivers, payload: [:]))
-        let payload = try payload(for: .driverDetected, in: events)
+        return try signingDrivers(in: payload(for: .driverDetected, in: events))
+    }
+
+    /// The helper without an arm64 slice is fatal; a driver without one stays listed with
+    /// its `unavailableReason`, so the other cards remain usable.
+    func signingDrivers(in payload: [String: JSONValue]) throws -> [SigningDriver] {
+        try driverResolver.requireNativeHelper(at: configuration.executableURL)
         let candidates = array(in: payload["drivers"]) ?? []
-        return try candidates.compactMap { candidate in
+        return candidates.compactMap { candidate in
             guard let id = string(in: candidate["id"]), let name = string(in: candidate["name"]),
                   let path = string(in: candidate["path"]) else { return nil }
-            let resolved = try driverResolver.resolve(
-                helperURL: configuration.executableURL,
-                driver: DriverCandidate(url: URL(fileURLWithPath: path))
-            )
             return SigningDriver(
                 id: id,
                 displayName: name,
-                middlewareVersion: resolved.middlewareVersion,
-                tokenPresent: bool(in: candidate["tokenPresent"])
+                tokenPresent: bool(in: candidate["tokenPresent"]),
+                unavailableReason: driverResolver.unavailableReason(driverURL: URL(fileURLWithPath: path),
+                                                                    displayName: name)
             )
         }
     }
