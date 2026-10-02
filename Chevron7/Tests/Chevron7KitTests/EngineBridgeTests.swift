@@ -216,6 +216,22 @@ final class EngineBridgeSelectionTests: XCTestCase {
         XCTAssertFalse(mapped.contains("machine request"))
     }
 
+    /// A timestamp authority that refuses the request (no contract, down) tells the person to
+    /// pick another one instead of reporting a generic signing failure.
+    func testRefusedTimestampAsksForAnotherAuthority() {
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(
+            "A qualified timestamp could not be obtained. [TIMESTAMP_FAILED]")
+        XCTAssertTrue(mapped.contains("Vyberte inú autoritu"))
+        XCTAssertFalse(mapped.contains("\u{2014}"))
+    }
+
+    /// CA Disig's qualified service answers only under a contract, which the picker says.
+    func testDisigSaysItNeedsAContract() throws {
+        let disig = try XCTUnwrap(TimestampAuthority.builtIn.first { $0.url == "http://tsa.disig.sk/qts" })
+        XCTAssertTrue(disig.name.contains("vyžaduje zmluvu s Disig"))
+        XCTAssertTrue(disig.isQualified)
+    }
+
     func testPrimaryDriverPrefersEIDLikeCertificateDiscovery() {
         XCTAssertEqual(EngineBridgeSigningProvider.primaryDriverID(fingerprint: "eid,secure_store"), "eid")
         XCTAssertEqual(EngineBridgeSigningProvider.primaryDriverID(fingerprint: "secure_store"), "secure_store")
@@ -426,8 +442,7 @@ final class MachineRequestEncodingTests: XCTestCase {
     }
 
     /// A record's explicit timestamp servers must reach the v1 SIGN payload's
-    /// "timestamp.servers", and resolving them must never even query the app's own
-    /// timestamp preferences.
+    /// "timestamp.servers" exactly, and unconfigured timestamp preferences never stop it.
     func testExplicitTimestampServersOverrideTheProviderInTheV1Payload() throws {
         let provider = FakeTimestampSourceProvider(configuration: .automatic)
         let engine = AutogramCLIEngine(timestampSourceProvider: provider)
@@ -439,7 +454,58 @@ final class MachineRequestEncodingTests: XCTestCase {
 
         XCTAssertEqual(payload.timestamp,
                        .object(["required": .bool(true), "servers": .array([.string("https://tsa.belgium.be/connect")])]))
-        XCTAssertEqual(provider.loadCallCount, 0)
+        XCTAssertNil(timestamp.authentication)
+    }
+
+    /// A chosen authority that is the configured custom provider keeps its Basic credential.
+    func testAnOverrideForTheCustomProviderCarriesItsBasicCredential() throws {
+        let custom = CustomTimestampProviderConfiguration(
+            displayName: "Firemná TSA", urls: ["https://tsa.example.test/qts"],
+            authentication: TimestampAuthenticationPreference(kind: .basic, username: "advokat"))
+        let provider = FakeTimestampSourceProvider(
+            configuration: TimestampSourceConfiguration(source: .custom, customProvider: custom),
+            credential: Secret("heslo"))
+        let engine = AutogramCLIEngine(timestampSourceProvider: provider)
+
+        let timestamp = try engine.resolvedTimestamp(wantsTimestamp: true, override: ["https://tsa.example.test/qts"])
+
+        XCTAssertEqual(timestamp.endpoints, ["https://tsa.example.test/qts"])
+        guard case .basic(let username, _)? = timestamp.authentication else {
+            return XCTFail("Expected Basic authentication for the custom provider.")
+        }
+        XCTAssertEqual(username, "advokat")
+    }
+
+    func testAnOverrideForTheCustomProviderCarriesItsBearerToken() throws {
+        let custom = CustomTimestampProviderConfiguration(
+            urls: ["https://tsa.example.test/qts"],
+            authentication: TimestampAuthenticationPreference(kind: .bearer, username: nil))
+        let provider = FakeTimestampSourceProvider(
+            configuration: TimestampSourceConfiguration(source: .custom, customProvider: custom),
+            credential: Secret("token"))
+        let engine = AutogramCLIEngine(timestampSourceProvider: provider)
+
+        let timestamp = try engine.resolvedTimestamp(wantsTimestamp: true, override: ["https://tsa.example.test/qts"])
+
+        guard case .bearer? = timestamp.authentication else {
+            return XCTFail("Expected a bearer token for the custom provider.")
+        }
+    }
+
+    /// Another authority never receives the custom provider's credential.
+    func testAnOverrideForAnotherAuthorityCarriesNoCredential() throws {
+        let custom = CustomTimestampProviderConfiguration(
+            urls: ["https://tsa.example.test/qts"],
+            authentication: TimestampAuthenticationPreference(kind: .basic, username: "advokat"))
+        let provider = FakeTimestampSourceProvider(
+            configuration: TimestampSourceConfiguration(source: .custom, customProvider: custom),
+            credential: Secret("heslo"))
+        let engine = AutogramCLIEngine(timestampSourceProvider: provider)
+
+        let timestamp = try engine.resolvedTimestamp(wantsTimestamp: true, override: ["http://tsa.disig.sk/qts"])
+
+        XCTAssertEqual(timestamp.endpoints, ["http://tsa.disig.sk/qts"])
+        XCTAssertNil(timestamp.authentication)
     }
 
     /// Without an override, resolution keeps reading the provider's own endpoints,
@@ -463,6 +529,7 @@ final class MachineRequestEncodingTests: XCTestCase {
 /// Keychain, just returns a fixed configuration and counts how often it was read.
 private final class FakeTimestampSourceProvider: TimestampSourceProviding, @unchecked Sendable {
     private let configuration: TimestampSourceConfiguration
+    private let storedCredential: Secret?
     private let lock = NSLock()
     private var _loadCallCount = 0
 
@@ -472,8 +539,9 @@ private final class FakeTimestampSourceProvider: TimestampSourceProviding, @unch
         return _loadCallCount
     }
 
-    init(configuration: TimestampSourceConfiguration) {
+    init(configuration: TimestampSourceConfiguration, credential: Secret? = nil) {
         self.configuration = configuration
+        storedCredential = credential
     }
 
     func load() -> TimestampSourceConfiguration {
@@ -483,7 +551,7 @@ private final class FakeTimestampSourceProvider: TimestampSourceProviding, @unch
         return configuration
     }
 
-    func credential(for provider: CustomTimestampProviderConfiguration) throws -> Secret? { nil }
+    func credential(for provider: CustomTimestampProviderConfiguration) throws -> Secret? { storedCredential }
 }
 
 /// A `SigningEngine` test double: never spawns the real helper process, just
@@ -707,6 +775,54 @@ final class EngineBridgeRecordSubmissionTests: XCTestCase {
 
         let request = try XCTUnwrap(engine.capturedRequest)
         XCTAssertEqual(request.timestampServersOverride, ["https://tsa.belgium.be/connect"])
+    }
+}
+
+/// The timestamp authority picked in Settings, in the main window, the batch or the
+/// browser panel arrives as `tsaURL`; the engine has to receive it.
+final class EngineBridgeTimestampRoutingTests: XCTestCase {
+    private func request(tsaURL: String?, timestampServers: [String]? = nil,
+                         level: String? = nil) -> SigningRequest {
+        SigningRequest(pdfData: TestPDFBuilder.singlePageWhitePDF(), identityID: "engine:eid",
+                       includeTimestamp: tsaURL != nil, tsaURL: tsaURL, outputFormat: .attachedASIC,
+                       signatureLevelOverride: level, filename: "zmluva.pdf",
+                       signsExtraFilesAsDataObjects: true, timestampServers: timestampServers)
+    }
+
+    func testTheChosenAuthorityReachesTheEngine() async throws {
+        let engine = RecordingSigningEngine()
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(request(tsaURL: "http://tsa.disig.sk/qts"))
+
+        XCTAssertEqual(engine.capturedRequest?.timestampServersOverride, ["http://tsa.disig.sk/qts"])
+    }
+
+    /// ZaKo outside Demo passes the built-in qualified list, which wins over its `tsaURL`.
+    func testExplicitTimestampServersWinOverTheChosenAuthority() async throws {
+        let engine = RecordingSigningEngine()
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(request(
+            tsaURL: "http://tsa.belgium.be/connect",
+            timestampServers: ["http://tsa.belgium.be/connect", "http://time.certum.pl"]))
+
+        XCTAssertEqual(engine.capturedRequest?.timestampServersOverride,
+                       ["http://tsa.belgium.be/connect", "http://time.certum.pl"])
+    }
+
+    func testABlankAuthorityIsNoOverride() async throws {
+        let engine = RecordingSigningEngine()
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(request(tsaURL: "  "))
+
+        XCTAssertNil(engine.capturedRequest?.timestampServersOverride)
+    }
+
+    /// A portal's Baseline B (slovensko.sk, switch off) still goes out without a timestamp.
+    func testAPortalBaselineBStillCarriesNoTimestamp() async throws {
+        let engine = RecordingSigningEngine()
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(request(tsaURL: nil, level: "XAdES_BASELINE_B"))
+
+        let captured = try XCTUnwrap(engine.capturedRequest)
+        XCTAssertNil(captured.timestampServersOverride)
+        XCTAssertEqual(AutogramCLIEngine.levelAndTimestamp(for: captured, endpoints: []).timestamp,
+                       .object(["required": .bool(false), "servers": .array([])]))
     }
 }
 

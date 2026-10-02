@@ -275,7 +275,7 @@ public final class MachineSigningService {
             if (cause instanceof MachineProtocolException protocolException) {
                 return switch (protocolException.getMessage()) {
                     case "OUTPUT_CLEANUP_FAILED", "OUTPUT_VALIDATION_FAILED", "TIMESTAMP_QUALIFICATION_FAILED",
-                            "OUTPUT_PUBLISH_UNSUPPORTED", "OUTPUT_TARGET_EXISTS", "MACHINE_PLATFORM_UNSUPPORTED",
+                            "TIMESTAMP_FAILED", "OUTPUT_PUBLISH_UNSUPPORTED", "OUTPUT_TARGET_EXISTS", "MACHINE_PLATFORM_UNSUPPORTED",
                             "TRUSTED_LIST_UNAVAILABLE" -> protocolException.getMessage();
                     default -> fallback;
                 };

@@ -404,7 +404,7 @@ struct SigningPrepareView: View {
             qualification: identity.isQualified
                 ? "Kvalifikovaný elektronický podpis"
                 : "Nekvalifikovaný certifikát",
-            timestampAuthorityName: store.includeQualifiedTimestamp ? store.settings.activeTSA.name : nil
+            timestampAuthorityName: store.addsQualifiedTimestamp(viaMobile: false) ? store.settings.activeTSA.name : nil
         )
     }
 
@@ -708,12 +708,20 @@ struct SigningPrepareView: View {
 
                 Divider().opacity(0.5)
 
-                Toggle(isOn: $store.includeQualifiedTimestamp) {
+                Toggle(isOn: $store.qualifiedTimestampSwitchIsOn) {
                     Label("Kvalifikovaná časová pečiatka (QTS)", systemImage: "clock.badge.checkmark")
                         .font(.callout)
                 }
+                .disabled(store.qualifiedTimestampIsLocked)
 
-                if store.includeQualifiedTimestamp {
+                if let note = store.qualifiedTimestampNote {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if store.qualifiedTimestampSwitchIsOn || store.signingProvider.alwaysAddsQualifiedTimestamp {
                     VStack(alignment: .leading, spacing: 4) {
                         Picker("", selection: $store.selectedTSAURL) {
                             ForEach(store.settings.availableTSAServers) { server in
@@ -722,6 +730,12 @@ struct SigningPrepareView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
+                        if let warning = store.timestampAuthorityWarning {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.leading, 8)
                 }
@@ -1057,7 +1071,7 @@ struct SigningDoneView: View {
                 }
             }
 
-            if store.includeQualifiedTimestamp {
+            if store.lastSignatureTimestamped {
                 GroupBox("Kvalifikovaná časová pečiatka") {
                     VStack(alignment: .leading, spacing: 5) {
                         detailRow("Autorita", store.settings.activeTSA.name)
@@ -1293,11 +1307,20 @@ struct SigningBatchView: View {
 
                 LabeledContent("Časová pečiatka") {
                     VStack(alignment: .leading, spacing: 6) {
+                        // A batch signs with the card only, which with the engine always timestamps.
+                        let timestampLocked = store.signingProvider.alwaysAddsQualifiedTimestamp
                         Toggle(
                             "Pridať kvalifikovanú časovú pečiatku (QTS)",
-                            isOn: batchOption(\.includeQualifiedTimestamp))
+                            isOn: timestampLocked ? .constant(true) : batchOption(\.includeQualifiedTimestamp))
                             .toggleStyle(.checkbox)
-                        if store.includeQualifiedTimestamp {
+                            .disabled(timestampLocked)
+                        if timestampLocked {
+                            Text(SigningSessionStore.cardAlwaysTimestampsNote)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if store.includeQualifiedTimestamp || timestampLocked {
                             Picker("Služba TSA", selection: batchOption(\.selectedTSAURL)) {
                                 ForEach(store.settings.availableTSAServers) { server in
                                     Text(server.name).tag(server.url)
@@ -1307,6 +1330,12 @@ struct SigningBatchView: View {
                             .pickerStyle(.menu)
                             .fixedSize()
                             .accessibilityLabel("Služba časovej pečiatky")
+                            if let warning = store.timestampAuthorityWarning {
+                                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                     .disabled(!settingsEditable)

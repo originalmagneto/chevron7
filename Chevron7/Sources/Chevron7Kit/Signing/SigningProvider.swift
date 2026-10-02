@@ -349,12 +349,17 @@ public protocol QualifiedSigningProviding: Sendable {
     /// Whether `sign` adds a signature to an ASiC-E handed over as the source (named by
     /// `SigningRequest.filename`) instead of wrapping that container in a new one.
     var addsSignatureToExistingContainer: Bool { get }
+    /// Whether every signature from `sign` carries a qualified timestamp whatever
+    /// `includeTimestamp` says, as the engine does for ordinary files.
+    var alwaysAddsQualifiedTimestamp: Bool { get }
 }
 
 extension QualifiedSigningProviding {
     public func inspectSignatures(in fileURL: URL) async -> [DocumentSignatureInfo] { [] }
 
     public var addsSignatureToExistingContainer: Bool { false }
+
+    public var alwaysAddsQualifiedTimestamp: Bool { false }
 
     public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         let result = await inspectInputSignatures(in: fileURL)

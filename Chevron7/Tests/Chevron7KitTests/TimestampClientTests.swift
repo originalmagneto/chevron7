@@ -119,6 +119,83 @@ final class TimestampClientTests: XCTestCase {
         let roundTrip = try JSONDecoder().decode(AppSettings.self, from: reencoded)
         XCTAssertEqual(roundTrip.selectedTSAURL, custom.selectedTSAURL)
     }
+
+    /// The pickers sit under a switch labelled "Kvalifikovaná časová pečiatka (QTS)", so the
+    /// built-in list offers qualified authorities only.
+    func testBuiltInAuthoritiesAreQualifiedOnly() {
+        let fresh = AppSettings()
+        XCTAssertTrue(TimestampAuthority.builtIn.allSatisfy(\.isQualified))
+        XCTAssertTrue(fresh.availableTSAServers.allSatisfy(\.isQualified))
+        for retired in TimestampAuthority.retiredUnqualified {
+            XCTAssertFalse(fresh.availableTSAServers.contains { $0.url == retired.url })
+        }
+        XCTAssertFalse(fresh.activeTSAQualificationIsUnverified)
+    }
+
+    /// A non-qualified authority chosen before it left the list falls back to the default,
+    /// whichever way it was stored, and never becomes a custom server.
+    func testARetiredUnqualifiedAuthorityFallsBackToTheDefault() throws {
+        let stored = try JSONDecoder().decode(
+            AppSettings.self, from: Data("{\"selectedTSAURL\":\"http://timestamp.digicert.com\"}".utf8))
+        XCTAssertEqual(stored.selectedTSAURL, TimestampAuthority.legacyDefaultURL)
+        XCTAssertTrue(stored.customTSAServers.isEmpty)
+
+        let legacy = try JSONDecoder().decode(
+            AppSettings.self, from: Data("{\"tsaURL\":\"http://timestamp.sectigo.com\"}".utf8))
+        XCTAssertEqual(legacy.selectedTSAURL, TimestampAuthority.legacyDefaultURL)
+        XCTAssertTrue(legacy.customTSAServers.isEmpty)
+
+        let typed = try JSONDecoder().decode(
+            AppSettings.self,
+            from: Data("{\"customTSAServers\":[\"http://timestamp.digicert.com\"],\"selectedTSAURL\":\"http://timestamp.digicert.com\"}".utf8))
+        XCTAssertTrue(typed.customTSAServers.isEmpty)
+        XCTAssertEqual(typed.activeTSA.url, TimestampAuthority.legacyDefaultURL)
+
+        let inMemory = AppSettings(customTSAServers: ["http://timestamp.digicert.com"],
+                                   selectedTSAURL: "http://timestamp.digicert.com")
+        XCTAssertFalse(inMemory.availableTSAServers.contains { $0.url == "http://timestamp.digicert.com" })
+        XCTAssertEqual(inMemory.activeTSA.url, TimestampAuthority.legacyDefaultURL)
+    }
+
+    /// A custom URL stays usable, but the app cannot know whether it is qualified.
+    func testACustomAuthorityIsMarkedUnverified() {
+        let custom = AppSettings(customTSAServers: ["https://tsa.kancelaria.test/tsp"],
+                                 selectedTSAURL: "https://tsa.kancelaria.test/tsp")
+        XCTAssertEqual(custom.activeTSA.url, "https://tsa.kancelaria.test/tsp")
+        XCTAssertTrue(custom.activeTSAQualificationIsUnverified)
+        XCTAssertFalse(TimestampAuthority.unverifiedQualificationWarning.contains("\u{2014}"))
+
+        let builtIn = AppSettings(customTSAServers: ["https://tsa.kancelaria.test/tsp"],
+                                  selectedTSAURL: "http://tsa.disig.sk/qts")
+        XCTAssertFalse(builtIn.activeTSAQualificationIsUnverified)
+    }
+
+    /// The RFC 3161 client keeps skipping a non-qualified authority after it left the list.
+    func testTimestampClientNeverAsksARetiredAuthority() async throws {
+        let goldenResponse = Data(hexEncoded: "3081823003020100307b06092a864886f70d010702a06e306c02010131003065060b2a864886f70d0109100204a0560454305202010106082b06010505070103302f300b06096086480165030402010420ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad02014d180f32303236303832333132303030305a")
+        let transport = URLRecordingTransport(response: goldenResponse)
+        let client = RFC3161TimestampClient(transport: transport)
+
+        _ = try await client.requestToken(for: Data("d".utf8),
+                                          tsaURL: try XCTUnwrap(URL(string: "http://timestamp.digicert.com")))
+
+        let asked = await transport.asked()
+        XCTAssertEqual(asked, [try XCTUnwrap(TimestampAuthority.qualifiedURLs.first)])
+    }
+}
+
+private actor URLRecordingTransport: LLMTransport {
+    let response: Data
+    private var urls: [URL] = []
+
+    init(response: Data) { self.response = response }
+
+    func post(url: URL, headers: [String: String], body: Data) async throws -> Data {
+        urls.append(url)
+        return response
+    }
+
+    func asked() -> [URL] { urls }
 }
 
 extension Data {

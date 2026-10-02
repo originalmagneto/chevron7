@@ -54,20 +54,23 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
 
     func drivers() async throws -> [SigningDriver] {
         let events = try await run(MachineRequest(protocolVersion: 1, requestID: UUID().uuidString, operation: .drivers, payload: [:]))
-        let payload = try payload(for: .driverDetected, in: events)
+        return try signingDrivers(in: payload(for: .driverDetected, in: events))
+    }
+
+    /// The helper without an arm64 slice is fatal; a driver without one stays listed with
+    /// its `unavailableReason`, so the other cards remain usable.
+    func signingDrivers(in payload: [String: JSONValue]) throws -> [SigningDriver] {
+        try driverResolver.requireNativeHelper(at: configuration.executableURL)
         let candidates = array(in: payload["drivers"]) ?? []
-        return try candidates.compactMap { candidate in
+        return candidates.compactMap { candidate in
             guard let id = string(in: candidate["id"]), let name = string(in: candidate["name"]),
                   let path = string(in: candidate["path"]) else { return nil }
-            let resolved = try driverResolver.resolve(
-                helperURL: configuration.executableURL,
-                driver: DriverCandidate(url: URL(fileURLWithPath: path))
-            )
             return SigningDriver(
                 id: id,
                 displayName: name,
-                middlewareVersion: resolved.middlewareVersion,
-                tokenPresent: bool(in: candidate["tokenPresent"])
+                tokenPresent: bool(in: candidate["tokenPresent"]),
+                unavailableReason: driverResolver.unavailableReason(driverURL: URL(fileURLWithPath: path),
+                                                                    displayName: name)
             )
         }
     }
@@ -590,16 +593,26 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }
     }
 
-    /// Endpoints and authentication for a Baseline T signature. An explicit
-    /// override (an EZZK record's own required TSA) wins and short-circuits
-    /// `qualifiedTimestampRequest()` entirely, so the app's own timestamp
-    /// preferences are never read, let alone required to be configured, for a
-    /// record submission; without one, resolution keeps today's behaviour.
+    /// Endpoints and authentication for a Baseline T signature. An explicit override (the
+    /// authority chosen in the app, or ZaKo's qualified list) is used exactly as given; it
+    /// carries the custom provider's credential only when it names that provider's URL, and
+    /// timestamp preferences that are not configured never stop it. Without an override the
+    /// engine's own timestamp preferences decide.
     func resolvedTimestamp(wantsTimestamp: Bool, override: [String]?) throws
         -> (endpoints: [String], authentication: TimestampAuthenticationSecret?) {
         guard wantsTimestamp else { return (endpoints: [], authentication: nil) }
         if let override, !override.isEmpty {
-            return (endpoints: override, authentication: nil)
+            let configuration = timestampSourceProvider.load()
+            guard configuration.source == .custom, let provider = configuration.customProvider,
+                  override.contains(where: { endpoint in
+                      provider.urls.contains {
+                          $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                              .caseInsensitiveCompare(endpoint) == .orderedSame
+                      }
+                  }) else {
+                return (endpoints: override, authentication: nil)
+            }
+            return (endpoints: override, authentication: try authentication(for: provider))
         }
         return try qualifiedTimestampRequest()
     }
@@ -613,6 +626,11 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         guard configuration.source == .custom, let provider = configuration.customProvider else {
             return (endpoints, nil)
         }
+        return (endpoints, try authentication(for: provider))
+    }
+
+    private func authentication(for provider: CustomTimestampProviderConfiguration) throws
+        -> TimestampAuthenticationSecret? {
         let secret: Secret?
         do {
             secret = try timestampSourceProvider.credential(for: provider)
@@ -621,18 +639,18 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }
         switch provider.authentication.kind {
         case .none:
-            return (endpoints, nil)
+            return nil
         case .basic:
             guard let username = provider.authentication.username?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !username.isEmpty, let secret else {
                 throw SigningFailure.engine("Configure custom timestamp Basic authentication before signing.")
             }
-            return (endpoints, .basic(username: username, password: secret))
+            return .basic(username: username, password: secret)
         case .bearer:
             guard let secret else {
                 throw SigningFailure.engine("Configure a custom timestamp bearer token before signing.")
             }
-            return (endpoints, .bearer(token: secret))
+            return .bearer(token: secret)
         }
     }
 
