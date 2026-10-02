@@ -847,7 +847,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return "Zvolený certifikát už nie je na karte: obnovte zoznam certifikátov."
         }
         if code("TIMESTAMP_FAILED") {
-            return "Nepodarilo sa získať kvalifikovanú časovú pečiatku (TSA)."
+            return "Služba časovej pečiatky odmietla požiadavku alebo je nedostupná. Vyberte inú autoritu časovej pečiatky."
         }
         if code("TIMESTAMP_QUALIFICATION_FAILED") {
             return "Časová pečiatka nie je kvalifikovaná. Skontrolujte TSA a internet."

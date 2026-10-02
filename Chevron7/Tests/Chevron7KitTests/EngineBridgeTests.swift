@@ -216,6 +216,22 @@ final class EngineBridgeSelectionTests: XCTestCase {
         XCTAssertFalse(mapped.contains("machine request"))
     }
 
+    /// A timestamp authority that refuses the request (no contract, down) tells the person to
+    /// pick another one instead of reporting a generic signing failure.
+    func testRefusedTimestampAsksForAnotherAuthority() {
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(
+            "A qualified timestamp could not be obtained. [TIMESTAMP_FAILED]")
+        XCTAssertTrue(mapped.contains("Vyberte inú autoritu"))
+        XCTAssertFalse(mapped.contains("\u{2014}"))
+    }
+
+    /// CA Disig's qualified service answers only under a contract, which the picker says.
+    func testDisigSaysItNeedsAContract() throws {
+        let disig = try XCTUnwrap(TimestampAuthority.builtIn.first { $0.url == "http://tsa.disig.sk/qts" })
+        XCTAssertTrue(disig.name.contains("vyžaduje zmluvu s Disig"))
+        XCTAssertTrue(disig.isQualified)
+    }
+
     func testPrimaryDriverPrefersEIDLikeCertificateDiscovery() {
         XCTAssertEqual(EngineBridgeSigningProvider.primaryDriverID(fingerprint: "eid,secure_store"), "eid")
         XCTAssertEqual(EngineBridgeSigningProvider.primaryDriverID(fingerprint: "secure_store"), "secure_store")

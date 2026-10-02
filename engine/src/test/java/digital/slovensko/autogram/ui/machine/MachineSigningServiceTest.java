@@ -92,6 +92,22 @@ class MachineSigningServiceTest {
         assertFalse(writer.serialized().contains("sensitive failure"));
     }
 
+    /// A timestamp authority that refuses the request (no contract, wrong credentials, down)
+    /// used to surface as SIGNING_FAILED, so the app could not say what went wrong.
+    @Test
+    void aRefusedTimestampIsReportedAsTimestampFailed() throws Exception {
+        var writer = new RecordingWriter();
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((file, completed) -> {
+            throw new eu.europa.esig.dss.model.DSSException("Unable to sign",
+                    new MachineProtocolException("TIMESTAMP_FAILED", new IllegalStateException("HTTP 401 from tsa")));
+        }), path -> true);
+
+        service.sign("request-1", request("1234".toCharArray(), file("one", "one.pdf", "one-signed.pdf")));
+
+        assertEquals("TIMESTAMP_FAILED", writer.payloadCode(2));
+        assertFalse(writer.serialized().contains("HTTP 401 from tsa"));
+    }
+
     @Test
     void emitsProgressAtMachineSigningBoundaries() throws Exception {
         var writer = new RecordingWriter();

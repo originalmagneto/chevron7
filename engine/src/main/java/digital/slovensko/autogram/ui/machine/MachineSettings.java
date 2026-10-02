@@ -1,7 +1,10 @@
 package digital.slovensko.autogram.ui.machine;
 
 import digital.slovensko.autogram.core.UserSettings;
+import eu.europa.esig.dss.enumerations.DigestAlgorithm;
 import eu.europa.esig.dss.enumerations.SignatureLevel;
+import eu.europa.esig.dss.model.TimestampBinary;
+import eu.europa.esig.dss.spi.x509.tsp.TSPSource;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -63,6 +66,32 @@ public final class MachineSettings extends UserSettings {
     @Override
     public List<String> getTrustedList() {
         return trustedList;
+    }
+
+    /// The signer gets the configured timestamp authorities through this source, so a
+    /// refused or unreachable authority surfaces as TIMESTAMP_FAILED instead of the generic
+    /// SIGNING_FAILED, and the app can say that the timestamp was the problem.
+    @Override
+    public TSPSource getTspSource() {
+        var source = super.getTspSource();
+        return source == null ? null : new TimestampFailureSource(source);
+    }
+
+    static final class TimestampFailureSource implements TSPSource {
+        private final TSPSource delegate;
+
+        TimestampFailureSource(TSPSource delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public TimestampBinary getTimeStampResponse(DigestAlgorithm digestAlgorithm, byte[] digest) {
+            try {
+                return delegate.getTimeStampResponse(digestAlgorithm, digest);
+            } catch (RuntimeException exception) {
+                throw new MachineProtocolException("TIMESTAMP_FAILED", exception);
+            }
+        }
     }
 
     static int secureStoreSlotIndex(int configuredSlotIndex) {

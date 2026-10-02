@@ -21,7 +21,7 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     public static let builtIn: [TimestampAuthority] = [
         TimestampAuthority(name: "Belgium BOSA (kvalifikovaná)", url: "http://tsa.belgium.be/connect", isQualified: true),
         TimestampAuthority(name: "Certum (PL)", url: "http://time.certum.pl", isQualified: true),
-        TimestampAuthority(name: "CA Disig (SK, kvalifikovaná)", url: "http://tsa.disig.sk/qts", isQualified: true),
+        TimestampAuthority(name: "CA Disig (SK, kvalifikovaná, vyžaduje zmluvu s Disig)", url: "http://tsa.disig.sk/qts", isQualified: true),
         TimestampAuthority(name: "DigiCert (nekvalifikovaná)", url: "http://timestamp.digicert.com", isQualified: false),
         TimestampAuthority(name: "Sectigo (nekvalifikovaná)", url: "http://timestamp.sectigo.com", isQualified: false)
     ]
