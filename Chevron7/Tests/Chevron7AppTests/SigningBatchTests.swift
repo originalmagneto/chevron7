@@ -806,7 +806,9 @@ final class SigningBatchTests: XCTestCase {
         let previousTSAURL = store.selectedTSAURL
         defer { store.selectedTSAURL = previousTSAURL }
         store.includeQualifiedTimestamp = true
-        store.selectedTSAURL = "bez schemy"
+        // Only a custom server can carry a malformed address; a selection outside the list
+        // falls back to the default authority.
+        store.addCustomTSA("bez schemy")
         store.refreshReadyBatchOptions()
 
         XCTAssertEqual(store.batchPhase, .ready)
@@ -1084,6 +1086,68 @@ final class SigningBatchTests: XCTestCase {
         XCTAssertFalse(honouringStore.qualifiedTimestampIsLocked)
         XCTAssertFalse(honouringStore.qualifiedTimestampSwitchIsOn)
         XCTAssertNil(honouringStore.qualifiedTimestampNote)
+    }
+
+    /// A non-qualified authority left in the settings never reaches the engine under the
+    /// "Kvalifikovaná časová pečiatka (QTS)" switch: the default qualified one goes instead.
+    func testCardSigningNeverSendsARetiredUnqualifiedAuthority() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.selectedTSAURL = "http://timestamp.digicert.com"
+        store.outputFormat = .attachedASIC
+
+        await store.sign()
+
+        let recorded = await provider.recordedRequests()
+        let request = try XCTUnwrap(recorded.first)
+        XCTAssertTrue(request.includeTimestamp)
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.legacyDefaultURL)
+        XCTAssertEqual(store.selectedTSAURL, TimestampAuthority.legacyDefaultURL)
+        XCTAssertNil(store.timestampAuthorityWarning)
+    }
+
+    func testBatchNeverSendsARetiredUnqualifiedAuthority() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "a.pdf"), makePDF(named: "b.pdf")], selectLast: false)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.selectedTSAURL = "http://timestamp.sectigo.com"
+        store.outputFormat = .attachedASIC
+        store.batchASiCPackaging = .combined
+
+        await store.prepareBatch(ids: store.queue.map(\.id))
+        await store.startBatch()
+
+        let recorded = await provider.recordedRequests()
+        let request = try XCTUnwrap(recorded.first)
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.legacyDefaultURL)
+    }
+
+    /// A custom authority is still sent, but every picker warns that its qualification is unknown.
+    func testACustomAuthorityIsSentWithAQualificationWarning() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.addCustomTSA("https://tsa.kancelaria.test/tsp")
+        store.outputFormat = .attachedASIC
+
+        let warning = try XCTUnwrap(store.timestampAuthorityWarning)
+        XCTAssertFalse(warning.contains("\u{2014}"))
+
+        await store.sign()
+
+        let recorded = await provider.recordedRequests()
+        let request = try XCTUnwrap(recorded.first)
+        XCTAssertEqual(request.tsaURL, "https://tsa.kancelaria.test/tsp")
+
+        store.selectedTSAURL = "http://tsa.disig.sk/qts"
+        XCTAssertNil(store.timestampAuthorityWarning)
     }
 
     private func makeStore(provider: RecordingSigningProvider) -> SigningSessionStore {

@@ -255,18 +255,21 @@ public struct AppSettings: Codable, Sendable {
         self.openAICompatibleModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleModel) ?? "gpt-4o-mini"
 
         let legacy = try container.decodeIfPresent(String.self, forKey: .legacyTSAURL)
-        var customs = try container.decodeIfPresent([String].self, forKey: .customTSAServers) ?? []
+        var customs = (try container.decodeIfPresent([String].self, forKey: .customTSAServers) ?? [])
+            .filter { !TimestampAuthority.isRetiredUnqualified($0) }
         if let legacy, !legacy.isEmpty,
-           !TimestampAuthority.builtIn.contains(where: { $0.url.caseInsensitiveCompare(legacy) == .orderedSame }),
+           !TimestampAuthority.isBuiltIn(legacy),
+           !TimestampAuthority.isRetiredUnqualified(legacy),
            !customs.contains(where: { $0.caseInsensitiveCompare(legacy) == .orderedSame }) {
             customs.append(legacy)
         }
         self.customTSAServers = customs
 
         let storedSelection = try container.decodeIfPresent(String.self, forKey: .selectedTSAURL)
-        if let storedSelection, !storedSelection.isEmpty {
+        if let storedSelection, !storedSelection.isEmpty,
+           !TimestampAuthority.isRetiredUnqualified(storedSelection) {
             self.selectedTSAURL = storedSelection
-        } else if let legacy, !legacy.isEmpty {
+        } else if let legacy, !legacy.isEmpty, !TimestampAuthority.isRetiredUnqualified(legacy) {
             self.selectedTSAURL = legacy
         } else {
             self.selectedTSAURL = TimestampAuthority.legacyDefaultURL
@@ -336,10 +339,17 @@ public struct AppSettings: Codable, Sendable {
                                            selectedTSAURL: selectedTSAURL)
     }
 
+    /// The authority a signature uses: the selection while the list offers it, otherwise
+    /// the first built-in one (never a retired non-qualified authority).
     public var activeTSA: TimestampAuthority {
         availableTSAServers.first { $0.url == selectedTSAURL }
             ?? availableTSAServers.first
             ?? TimestampAuthority.builtIn[0]
+    }
+
+    /// A custom authority: the app cannot tell whether it is qualified.
+    public var activeTSAQualificationIsUnverified: Bool {
+        !TimestampAuthority.isBuiltIn(activeTSA.url)
     }
 
     public static let standard = AppSettings()

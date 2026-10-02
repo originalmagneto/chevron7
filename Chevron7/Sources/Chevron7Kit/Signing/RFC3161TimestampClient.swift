@@ -54,9 +54,7 @@ public struct RFC3161TimestampClient: Sendable {
     public func requestToken(for data: Data, tsaURL: URL) async throws -> TimestampReply {
         var lastError: Error = TimestampError.transportFailure("žiadny TSA")
         var candidates: [URL] = []
-        let selectedUnqualified = TimestampAuthority.builtIn.contains {
-            $0.url == tsaURL.absoluteString && !$0.isQualified
-        }
+        let selectedUnqualified = TimestampAuthority.isRetiredUnqualified(tsaURL.absoluteString)
         if !selectedUnqualified { candidates.append(tsaURL) }
         for extra in TimestampAuthority.qualifiedURLs where !candidates.contains(extra) {
             candidates.append(extra)

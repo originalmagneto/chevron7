@@ -222,8 +222,10 @@ final class SigningSessionStore {
 
     var settings: AppSettings { settingsStore.settings }
 
+    /// The authority signatures use: the stored selection while the list offers it, so a
+    /// retired non-qualified one never reaches the engine and the pickers never show blank.
     var selectedTSAURL: String {
-        get { settingsStore.settings.selectedTSAURL }
+        get { settingsStore.settings.activeTSA.url }
         set {
             var next = settingsStore.settings
             next.selectedTSAURL = newValue
@@ -588,6 +590,11 @@ final class SigningSessionStore {
     var qualifiedTimestampSwitchIsOn: Bool {
         get { includeQualifiedTimestamp || qualifiedTimestampIsLocked }
         set { includeQualifiedTimestamp = newValue }
+    }
+
+    /// Shown under the timestamp pickers while a custom authority of unknown qualification is chosen.
+    var timestampAuthorityWarning: String? {
+        settings.activeTSAQualificationIsUnverified ? TimestampAuthority.unverifiedQualificationWarning : nil
     }
 
     static let cardAlwaysTimestampsNote = "Podpis kartou vždy obsahuje kvalifikovanú časovú pečiatku."

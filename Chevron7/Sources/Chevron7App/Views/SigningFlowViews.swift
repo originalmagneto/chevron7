@@ -730,6 +730,12 @@ struct SigningPrepareView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
+                        if let warning = store.timestampAuthorityWarning {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.leading, 8)
                 }
@@ -1324,6 +1330,12 @@ struct SigningBatchView: View {
                             .pickerStyle(.menu)
                             .fixedSize()
                             .accessibilityLabel("Služba časovej pečiatky")
+                            if let warning = store.timestampAuthorityWarning {
+                                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                     .disabled(!settingsEditable)

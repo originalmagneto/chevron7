@@ -1473,7 +1473,7 @@ final class ZakoSessionStore {
                     throw SigningError.timestampFailed
                 }
                 timestampServers = nil
-                tsaURL = stampsSignatures ? settings.selectedTSAURL : nil
+                tsaURL = stampsSignatures ? settings.activeTSA.url : nil
             } else {
                 let qualified = TimestampAuthority.qualifiedURLs.map(\.absoluteString)
                 guard let first = qualified.first else { throw SigningError.timestampFailed }
