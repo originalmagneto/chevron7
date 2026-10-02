@@ -111,12 +111,12 @@ struct AuthorizeView: View {
         let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
         // Outside Demo the switch is hidden and the qualified built-in authorities always stamp.
         let qtsReady = store.showsQualifiedTimestampToggle
-            ? (!store.includeQualifiedTimestamp
+            ? (!store.usesQualifiedTimestamp
                || !store.settings.selectedTSAURL.trimmingCharacters(in: .whitespaces).isEmpty)
             : !TimestampAuthority.qualifiedURLs.isEmpty
         let qtsLabel = !store.showsQualifiedTimestampToggle
             ? "QTS z kvalifikovaných autorít časových pečiatok"
-            : (store.includeQualifiedTimestamp ? "QTS pripravená s TSA službou" : "QTS nepoužitá")
+            : (store.usesQualifiedTimestamp ? "QTS pripravená s TSA službou" : "QTS nepoužitá")
         return [
             inputSignatureChecklistItem,
             (store.attestation.originConfirmed,
@@ -231,11 +231,14 @@ struct AuthorizeView: View {
             }
 
             if store.showsQualifiedTimestampToggle {
-                Toggle(isOn: $store.includeQualifiedTimestamp) {
+                // With the engine the card always timestamps, so the Demo switch shows on and locked.
+                let timestampLocked = store.signingProvider.alwaysAddsQualifiedTimestamp
+                Toggle(isOn: timestampLocked ? .constant(true) : $store.includeQualifiedTimestamp) {
                     Label("Kvalifikovaná časová pečiatka (QTS)", systemImage: "clock.badge.checkmark")
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .disabled(timestampLocked)
             }
 
             if store.requiresMandateOverride {

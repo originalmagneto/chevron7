@@ -130,6 +130,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// service extends it (`SigningParameters.buildForExistingASiC`).
     public var addsSignatureToExistingContainer: Bool { true }
 
+    /// The engine refuses Baseline B for ordinary files (`MachineRequestValidator`), so every
+    /// signature of the app's own flows is Baseline T; only a portal's `signatureLevelOverride`
+    /// asks for Baseline B.
+    public var alwaysAddsQualifiedTimestamp: Bool { true }
+
     public func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult {
         let canonical = EnginePaths.canonical(fileURL)
         return await inspectInputSignatures(in: [canonical])[canonical]
