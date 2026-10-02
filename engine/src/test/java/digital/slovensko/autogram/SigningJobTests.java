@@ -1,12 +1,16 @@
 package digital.slovensko.autogram;
 
+import digital.slovensko.autogram.core.NeedAppearancesFixture;
 import digital.slovensko.autogram.core.SigningJob;
+import digital.slovensko.autogram.core.SigningParameters;
 import digital.slovensko.autogram.core.UserSettings;
 import digital.slovensko.autogram.server.dto.Document;
 import digital.slovensko.autogram.server.dto.ServerSigningParameters;
 import digital.slovensko.autogram.server.dto.SignRequestBody;
 import digital.slovensko.autogram.server.errors.RequestValidationException;
 import eu.europa.esig.dss.enumerations.ASiCContainerType;
+import eu.europa.esig.dss.enumerations.MimeTypeEnum;
+import eu.europa.esig.dss.model.InMemoryDocument;
 import eu.europa.esig.dss.enumerations.SignatureLevel;
 import eu.europa.esig.dss.enumerations.SignatureForm;
 import eu.europa.esig.dss.spi.x509.tsp.CompositeTSPSource;
@@ -14,6 +18,7 @@ import eu.europa.esig.dss.spi.x509.tsp.CompositeTSPSource;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class SigningJobTests {
@@ -70,5 +75,30 @@ public class SigningJobTests {
         settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
 
         assertTrue(settings.shouldSignPDFAsPades());
+    }
+
+    @Test
+    void padesJobSignsTheFormWithGeneratedAppearances() throws Exception {
+        var source = NeedAppearancesFixture.webForm(true);
+        var document = new InMemoryDocument(source, "form.pdf", MimeTypeEnum.PDF);
+
+        var job = SigningJob.buildFromRequest(document, SigningParameters.buildForPDF(document, false, false, null), null);
+
+        var signed = eu.europa.esig.dss.spi.DSSUtils.toByteArray(job.getDocument());
+        assertFalse(Arrays.equals(source, signed), "the PAdES input must not ask the viewer to redraw its fields");
+        assertArrayEquals(source, Arrays.copyOf(signed, source.length));
+        assertEquals("form.pdf", job.getDocument().getName());
+        assertEquals(MimeTypeEnum.PDF, job.getDocument().getMimeType());
+    }
+
+    @Test
+    void asicJobKeepsTheFormByteIdentical() throws Exception {
+        var source = NeedAppearancesFixture.webForm(true);
+        var document = new InMemoryDocument(source, "form.pdf", MimeTypeEnum.PDF);
+
+        var job = SigningJob.buildFromRequest(document,
+                SigningParameters.buildForASiCWithXAdES(document, false, false, null, true), null);
+
+        assertArrayEquals(source, eu.europa.esig.dss.spi.DSSUtils.toByteArray(job.getDocument()), "an ASiC-E data object stays the source itself");
     }
 }

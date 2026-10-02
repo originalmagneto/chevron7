@@ -1,6 +1,7 @@
 package digital.slovensko.autogram.ui.machine;
 
 import com.google.gson.JsonParser;
+import digital.slovensko.autogram.core.NeedAppearancesFixture;
 import digital.slovensko.autogram.core.PasswordManager;
 import digital.slovensko.autogram.core.SignedDocument;
 import digital.slovensko.autogram.core.SigningKey;
@@ -1685,6 +1686,86 @@ class MachineSigningServiceTest {
 
     /// Same production path for a PNG: the gate checks the real PNG magic and the published
     /// container carries the image as its single data object.
+    /// A web form export asks the viewer to redraw its fields, and Acrobat then hides the
+    /// signature. The PAdES output signs a revision with generated appearances and the flag
+    /// cleared, keeps the source as its first revision and still passes the output check.
+    /// The machine protocol refuses PAdES Baseline B and Baseline T needs a live TSA, so the
+    /// job is signed directly with the test token and checked by the real output validator.
+    @Test
+    void padesSignatureOfANeedAppearancesFormSignsGeneratedAppearances() throws Exception {
+        var source = NeedAppearancesFixture.webForm(true);
+        var retained = new MemoryRetainedFile();
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+
+        MachineSigningService.DefaultSigningSession.signingJob(source, "/tmp/formular.pdf",
+                new MachineFileResponder(retained, () -> { }), settings)
+                .signWithKeyAndRespond(new SigningKey(token, token.getKeys().get(0)));
+
+        var signed = retained.readAll();
+        var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService());
+        var previousSignatureIds = validator.signatureIds(source);
+        assertEquals(java.util.Set.of(), previousSignatureIds);
+        assertEquals(null, validator.validationFailure(signed, previousSignatureIds, false, "PAdES_BASELINE_B"));
+        assertArrayEquals(source, Arrays.copyOf(signed, source.length), "the source stays the first revision");
+        try (var document = org.apache.pdfbox.Loader.loadPDF(signed)) {
+            var acroForm = document.getDocumentCatalog().getAcroForm(null);
+            assertFalse(acroForm.getNeedAppearances());
+            assertEquals(1, document.getSignatureDictionaries().size());
+            for (var field : acroForm.getFieldTree()) {
+                for (var widget : field.getWidgets()) {
+                    assertTrue(widget.getAppearance() != null, field.getFullyQualifiedName() + " has no appearance");
+                }
+            }
+        }
+    }
+
+    /// An ASiC-E carries the PDF as its data object, which must stay the source itself.
+    @Test
+    void asicSignatureOfANeedAppearancesFormKeepsThePdfByteIdentical() throws Exception {
+        var source = NeedAppearancesFixture.webForm(true);
+        var target = signThroughTheService(source, "formular.pdf", "formular.asice", SignatureLevel.XAdES_BASELINE_B);
+
+        byte[] dataObject = null;
+        try (var zip = new ZipInputStream(Files.newInputStream(target))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                if (entry.getName().equals("formular.pdf")) dataObject = zip.readAllBytes();
+            }
+        }
+        assertArrayEquals(source, dataObject);
+    }
+
+    private Path signThroughTheService(byte[] source, String sourceName, String targetName, SignatureLevel level)
+            throws Exception {
+        var writer = new RecordingWriter();
+        var sourcePath = Files.write(temporaryDirectory.resolve(sourceName), source).toRealPath();
+        var target = target(targetName);
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(level);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(input.sourceContent(), input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), level.name(),
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", sourcePath.toString(), target.toString()))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes(), writer.serialized());
+        return target;
+    }
+
     @Test
     void signsAndPublishesPngThroughTheService() throws Exception {
         var writer = new RecordingWriter();
