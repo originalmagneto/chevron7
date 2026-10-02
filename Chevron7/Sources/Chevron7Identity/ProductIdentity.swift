@@ -16,6 +16,11 @@ public enum ProductIdentity {
     public static let webExtensionBundleIdentifier = "app.slovensko.chevron7.WebExtension"
     /// Mach service the launchd agent owns, and the agent's label.
     public static let webBridgeServiceName = "app.slovensko.chevron7.webbridge"
+    /// Code signing identifier of the launchd agent: a bare executable, so its
+    /// file name. `scripts/sign-release.sh` passes it explicitly.
+    public static let webBridgeAgentIdentifier = "chevron7-webbridge-agent"
+    /// Code signing identifier of the `webbridge-probe` developer tool.
+    public static let webBridgeProbeIdentifier = "webbridge-probe"
     public static let urlScheme = "chevron7"
     public static let installedAppURL = URL(fileURLWithPath: "/Applications/Chevron7.app", isDirectory: true)
 

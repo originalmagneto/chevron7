@@ -40,6 +40,10 @@ final class Chevron7WebExtensionHandler: NSObject, NSExtensionRequestHandling {
         // lookup at all.
         let agent = NSXPCConnection(machServiceName: WebSigningBridge.machServiceName, options: [])
         agent.remoteObjectInterface = NSXPCInterface(with: WebBridgeRendezvousProtocol.self)
+        // Documents go only to Chevron7: the name must be held by our agent and
+        // the endpoint it hands back must belong to the app, or the connection
+        // is invalidated and the page hears that Chevron7 is unavailable.
+        agent.setCodeSigningRequirement(WebBridgeCodeRequirement.requirement(for: [.agent]))
         agent.resume()
 
         // Only one reply may ever be delivered: the sandbox turns a missing app
@@ -71,6 +75,7 @@ final class Chevron7WebExtensionHandler: NSObject, NSExtensionRequestHandling {
             }
             let connection = NSXPCConnection(listenerEndpoint: endpoint)
             connection.remoteObjectInterface = NSXPCInterface(with: WebSigningBridgeProtocol.self)
+            connection.setCodeSigningRequirement(WebBridgeCodeRequirement.requirement(for: [.app]))
             connection.resume()
             appConnection = connection
             connection.interruptionHandler = { finish(unavailable) }
