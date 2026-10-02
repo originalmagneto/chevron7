@@ -356,6 +356,16 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return filename
     }
 
+    /// Timestamp endpoints handed to the engine: an explicit list (ZaKo outside Demo) wins,
+    /// otherwise the authority the person chose (`tsaURL`). Without either the engine falls
+    /// back to its own timestamp preferences.
+    static func timestampServers(for request: SigningRequest) -> [String]? {
+        if let servers = request.timestampServers, !servers.isEmpty { return servers }
+        guard let chosen = request.tsaURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !chosen.isEmpty else { return nil }
+        return [chosen]
+    }
+
     /// Serial the engine reads as "the signing key on this token".
     static let signingKeyOnToken = "*"
     static let eidSignerLabel = "Občiansky preukaz (eID)"
@@ -527,7 +537,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             outputFormat: wantsPAdES ? .pades : .asiceXAdES,
             eform: request.eform,
             signatureLevelOverride: request.signatureLevelOverride,
-            timestampServersOverride: request.timestampServers)
+            timestampServersOverride: Self.timestampServers(for: request))
 
         statusLog("Podpisujem kvalifikovaným podpisom (DSS)…")
         var outputURL: URL?

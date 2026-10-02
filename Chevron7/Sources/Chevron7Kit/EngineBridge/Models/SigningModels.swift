@@ -71,9 +71,9 @@ struct EngineSigningRequest: Sendable {
     /// Overrides the level derived from `outputFormat`. State portals ask for
     /// Baseline B, which carries no timestamp.
     let signatureLevelOverride: String?
-    /// Explicit timestamp endpoints (an EZZK record's own TSA requirement). When
-    /// set and non-empty, `AutogramCLIEngine.sign` uses exactly these for a
-    /// Baseline T signature instead of `timestampSourceProvider.load()`.
+    /// Explicit timestamp endpoints: the authority the person chose, or ZaKo's
+    /// qualified list. When set and non-empty, `AutogramCLIEngine.sign` uses exactly
+    /// these for a Baseline T signature instead of `timestampSourceProvider.load()`.
     let timestampServersOverride: [String]?
 
     init(
