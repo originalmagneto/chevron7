@@ -14,6 +14,7 @@ import eu.europa.esig.dss.asic.cades.signature.ASiCWithCAdESService;
 import eu.europa.esig.dss.asic.xades.signature.ASiCWithXAdESService;
 import eu.europa.esig.dss.cades.signature.CAdESService;
 import eu.europa.esig.dss.enumerations.MimeTypeEnum;
+import eu.europa.esig.dss.enumerations.SignatureForm;
 import eu.europa.esig.dss.enumerations.SignatureLevel;
 import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
@@ -196,6 +197,11 @@ public class SigningJob {
                     : AutogramMimeType.XML_DATACONTAINER_WITH_CHARSET);
             document.setName(getXdcfFilename(document.getName()));
         }
+
+        // Acrobat hides a PAdES signature whose revision still asks it to redraw the form
+        // fields. Only PAdES: an ASiC-E data object stays the source itself.
+        if (params.getSignatureType() == SignatureForm.PAdES && isPDF(document.getMimeType()))
+            document = PdfFormAppearances.withGeneratedAppearances(document);
 
         return new SigningJob(document, params, responder, extraDocuments);
     }
