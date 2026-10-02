@@ -39,7 +39,7 @@ Operation payloads are:
 - `DRIVERS`: `{}`.
 - `CERTIFICATES`: `{"driver":"driver-id","pin":"PIN"}`.
 - `INSPECT`: `{"files":[{"id":"file-1","source":"/absolute/source.pdf","target":"/absolute/output.pdf"}]}`.
-- `SIGN`: `{"driver":"driver-id","certificateSerial":"serial","pin":"PIN","signatureLevel":"PAdES_BASELINE_T","timestamp":{"required":true,"servers":["https://tsa.example"]},"files":[...]}`.
+- `SIGN`: `{"driver":"driver-id","certificateSerial":"serial","pin":"PIN","signatureLevel":"PAdES_BASELINE_T","timestamp":{"required":true,"servers":["https://tsa.example"]},"files":[...]}`. A file may add `attachments`, absolute paths signed as further data objects of one ASiC-E (XAdES only). eForm attributes (`eform`) and visible signatures are protocol v2 features (`--protocol-version 2`, one long-lived session), which share the signing policy below.
 
 Sources and targets in `INSPECT` and `SIGN` must be absolute normalized paths. Signing never overwrites an original or an existing target.
 
@@ -91,4 +91,13 @@ Stable error codes include `PROTOCOL_INVALID_REQUEST`, `PROTOCOL_UNSUPPORTED_VER
 
 PINs are supplied only through standard input and are cleared after use. Machine output never contains a PIN, request payload, client path from an unknown exception, raw exception message, exception class name, or stack trace. Do not treat standard error as protocol output.
 
-Successful signing is PDF-only and always `PAdES_BASELINE_T`. A timestamp is mandatory and the resulting timestamp must validate as `TimestampQualification.QTSA`. Supplying a TSA URL alone does not prove that the timestamp is qualified.
+## Signing policy
+
+Machine signing accepts PDFs, existing ASiC containers (a new signature is added to the container), XMLDataContainer `.xdcf` files (signed alone), plain text and PNG files, and XML eForms when the request carries `eform` attributes (v2).
+
+- `PAdES_BASELINE_T` and `XAdES_BASELINE_T` are always accepted and require a timestamp (`timestamp.required` true with at least one TSA URL). The new signature's timestamp must be cryptographically valid; with a visible signature the output must also be `PAdES_BASELINE_T` with a timestamp that validates as `TimestampQualification.QTSA`.
+- `XAdES_BASELINE_B` is accepted for state-portal requests (an eForm, or XAdES around a PDF, which always becomes an ASiC-E). `PAdES_BASELINE_B` is accepted only with `eform` attributes (v2). Baseline B carries no timestamp; its output is checked for exactly one new signature of the requested level with intact cryptography.
+- XAdES output is an ASiC-E container. `files[].attachments` (XAdES only, never with `eform`) adds further files as data objects of one new ASiC-E; no attachment may itself be a container.
+- Every output must contain exactly one new signature with intact cryptography and keep every earlier signature.
+
+Supplying a TSA URL alone does not prove that the timestamp is qualified.

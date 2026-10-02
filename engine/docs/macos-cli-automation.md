@@ -25,7 +25,14 @@ Read JSON Lines only from standard output. Standard error is for local diagnosti
 
 ## Signing policy
 
-Machine signing accepts PDF requests only and produces `PAdES_BASELINE_T`. A valid qualified timestamp is mandatory. The result must pass DSS validation with `TimestampQualification.QTSA`.
+Machine signing accepts PDFs, existing ASiC containers (a new signature is added to the container), XMLDataContainer `.xdcf` files (signed alone), plain text and PNG files, and XML eForms when the request carries `eform` attributes.
+
+- `PAdES_BASELINE_T` and `XAdES_BASELINE_T` are always accepted and require a timestamp (`timestamp.required` true with at least one TSA URL). The new signature's timestamp must be cryptographically valid; with a visible signature the output must also be `PAdES_BASELINE_T` with a timestamp that validates as `TimestampQualification.QTSA`.
+- `XAdES_BASELINE_B` is accepted for state-portal requests (an eForm, or XAdES around a PDF, which always becomes an ASiC-E). `PAdES_BASELINE_B` is accepted only with `eform` attributes. Baseline B carries no timestamp; its output is checked for exactly one new signature of the requested level with intact cryptography.
+- XAdES output is an ASiC-E container. `files[].attachments` (XAdES only, never with `eform`) adds further files as data objects of one new ASiC-E; no attachment may itself be a container.
+- Every output must contain exactly one new signature with intact cryptography and keep every earlier signature.
+
+Protocol v1 is described in `docs/machine-cli-protocol-v1.md`; eForm attributes and visible signatures need protocol v2.
 
 A TSA URL alone does not prove qualification. Verify the timestamp in the signed output against the applicable trusted list before accepting it as qualified.
 

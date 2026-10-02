@@ -10,8 +10,11 @@ import os
 /// Publishes the Mach service the Safari web extension handler connects to.
 ///
 /// The handler is sandboxed and can do nothing useful on its own, so everything
-/// it receives from a state portal arrives here. Only the extension inside our
-/// own bundle is entitled to look the service up.
+/// it receives from a state portal arrives here. The anonymous endpoint is handed
+/// out only by the agent, but any process of the same user could otherwise reach
+/// it, so the listener admits only the extension (and `webbridge-probe`) by code
+/// signing requirement, and talks only to the agent it expects
+/// (`WebBridgeCodeRequirement`).
 final class WebBridgeListener: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     static let shared = WebBridgeListener()
 
@@ -38,12 +41,16 @@ final class WebBridgeListener: NSObject, NSXPCListenerDelegate, @unchecked Senda
     func start() {
         guard listener == nil else { return }
         let listener = NSXPCListener.anonymous()
+        listener.setConnectionCodeSigningRequirement(
+            WebBridgeCodeRequirement.requirement(for: WebBridgeCallerRole.endpointClient.peers))
         listener.delegate = self
         listener.resume()
         self.listener = listener
 
         let connection = NSXPCConnection(machServiceName: WebSigningBridge.machServiceName, options: [])
         connection.remoteObjectInterface = NSXPCInterface(with: WebBridgeRendezvousProtocol.self)
+        // Whoever holds the name gets our endpoint, so it must be our agent.
+        connection.setCodeSigningRequirement(WebBridgeCodeRequirement.requirement(for: [.agent]))
         connection.resume()
         self.rendezvous = connection
 
