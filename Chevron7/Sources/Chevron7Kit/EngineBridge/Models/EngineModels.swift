@@ -16,14 +16,15 @@ struct EngineCapabilities: Sendable, Equatable {
 struct SigningDriver: Sendable, Equatable, Identifiable {
     let id: String
     let displayName: String
-    let middlewareVersion: String?
     let tokenPresent: Bool?
+    /// Why this driver cannot be used (Slovak, for the person), nil when it can.
+    let unavailableReason: String?
 
-    init(id: String, displayName: String, middlewareVersion: String? = nil, tokenPresent: Bool? = nil) {
+    init(id: String, displayName: String, tokenPresent: Bool? = nil, unavailableReason: String? = nil) {
         self.id = id
         self.displayName = displayName
-        self.middlewareVersion = middlewareVersion
         self.tokenPresent = tokenPresent
+        self.unavailableReason = unavailableReason
     }
 }
 

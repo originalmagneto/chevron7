@@ -69,10 +69,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     public func resolveIdentities(pin: String) async -> [SigningIdentityInfo]? {
         do {
             let drivers = try await engine.drivers()
-            let present = drivers.filter { $0.tokenPresent == true }
-            let usable = present.isEmpty ? drivers.filter { $0.tokenPresent != false } : present
+            let usable = Self.usableDrivers(drivers)
             guard let driverID = (usable.first(where: { $0.id == Self.driverID }) ?? usable.first)?.id else {
-                lastResolveErrorLock.withLock { $0 = "Karta nie je dostupná — vložte ju do čítačky." }
+                let reason = drivers.first(where: { $0.tokenPresent == true && $0.unavailableReason != nil })?
+                    .unavailableReason ?? drivers.compactMap(\.unavailableReason).first
+                lastResolveErrorLock.withLock { $0 = reason ?? "Karta nie je dostupná: vložte ju do čítačky." }
                 return []
             }
             // eID má chránenú autentizačnú cestu — BOK si vypýta eID klient vo vlastnom okne.
@@ -107,7 +108,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             } else if message.contains("OPERATION_CANCELLED") {
                 friendly = "Operácia s kartou bola zrušená."
             } else if message.contains("DRIVER_UNAVAILABLE") || message.contains("DRIVER_NOT_FOUND") {
-                friendly = "Karta nie je dostupná — vložte ju do čítačky."
+                friendly = "Karta nie je dostupná: vložte ju do čítačky."
             } else {
                 friendly = "Načítanie certifikátu zlyhalo: \(message)"
             }
@@ -128,6 +129,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// An `.asice` source reaches the engine under its own name, and the machine
     /// service extends it (`SigningParameters.buildForExistingASiC`).
     public var addsSignatureToExistingContainer: Bool { true }
+
+    /// The engine refuses Baseline B for ordinary files (`MachineRequestValidator`), so every
+    /// signature of the app's own flows is Baseline T; only a portal's `signatureLevelOverride`
+    /// asks for Baseline B.
+    public var alwaysAddsQualifiedTimestamp: Bool { true }
 
     public func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult {
         let canonical = EnginePaths.canonical(fileURL)
@@ -290,11 +296,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return cached.fingerprint.isEmpty ? nil : (cached.fingerprint, cached.names)
         }
         do {
-            let drivers = try await engine.drivers()
-            let present = drivers.filter { $0.tokenPresent == true }
-            let usable = present.isEmpty
-                ? drivers.filter { $0.tokenPresent != false }
-                : present
+            let usable = Self.usableDrivers(try await engine.drivers())
             let fingerprint = usable.map(\.id).sorted().joined(separator: ",")
             let names = usable.sorted { $0.id < $1.id }.map(\.displayName)
             driverProbeCache.withLock { $0 = (fingerprint, names, Date()) }
@@ -316,6 +318,15 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return cached.map { Self.identityInfo(from: $0, driverID: cachedDriverID ?? primaryDriverID) }
         }
         return [Self.syntheticIdentity(driverNames: driverNames, driverID: primaryDriverID)]
+    }
+
+    /// Drivers certificate discovery and signing may use: those with a card in the reader,
+    /// or, when no reader reports one, every driver that did not report an empty reader.
+    /// A driver that cannot run on this Mac is never one of them.
+    static func usableDrivers(_ drivers: [SigningDriver]) -> [SigningDriver] {
+        let drivers = drivers.filter { $0.unavailableReason == nil }
+        let present = drivers.filter { $0.tokenPresent == true }
+        return present.isEmpty ? drivers.filter { $0.tokenPresent != false } : present
     }
 
     /// The driver certificate discovery and signing pick when several cards are
@@ -350,6 +361,16 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return filename
     }
 
+    /// Timestamp endpoints handed to the engine: an explicit list (ZaKo outside Demo) wins,
+    /// otherwise the authority the person chose (`tsaURL`). Without either the engine falls
+    /// back to its own timestamp preferences.
+    static func timestampServers(for request: SigningRequest) -> [String]? {
+        if let servers = request.timestampServers, !servers.isEmpty { return servers }
+        guard let chosen = request.tsaURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !chosen.isEmpty else { return nil }
+        return [chosen]
+    }
+
     /// Serial the engine reads as "the signing key on this token".
     static let signingKeyOnToken = "*"
     static let eidSignerLabel = "Občiansky preukaz (eID)"
@@ -374,9 +395,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     public func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
-        let drivers = (try? await engine.drivers()) ?? []
-        let present = drivers.filter { $0.tokenPresent == true }
-        let usable = present.isEmpty ? drivers.filter { $0.tokenPresent != false } : present
+        let usable = Self.usableDrivers((try? await engine.drivers()) ?? [])
         let connectedDriver = usable.first(where: { $0.id == Self.driverID }) ?? usable.first
         guard let driverID = connectedDriver?.id else {
             cachedCertificates.withLock { $0 = [] }
@@ -523,7 +542,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             outputFormat: wantsPAdES ? .pades : .asiceXAdES,
             eform: request.eform,
             signatureLevelOverride: request.signatureLevelOverride,
-            timestampServersOverride: request.timestampServers)
+            timestampServersOverride: Self.timestampServers(for: request))
 
         statusLog("Podpisujem kvalifikovaným podpisom (DSS)…")
         var outputURL: URL?
@@ -828,7 +847,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return "Zvolený certifikát už nie je na karte: obnovte zoznam certifikátov."
         }
         if code("TIMESTAMP_FAILED") {
-            return "Nepodarilo sa získať kvalifikovanú časovú pečiatku (TSA)."
+            return "Služba časovej pečiatky odmietla požiadavku alebo je nedostupná. Vyberte inú autoritu časovej pečiatky."
         }
         if code("TIMESTAMP_QUALIFICATION_FAILED") {
             return "Časová pečiatka nie je kvalifikovaná. Skontrolujte TSA a internet."

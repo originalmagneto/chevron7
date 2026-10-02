@@ -73,8 +73,11 @@ final class ZakoSessionStore {
     /// The QTS switch exists only in Demo. Outside Demo both ZaKo signatures (client container
     /// and record) always carry a timestamp from the built-in qualified authorities.
     var showsQualifiedTimestampToggle: Bool { settingsStore.ezzkAccountController.isDemoMode }
-    /// Whether the ZaKo signatures get a timestamp: the switch in Demo, always outside it.
-    var usesQualifiedTimestamp: Bool { showsQualifiedTimestampToggle ? includeQualifiedTimestamp : true }
+    /// Whether the ZaKo signatures get a timestamp: the switch in Demo, always outside it, and
+    /// always with the engine, which refuses Baseline B for ordinary files.
+    var usesQualifiedTimestamp: Bool {
+        showsQualifiedTimestampToggle ? includeQualifiedTimestamp || signingProvider.alwaysAddsQualifiedTimestamp : true
+    }
     var allowNonMandateOverride = false
     private var mandateOverrideIdentityID: String?
     /// Kept for the whole app run once typed (the owner's choice), only in memory; cleared
@@ -1470,7 +1473,7 @@ final class ZakoSessionStore {
                     throw SigningError.timestampFailed
                 }
                 timestampServers = nil
-                tsaURL = stampsSignatures ? settings.selectedTSAURL : nil
+                tsaURL = stampsSignatures ? settings.activeTSA.url : nil
             } else {
                 let qualified = TimestampAuthority.qualifiedURLs.map(\.absoluteString)
                 guard let first = qualified.first else { throw SigningError.timestampFailed }

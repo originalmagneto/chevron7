@@ -3,45 +3,55 @@
 
 import Foundation
 
-enum HelperArchitecture: String, Sendable, Equatable {
-    case arm64
+enum DriverRequirementError: Error, Sendable, Equatable, LocalizedError {
+    case arm64Required
+    case architectureInspectionFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .arm64Required:
+            String(localized: "The selected signing component must include an ARM64 slice.")
+        case .architectureInspectionFailed:
+            String(localized: "The selected signing component could not be inspected.")
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .arm64Required:
+            String(localized: "Install an ARM64-compatible signing component and try again.")
+        case .architectureInspectionFailed:
+            String(localized: "Reinstall the signing component and try again.")
+        }
+    }
 }
 
-struct ResolvedDriver: Sendable, Equatable {
-    let helperURL: URL
-    let driverURL: URL
-    let architecture: HelperArchitecture
-    let middlewareVersion: String?
-}
-
+/// Checks that the helper and each PKCS#11 driver can run natively on Apple Silicon.
+/// The helper is required: without it nothing signs. A driver is checked on its own,
+/// so one Intel-only middleware on the Mac never hides the cards of the others.
+/// The engine's DRIVERS payload carries only id, name and path, so no middleware
+/// version is checked here.
 struct DriverResolver: Sendable {
     private let inspector: MachOInspector
-    private let middlewareValidator: MiddlewareRequirementValidator
 
-    init(
-        lipo: any LipoProcess = SystemLipoProcess(),
-        middlewareValidator: MiddlewareRequirementValidator = .init()
-    ) {
+    init(lipo: any LipoProcess = SystemLipoProcess()) {
         inspector = MachOInspector(lipo: lipo)
-        self.middlewareValidator = middlewareValidator
     }
 
-    func resolve(helperURL: URL, driver: DriverCandidate) throws -> ResolvedDriver {
-        guard try inspector.containsArm64Slice(at: helperURL),
-              try inspector.containsArm64Slice(at: driver.url) else {
+    func requireNativeHelper(at helperURL: URL) throws {
+        guard try inspector.containsArm64Slice(at: helperURL) else {
             throw DriverRequirementError.arm64Required
         }
-        try middlewareValidator.validate(driver)
-        return ResolvedDriver(
-            helperURL: helperURL,
-            driverURL: driver.url,
-            architecture: .arm64,
-            middlewareVersion: middlewareVersion(of: driver)
-        )
     }
 
-    private func middlewareVersion(of driver: DriverCandidate) -> String? {
-        guard case let .icaSecureStore(version)? = driver.middleware else { return nil }
-        return version
+    /// Nil when the driver can load in the arm64 helper, otherwise a Slovak reason for the person.
+    func unavailableReason(driverURL: URL, displayName: String) -> String? {
+        do {
+            if try inspector.containsArm64Slice(at: driverURL) { return nil }
+            return "Ovládač karty „\(displayName)“ nemá verziu pre Apple Silicon (ARM64). "
+                + "Nainštalujte aktuálnu verziu od výrobcu karty."
+        } catch {
+            return "Ovládač karty „\(displayName)“ sa nepodarilo overiť. Preinštalujte ho od výrobcu karty."
+        }
     }
 }

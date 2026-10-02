@@ -516,6 +516,14 @@ struct SettingsView: View {
                     }
                 }
 
+                if settingsStore.settings.activeTSAQualificationIsUnverified {
+                    Label(TimestampAuthority.unverifiedQualificationWarning,
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if !settingsStore.settings.customTSAServers.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Vlastné TSA servery")

@@ -48,6 +48,8 @@ final class SigningSessionStore {
     var agpKeyStore: any AGPKeyStoring = AGPKeyStore()
     /// Which path the current `sign` run uses; drives the button labels.
     private(set) var isSigningViaMobile = false
+    /// Whether the last signature from `sign` carries a qualified timestamp, for the result screen.
+    private(set) var lastSignatureTimestamped = false
     var existingSignatureState = SignatureTreeState()
     var resultSignatureState = SignatureTreeState()
     /// Top-level signatures, for callers that predate the tree.
@@ -220,8 +222,10 @@ final class SigningSessionStore {
 
     var settings: AppSettings { settingsStore.settings }
 
+    /// The authority signatures use: the stored selection while the list offers it, so a
+    /// retired non-qualified one never reaches the engine and the pickers never show blank.
     var selectedTSAURL: String {
-        get { settingsStore.settings.selectedTSAURL }
+        get { settingsStore.settings.activeTSA.url }
         set {
             var next = settingsStore.settings
             next.selectedTSAURL = newValue
@@ -571,6 +575,36 @@ final class SigningSessionStore {
             ? Self.qualifiedSignatureLabel : nil
     }
 
+    /// Whether a signature gets a qualified timestamp: the switch, except that card signing
+    /// through the engine always adds one (it refuses Baseline B for ordinary files). The
+    /// phone follows the switch.
+    func addsQualifiedTimestamp(viaMobile: Bool) -> Bool {
+        includeQualifiedTimestamp || (!viaMobile && signingProvider.alwaysAddsQualifiedTimestamp)
+    }
+
+    /// Only the card can sign and it always adds the timestamp, so the switch shows on and locked.
+    var qualifiedTimestampIsLocked: Bool {
+        signingProvider.alwaysAddsQualifiedTimestamp && !isMobileSigningAvailable
+    }
+
+    var qualifiedTimestampSwitchIsOn: Bool {
+        get { includeQualifiedTimestamp || qualifiedTimestampIsLocked }
+        set { includeQualifiedTimestamp = newValue }
+    }
+
+    /// Shown under the timestamp pickers while a custom authority of unknown qualification is chosen.
+    var timestampAuthorityWarning: String? {
+        settings.activeTSAQualificationIsUnverified ? TimestampAuthority.unverifiedQualificationWarning : nil
+    }
+
+    static let cardAlwaysTimestampsNote = "Podpis kartou vždy obsahuje kvalifikovanú časovú pečiatku."
+
+    var qualifiedTimestampNote: String? {
+        guard signingProvider.alwaysAddsQualifiedTimestamp else { return nil }
+        if qualifiedTimestampIsLocked { return Self.cardAlwaysTimestampsNote }
+        return includeQualifiedTimestamp ? nil : "Vypnutie platí len pre podpis mobilom. \(Self.cardAlwaysTimestampsNote)"
+    }
+
     var isMobileSigningAvailable: Bool {
         settings.mobileSigningEnabled && !signingProviderIsDemo
     }
@@ -598,6 +632,8 @@ final class SigningSessionStore {
         lastError = nil
         isSigning = true
         isSigningViaMobile = viaMobile
+        let timestamped = addsQualifiedTimestamp(viaMobile: viaMobile)
+        lastSignatureTimestamped = timestamped
         statusText = includeVisibleSignature ? "Pripravujem vizuálny podpis…" : "Podpisujem…"
 
         do {
@@ -650,11 +686,11 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: includeQualifiedTimestamp ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
                 let stampedData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,
-                    includeTimestamp: includeQualifiedTimestamp,
+                    includeTimestamp: timestamped,
                     stamper: stamper,
                     flattenAnnotations: true)
                 visualStampWasPreapplied = stampedData != pdfData
@@ -698,11 +734,11 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: includeQualifiedTimestamp ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
                 pdfData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,
-                    includeTimestamp: includeQualifiedTimestamp,
+                    includeTimestamp: timestamped,
                     stamper: stamper,
                     flattenAnnotations: true)
             }
@@ -726,7 +762,7 @@ final class SigningSessionStore {
                     qualification: identities.first(where: { $0.id == selectedIdentityID })?.isQualified == true
                         ? "Kvalifikovaný elektronický podpis" : nil,
                     certificateName: identities.first(where: { $0.id == selectedIdentityID })?.label,
-                    timestampAuthorityName: includeQualifiedTimestamp ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
             } else {
                 visualStamp = nil
             }
@@ -736,8 +772,8 @@ final class SigningSessionStore {
                 case .autogramMobile:
                     // The phone signs on the AVM server; only the final step differs from the card path.
                     let level: AVMSignatureLevel = outputFormat == .embeddedPAdES
-                        ? .pades(timestamp: includeQualifiedTimestamp)
-                        : .xades(timestamp: includeQualifiedTimestamp)
+                        ? .pades(timestamp: timestamped)
+                        : .xades(timestamp: timestamped)
                     let upload = AVMUploadRequest(filename: pdfName,
                                                   data: pdfData,
                                                   mimeType: AVMUploadRequest.pdfMimeType,
@@ -753,7 +789,7 @@ final class SigningSessionStore {
                                                     data: pdfData,
                                                     mimeType: AVMUploadRequest.pdfMimeType,
                                                     format: outputFormat == .embeddedPAdES ? .pades : .xades,
-                                                    level: includeQualifiedTimestamp ? .baselineT : .baselineB)
+                                                    level: timestamped ? .baselineT : .baselineB)
                     let file = try await mobileSigning.signViaEidentita(request, client: eidentitaClient())
                     // The portal validates the upload, so a returned file is a qualified signature.
                     // No mandate check here: this is ordinary mobile signing, ZaKo keeps its own.
@@ -775,8 +811,8 @@ final class SigningSessionStore {
                 func makeRequest(with data: Data) -> SigningRequest {
                     SigningRequest(pdfData: data,
                                    identityID: identityID,
-                                   includeTimestamp: includeQualifiedTimestamp,
-                                   tsaURL: includeQualifiedTimestamp ? selectedTSAURL : nil,
+                                   includeTimestamp: timestamped,
+                                   tsaURL: timestamped ? selectedTSAURL : nil,
                                    outputFormat: outputFormat,
                                    pin: signingPIN.isEmpty ? nil : signingPIN,
                                    extraFiles: [ASiCEPackager.Entry(path: pdfName, data: data)],
@@ -825,8 +861,8 @@ final class SigningSessionStore {
                 origin: .app,
                 method: viaMobile ? .mobile : .card,
                 signatureLevel: outputFormat == .embeddedPAdES
-                    ? (includeQualifiedTimestamp ? "PAdES_BASELINE_T" : "PAdES_BASELINE_B")
-                    : (includeQualifiedTimestamp ? "XAdES_BASELINE_T" : "XAdES_BASELINE_B"),
+                    ? (timestamped ? "PAdES_BASELINE_T" : "PAdES_BASELINE_B")
+                    : (timestamped ? "XAdES_BASELINE_T" : "XAdES_BASELINE_B"),
                 signedBy: signed.signatureLabel,
                 url: signedOutputURL)
             if let index = queue.firstIndex(where: { $0.id == selectedQueueID }) {
@@ -1051,8 +1087,8 @@ final class SigningSessionStore {
             outputFormat: outputFormat,
             asicPackaging: batchASiCPackaging,
             containerStem: nil,
-            includeQualifiedTimestamp: includeQualifiedTimestamp,
-            tsaURL: includeQualifiedTimestamp ? selectedTSAURL : nil,
+            includeQualifiedTimestamp: addsQualifiedTimestamp(viaMobile: false),
+            tsaURL: addsQualifiedTimestamp(viaMobile: false) ? selectedTSAURL : nil,
             convertToPDFA: convertToPDFA,
             pdfaMode: pdfaMode,
             selectedIdentityID: identityID,
@@ -1141,8 +1177,9 @@ final class SigningSessionStore {
                 ?? Self.containerStem(from: batchContainerDefaultName)
                 ?? "podpisane")
             : nil
-        snapshot.includeQualifiedTimestamp = includeQualifiedTimestamp
-        snapshot.tsaURL = includeQualifiedTimestamp ? selectedTSAURL : nil
+        // A batch signs with the card only.
+        snapshot.includeQualifiedTimestamp = addsQualifiedTimestamp(viaMobile: false)
+        snapshot.tsaURL = snapshot.includeQualifiedTimestamp ? selectedTSAURL : nil
         snapshot.convertToPDFA = convertToPDFA
         snapshot.pdfaMode = pdfaMode
     }
