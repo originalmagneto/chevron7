@@ -84,7 +84,7 @@ Remote-signing entries all show a status start in 2026, which is when the list b
 | **Thales SafeNet eToken 5110 CC, IDPrime 940/941/3940** (PostSignum, eIdentity) | SafeNet Authentication Client 10.9 | macOS 15 supported; macOS 26/27 and arm64 unverified | `/usr/local/lib/libeTPkcs11.dylib` | Via SAC | Separate QPIN for the qualified area; eIdentity's request plug-in does not support macOS |
 | **Bit4id TokenME EVO** (PostSignum) | Bit4id PKI Manager | PostSignum links a macOS DMG from 2017 [observed]; arm64 unverified | `/Library/bit4id/pkcs11/libbit4xpki.dylib` | Yes | Uninstall old Bit4id software first |
 
-Also observed on this Mac: an old Gemalto IDGo800 PKCS#11 (`/usr/local/lib/libidprimepkcs11.0.dylib`) that is x86_64 and i386 only. It cannot load in an arm64 process, and today it would break Chevron7's whole driver list (section 7.1).
+Also observed on this Mac: an old Gemalto IDGo800 PKCS#11 (`/usr/local/lib/libidprimepkcs11.0.dylib`) that is x86_64 and i386 only, so it cannot load in an arm64 process. It does not trigger the driver-list bug of section 7.1 here, because the engine looks for `/usr/local/lib/libIDPrimePKCS11.dylib`, which does not exist on this Mac; a newer IDPrime install at that path without an arm64 slice would.
 
 ### The eObčanka in detail
 
