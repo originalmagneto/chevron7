@@ -1,20 +1,36 @@
 package digital.slovensko.autogram.ui.machine;
 
 import digital.slovensko.autogram.core.SignatureValidator;
+import digital.slovensko.autogram.core.TrustedListCacheLoader;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+/**
+ * Loads the EU trusted lists before a visible signature or a trusted validation.
+ *
+ * <p>The national lists download in parallel, each capped by {@link TrustedListCacheLoader}
+ * and all of them by {@link #DOWNLOAD_BUDGET}, after which every unfinished download falls
+ * back to its cached copy, so the load finishes inside {@link #LOAD_TIMEOUT} with whatever
+ * did arrive. It fails only when no configured list is available at all; a visible
+ * signature whose own timestamp needs a missing list is refused after signing, naming
+ * that country.
+ */
 public final class MachineTrustService {
     private static final Duration LOAD_TIMEOUT = Duration.ofSeconds(60);
+    /** Downloads stop here; the rest of the load timeout parses, validates and synchronizes. */
+    private static final Duration DOWNLOAD_BUDGET = Duration.ofSeconds(45);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(50);
 
     private final Supplier<ExecutorService> executorFactory;
@@ -26,9 +42,14 @@ public final class MachineTrustService {
     private final Sleeper sleeper;
 
     public MachineTrustService() {
-        this(() -> Executors.newFixedThreadPool(2),
-                executor -> SignatureValidator.getInstance().initialize(executor, new MachineSettings().getTrustedList()),
-                () -> SignatureValidator.getInstance().areTLsLoaded(),
+        this(new MachineSettings().getTrustedList());
+    }
+
+    private MachineTrustService(List<String> countries) {
+        this(() -> trustedListExecutor(countries.size()),
+                executor -> SignatureValidator.getInstance().initialize(executor, countries,
+                        TrustedListCacheLoader.standard(Instant.now().plus(DOWNLOAD_BUDGET))),
+                () -> SignatureValidator.getInstance().hasAvailableTrustedList(),
                 LOAD_TIMEOUT,
                 POLL_INTERVAL,
                 System::nanoTime,
@@ -51,6 +72,20 @@ public final class MachineTrustService {
         this.pollInterval = pollInterval;
         this.nanoTime = nanoTime;
         this.sleeper = sleeper;
+    }
+
+    /**
+     * DSS runs the LOTL and then every national list as tasks on this executor while the
+     * loading task itself waits on them, so it needs a thread for that wait, one for the
+     * LOTL and one per country; with fewer the lists download one after another.
+     */
+    static ExecutorService trustedListExecutor(int countries) {
+        var counter = new AtomicInteger();
+        return Executors.newFixedThreadPool(countries + 2, runnable -> {
+            var thread = new Thread(runnable, "trusted-list-load-" + counter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     public void initialize() {

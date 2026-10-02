@@ -188,7 +188,7 @@ public final class MachineSigningService {
                     : outputValidationFailure(signedContent, previousSignatureIds,
                             prepared.hasVisibleAppearance(), requestedLevel);
             if (validationFailure != null) {
-                throw new MachineProtocolException(validationFailure);
+                throw MachineProtocolException.fromFailure(validationFailure);
             }
             progress(requestId, file, "saving");
             prepared.publish();
@@ -198,7 +198,8 @@ public final class MachineSigningService {
             if (!prepared.cleanup()) {
                 code = "OUTPUT_CLEANUP_FAILED";
             }
-            writer.write("file.failed", requestId, file.id(), failure(code));
+            writer.write("file.failed", requestId, file.id(), failure(code,
+                    "TRUSTED_LIST_UNAVAILABLE".equals(code) ? failureCountry(exception) : null));
         }
     }
 
@@ -284,6 +285,15 @@ public final class MachineSigningService {
         return fallback;
     }
 
+    private static String failureCountry(Throwable exception) {
+        for (var cause = exception; cause != null && cause.getCause() != cause; cause = cause.getCause()) {
+            if (cause instanceof MachineProtocolException protocolException && protocolException.country() != null) {
+                return protocolException.country();
+            }
+        }
+        return null;
+    }
+
     private static MachineProtocolException rethrow(Throwable exception) {
         if (exception instanceof RuntimeException runtimeException) {
             throw runtimeException;
@@ -295,8 +305,15 @@ public final class MachineSigningService {
     }
 
     private static JsonObject failure(String code) {
+        return failure(code, null);
+    }
+
+    private static JsonObject failure(String code, String country) {
         var payload = new JsonObject();
         payload.addProperty("code", code);
+        if (country != null) {
+            payload.addProperty("country", country);
+        }
         return payload;
     }
 
@@ -591,6 +608,12 @@ public final class MachineSigningService {
 
         @Override
         void close();
+    }
+
+    /// The country whose trusted list a signature's timestamp needs but did not load, or null.
+    @FunctionalInterface
+    interface MissingTrustAnchor {
+        String missingCountry(byte[] content, String signatureId);
     }
 
     @FunctionalInterface
@@ -942,9 +965,15 @@ public final class MachineSigningService {
 
     static final class PdfOutputValidator implements OutputValidator {
         private final MachineInspectionService inspectionService;
+        private final MissingTrustAnchor trustAnchors;
 
         PdfOutputValidator(MachineInspectionService inspectionService) {
+            this(inspectionService, TimestampTrustAnchors.production());
+        }
+
+        PdfOutputValidator(MachineInspectionService inspectionService, MissingTrustAnchor trustAnchors) {
             this.inspectionService = inspectionService;
+            this.trustAnchors = trustAnchors;
         }
 
         boolean isValid(Path target) throws IOException {
@@ -1035,8 +1064,14 @@ public final class MachineSigningService {
             if (visibleAppearance && !"PAdES_BASELINE_T".equals(string(added.getFirst(), "format"))) {
                 return "OUTPUT_VALIDATION_FAILED";
             }
-            return !visibleAppearance || hasQualifiedTimestamp(added.getFirst())
-                    ? null : "TIMESTAMP_QUALIFICATION_FAILED";
+            if (!visibleAppearance || hasQualifiedTimestamp(added.getFirst())) {
+                return null;
+            }
+            // Unqualified only because its own country's list did not load (a BOSA
+            // timestamp while tsl.belgium.be is down): say so, naming the country.
+            var missingCountry = trustAnchors.missingCountry(content, string(added.getFirst(), "id"));
+            return missingCountry == null ? "TIMESTAMP_QUALIFICATION_FAILED"
+                    : "TRUSTED_LIST_UNAVAILABLE:" + missingCountry;
         }
 
         /**

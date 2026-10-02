@@ -286,7 +286,9 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                                 case .fileFailed:
                                     if let fileID = event.fileID {
                                         let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
-                                        continuation.yield(.failed(fileID, .engine(Self.fileFailureMessage(code: code))))
+                                        let message = Self.fileFailureMessage(
+                                            code: code, country: string(in: event.payload["country"]))
+                                        continuation.yield(.failed(fileID, .engine(message)))
                                     }
                                 default:
                                     break
@@ -389,7 +391,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
             case .fileFailed:
                 if let fileID = event.fileID {
                     let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
-                    continuation.yield(.failed(fileID, .engine(Self.fileFailureMessage(code: code))))
+                    let message = Self.fileFailureMessage(code: code, country: string(in: event.payload["country"]))
+                    continuation.yield(.failed(fileID, .engine(message)))
                 }
             case .requestStarted, .certificatesAvailable, .inspectionCompleted, .previewCompleted,
                     .validationCompleted, .requestCompleted, .requestFailed:
@@ -654,13 +657,21 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }
     }
 
-    private static func fileFailureMessage(code: String) -> String {
-        switch code {
+    /// The engine names the country of a trusted list it could not load (`country` in the
+    /// file.failed payload); it travels in the message as `[country:XX]` for
+    /// `EngineBridgeSigningProvider.localizedEngineMessage`. Anything but a two-letter
+    /// code is dropped.
+    static func fileFailureMessage(code: String, country: String? = nil) -> String {
+        let message = switch code {
         case "TIMESTAMP_FAILED":
             "A qualified timestamp could not be obtained. [TIMESTAMP_FAILED]"
         default:
             "Signing failed. [\(code)]"
         }
+        guard let country, country.count == 2, country.allSatisfy({ $0.isASCII && $0.isLetter }) else {
+            return message
+        }
+        return "\(message) [country:\(country.uppercased())]"
     }
 
     private func object(in value: JSONValue?) -> [String: JSONValue]? {

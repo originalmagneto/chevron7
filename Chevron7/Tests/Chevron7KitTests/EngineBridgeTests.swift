@@ -216,6 +216,43 @@ final class EngineBridgeSelectionTests: XCTestCase {
         XCTAssertFalse(mapped.contains("machine request"))
     }
 
+    /// tsl.belgium.be was down on 2026-10-02: a BOSA timestamp then cannot be shown
+    /// qualified, and the person learns which country's list is missing and what to do.
+    func testMissingNationalListNamesTheCountryAndAsksForAnotherAuthority() {
+        let message = AutogramCLIEngine.fileFailureMessage(code: "TRUSTED_LIST_UNAVAILABLE", country: "BE")
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(message)
+        XCTAssertTrue(mapped.contains("Belgicko"), mapped)
+        XCTAssertTrue(mapped.contains("inú autoritu časovej pečiatky"), mapped)
+        XCTAssertFalse(mapped.contains("dôveryhodných CA"), mapped)
+        XCTAssertFalse(mapped.contains("\u{2014}"))
+    }
+
+    func testFileFailureCarriesACountryOnlyWhenTheEngineNamesOne() {
+        XCTAssertEqual(AutogramCLIEngine.fileFailureMessage(code: "TRUSTED_LIST_UNAVAILABLE", country: nil),
+                       "Signing failed. [TRUSTED_LIST_UNAVAILABLE]")
+        XCTAssertEqual(AutogramCLIEngine.fileFailureMessage(code: "TRUSTED_LIST_UNAVAILABLE", country: "BE"),
+                       "Signing failed. [TRUSTED_LIST_UNAVAILABLE] [country:BE]")
+        XCTAssertEqual(AutogramCLIEngine.fileFailureMessage(code: "TRUSTED_LIST_UNAVAILABLE", country: "B]E"),
+                       "Signing failed. [TRUSTED_LIST_UNAVAILABLE]")
+    }
+
+    func testUnknownCountryCodeIsShownAsItIs() {
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(
+            "Signing failed. [TRUSTED_LIST_UNAVAILABLE] [country:XQ]")
+        XCTAssertTrue(mapped.contains("XQ"), mapped)
+    }
+
+    /// The engine keeps the last good copy of every trusted list in the app's caches,
+    /// never in the temporary directory, and a test names its own root.
+    func testSigningHelperKeepsTrustedListsUnderTheCacheRoot() {
+        let root = URL(fileURLWithPath: "/private/tmp/cache-root-\(UUID().uuidString)", isDirectory: true)
+        let environment = ProcessConfiguration.signingHelperEnvironment(
+            from: ["AUTOGRAM_TRUSTED_LIST_CACHE": "/elsewhere", "HOME": "/Users/test"], cacheRoot: root)
+        XCTAssertEqual(environment["AUTOGRAM_TRUSTED_LIST_CACHE"],
+                       root.appending(path: "Chevron7/Trusted Lists", directoryHint: .isDirectory).path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
     /// A timestamp authority that refuses the request (no contract, down) tells the person to
     /// pick another one instead of reporting a generic signing failure.
     func testRefusedTimestampAsksForAnotherAuthority() {
