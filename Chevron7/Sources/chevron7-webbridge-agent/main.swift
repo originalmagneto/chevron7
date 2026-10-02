@@ -13,19 +13,34 @@ import Chevron7Identity
 // its own anonymous endpoint here, the sandboxed Safari extension asks for that
 // endpoint, and the two then talk directly. No document ever passes through it.
 
-final class Rendezvous: NSObject, NSXPCListenerDelegate, WebBridgeRendezvousProtocol, @unchecked Sendable {
+final class Rendezvous: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let registry = WebBridgeEndpointRegistry()
     private var registrationCount = 0
 
+    /// Admits only Chevron7's own processes and fixes what each may do.
+    ///
+    /// Without this any process of the same user could publish its own endpoint
+    /// in place of the app's, and the extension would send it portal documents.
+    /// The role comes from the caller's pid, which can be reused, so the chosen
+    /// requirement is also enforced on every message: a wrong choice fails closed.
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        let processIdentifier = connection.processIdentifier
+        guard let role = WebBridgeCallerRole.classify(
+            teamIdentifier: WebBridgeCodeRequirement.ownTeamIdentifier,
+            satisfies: { WebBridgeCodeRequirement.process(processIdentifier, satisfies: $0) }
+        ) else {
+            FileHandle.standardError.write(Data("Refused a connection from pid \(processIdentifier): not a Chevron7 component\n".utf8))
+            return false
+        }
+        connection.setCodeSigningRequirement(WebBridgeCodeRequirement.requirement(for: role.peers))
         connection.exportedInterface = NSXPCInterface(with: WebBridgeRendezvousProtocol.self)
-        connection.exportedObject = self
+        connection.exportedObject = RendezvousSession(role: role, rendezvous: self, connection: connection)
         connection.resume()
         return true
     }
 
-    func registerApp(endpoint: NSXPCListenerEndpoint) {
+    fileprivate func registerApp(endpoint: NSXPCListenerEndpoint, connection: NSXPCConnection?) {
         lock.lock()
         registrationCount += 1
         let registration = registrationCount
@@ -34,14 +49,14 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, WebBridgeRendezvousProt
         // The app keeps this connection open while it runs. When it quits the
         // connection ends and its endpoint is forgotten; a remembered endpoint
         // of a quit app made every later request fail instead of launching it.
-        if let connection = NSXPCConnection.current() {
+        if let connection {
             let registry = self.registry
             connection.invalidationHandler = { registry.connectionEnded(registration: registration) }
             connection.interruptionHandler = { registry.connectionEnded(registration: registration) }
         }
     }
 
-    func appEndpoint(reply: @escaping (NSXPCListenerEndpoint?) -> Void) {
+    fileprivate func appEndpoint(reply: @escaping (NSXPCListenerEndpoint?) -> Void) {
         let appIsRunning = Self.appIsRunning()
         if let current = registry.current, appIsRunning {
             reply(current)
@@ -113,6 +128,36 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, WebBridgeRendezvousProt
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.25, execute: poll)
         }
         poll()
+    }
+}
+
+/// One connection's view of the rendezvous, limited to what its role allows.
+private final class RendezvousSession: NSObject, WebBridgeRendezvousProtocol, @unchecked Sendable {
+    private let role: WebBridgeCallerRole
+    private let rendezvous: Rendezvous
+    // The connection retains this object as its exported object.
+    private weak var connection: NSXPCConnection?
+
+    init(role: WebBridgeCallerRole, rendezvous: Rendezvous, connection: NSXPCConnection) {
+        self.role = role
+        self.rendezvous = rendezvous
+        self.connection = connection
+    }
+
+    func registerApp(endpoint: NSXPCListenerEndpoint) {
+        guard role == .app else {
+            FileHandle.standardError.write(Data("Refused registerApp from a caller that is not the Chevron7 app\n".utf8))
+            return
+        }
+        rendezvous.registerApp(endpoint: endpoint, connection: connection)
+    }
+
+    func appEndpoint(reply: @escaping (NSXPCListenerEndpoint?) -> Void) {
+        guard role == .endpointClient else {
+            reply(nil)
+            return
+        }
+        rendezvous.appEndpoint(reply: reply)
     }
 }
 

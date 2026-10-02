@@ -61,7 +61,7 @@ if ! pgrep -x "Chevron7" >/dev/null 2>&1; then
     open "$APP"
     sleep 4
 fi
-if "$(swift build --show-bin-path 2>/dev/null)/webbridge-probe" 2>&1 | sed 's/^/  /'; then
+if "$(dirname "$0")/webbridge-probe.sh" 2>&1 | sed 's/^/  /'; then
     ok "XPC transport funguje (appková polovica je overená)"
 else
     bad "XPC spojenie zlyhalo - pozri log: log show --last 2m --predicate 'subsystem == \"app.slovensko.chevron7\"'"

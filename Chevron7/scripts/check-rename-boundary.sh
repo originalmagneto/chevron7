@@ -61,6 +61,10 @@ must_keep "$(source_file SigningFlowViews.swift)" 'UTType(importedAs: "org.autog
 must_keep "$(source_file ditec.js)" 'isAutogram: true' 'ditec.js'
 must_keep "$(source_file FormPack.swift)" 'autogram-p2e-legacy-swift-1.0' 'FormPack.swift'
 must_keep "$(source_file UserPreferences.swift)" 'digital.slovensko.autogram.timestamp-provider' 'UserPreferences.swift'
+# Autogram macOS, this app before the rename, is another app now: the Finder Quick
+# Action cleanup looks it up by its bundle identifier and trashes its old workflow
+# only when it is gone (FinderQuickActionService.legacyAppIsInstalled).
+must_keep "$(source_file ServicesProvider.swift)" 'legacyBundleIdentifier = "sk.autogram.Autogram"' 'ServicesProvider.swift'
 
 if $strict; then
     echo "▸ No old product names left (strict)"
@@ -75,7 +79,18 @@ if $strict; then
     existing=()
     for path in "${scanned[@]}"; do [[ -e "$path" ]] && existing+=("$path"); done
     pattern='sk\.autogram|autogram://|Autogram macOS\.app|Autogram(Kit|App|WebBridge|WebExtension)|autogram-webbridge-agent|autogram-macos-|autogramMacOS|AUTOGRAM_(CLI_HELPER|JAVA_ENGINE_ROOT|ENGINE_LIVE_TEST|DIAG_PDF|LEGACY_APP_ROOT)|Application Support/Autogram'
-    if hits="$(grep -rIEn --exclude-dir=.build -- "$pattern" "${existing[@]}" | grep -v 'scripts/check-rename-boundary.sh')"; then
+    # Old names kept on purpose, matched by file and exact text (never by line
+    # number, which drifts), so any other old name in the same file still fails.
+    # Each one is also a must_keep above.
+    allowed=(
+        # The old Autogram macOS bundle identifier the Finder Quick Action cleanup
+        # looks for before trashing that app's workflow.
+        'Sources/Chevron7App/ServicesProvider\.swift:[0-9]+:.*static let legacyBundleIdentifier = "sk\.autogram\.Autogram"$'
+    )
+    allowed_pattern="$(IFS='|'; printf '%s' "${allowed[*]}")"
+    # grep -v exits 1 once it has filtered every hit away, which takes the ok branch.
+    if hits="$(grep -rIEn --exclude-dir=.build -- "$pattern" "${existing[@]}" \
+        | grep -v 'scripts/check-rename-boundary.sh' | grep -vE -- "$allowed_pattern")"; then
         fail "old names remain:"
         printf '%s\n' "$hits" | sed 's/^/      /'
     else

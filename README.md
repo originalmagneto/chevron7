@@ -443,8 +443,10 @@ DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" ./build_app.sh --rele
 Podpis bez Safari sa dá vyskúšať priamo:
 
 ```bash
-"$(swift build --show-bin-path)/webbridge-probe" --sign dokument.pdf
+Chevron7/scripts/webbridge-probe.sh --sign dokument.pdf
 ```
+
+Agent aj aplikácia prijmú len vlastné súčasti Chevron7 (podpisovú požiadavku `WebBridgeCodeRequirement`), preto samotné `swift run webbridge-probe` odmietnu: skript sondu podpíše ako `webbridge-probe`, pri zostave s Developer ID identitou toho istého tímu.
 
 </details>
 

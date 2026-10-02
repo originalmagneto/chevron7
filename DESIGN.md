@@ -200,6 +200,12 @@ Seven chevrons (the open "^", pointing outward) on an arc over the hero icon, at
 ### Flow diagram
 Three real signing routes (card, phone, Safari) behind a segmented switch whose white thumb slides between them. Five steps each: a 72px Deep Indigo circle with a 30px line icon, a bold 17px label and a 15px Dusk Grey line. Hairline connectors draw in, icons trace themselves, and a white packet crosses the chain three times, pinging each node as it arrives; hover replays it. Vertical on phones.
 
+### Way diagram
+The three signing paths under the hero (Kartou, Mobilom, V Safari), drawn in the flow diagram's language on a 330 by 150 grid: three 52-unit Deep Indigo nodes with traced 24px line icons, 2px connectors that stop 5 units short of each node (never through an icon), Haze labels under the nodes and a Signal White label and ring on the last one, the signed document. In view it plays once: nodes arrive, connectors draw, a white packet crosses each connector, the signed document traces itself and rings. Hover replays it. No box around it; the drawing sits on the ground at the measure of the body text.
+
+### Conversion figure
+Beside the guaranteed conversion intro: a hairline Mac with a paper original inside (text lines, the cord with its seal, a signature, a stamp), a soft white scan that passes down the page, corner brackets that close around each security element as the scan reaches it, and outside the Mac a dim cloud whose dashed line stops at a cross. It carries the on-device AI promise visually; the promise itself is a ruled title on the ground next to it, never a tinted box. Plays once in view, replays on hover, stands finished without motion. Monochrome: amber stays with the seventh chevron.
+
 ### Real capture (Shot)
 A responsive app screenshot (1x and 2x WebP) with the capture lift, no frame, no border, no device mockup around it.
 

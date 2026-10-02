@@ -197,30 +197,6 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
             </array>
         </dict>
     </array>
-    <key>NSServices</key>
-    <array>
-        <dict>
-            <key>NSMenuItem</key>
-            <dict>
-                <key>default</key>
-                <string>Chevron7 Signing Bridge</string>
-            </dict>
-            <key>NSMessage</key>
-            <string>signFiles</string>
-            <key>NSPortName</key>
-            <string>Chevron7</string>
-            <key>NSSendFileTypes</key>
-            <array>
-                <string>com.adobe.pdf</string>
-                <string>org.autogram.asice</string>
-            </array>
-            <key>NSRequiredContext</key>
-            <dict>
-                <key>NSApplicationIdentifier</key>
-                <string>com.apple.finder</string>
-            </dict>
-        </dict>
-    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppTransportSecurity</key>
@@ -293,6 +269,10 @@ AGENT_BIN="$BIN_DIR/chevron7-webbridge-agent"
 if [[ -x "$AGENT_BIN" ]]; then
     cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent" 2>/dev/null \
         || { mkdir -p "$CONTENTS/Helpers" && cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent"; }
+    # The linker signs it as "chevron7-webbridge-agent-<hash>"; the app and the
+    # extension check the agent by its plain identifier (WebBridgeCodeRequirement).
+    codesign --force --sign - --identifier chevron7-webbridge-agent "$CONTENTS/Helpers/chevron7-webbridge-agent" >/dev/null 2>&1 \
+        || echo "  (upozornenie: agenta sa nepodarilo podpísať)"
 
     # A Developer ID build registers the agent itself through SMAppService
     # (WebBridgeAgentService); launchd reads this plist from the bundle.
