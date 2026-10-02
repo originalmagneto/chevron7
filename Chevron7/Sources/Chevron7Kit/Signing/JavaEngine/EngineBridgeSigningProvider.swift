@@ -854,7 +854,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         }
         if code("TRUSTED_LIST_UNAVAILABLE"), let country = trustedListCountry(in: message) {
             return "Časová pečiatka pochádza od autority z krajiny \(country), ktorej dôveryhodný zoznam "
-                + "sa nepodarilo stiahnuť, preto nemožno overiť jej kvalifikáciu. "
+                + "sa nepodarilo stiahnuť, preto nemožno overiť kvalifikáciu tejto časovej pečiatky. "
                 + "Vyberte inú autoritu časovej pečiatky (z inej krajiny) alebo to skúste neskôr."
         }
         if code("TRUSTED_LIST_UNAVAILABLE") {
