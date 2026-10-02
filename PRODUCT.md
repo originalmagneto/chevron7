@@ -63,15 +63,16 @@ Terminology: KEP (kvalifikovany elektronicky podpis), eIDAS, eID, BOK, ZaKo (zar
 Undecided or not yet true, and must not be claimed:
 
 - Support for other national eID cards (CZ, HU, PL, SI and others) is the stated direction, not shipped. Czechia is researched and planned (`Chevron7/docs/research/2026-10-02-czech-signing.md`, plan in `Chevron7/docs/superpowers/plans/2026-10-02-czech-signing.md`); claim it only once it ships. Czech guaranteed conversion (autorizovaná konverze) cannot be offered: it runs only inside Czech POINT.
-- Code signing and notarization status of the downloadable build is unverified; do not promise a Gatekeeper-clean install until confirmed.
 - GitHub repository is being renamed to `originalmagneto/chevron7`; release titles still read "Autogram macOS".
 - Hosting provider for the site.
 
 ## Brand Commitments
 
 - Name: Chevron7, one word, no space. Never bare "Chevron" in public copy.
-- Required credits: the signing engine is a fork of slovensko-digital/autogram (EUPL-1.2); mobile signing uses Autogram v mobile and autogram.slovensko.digital run by Slovensko.Digital; the Safari extension ports parts of slovensko-digital/autogram-extension.
-- Required disclaimers: not affiliated with or endorsed by Slovensko.Digital; not affiliated with Chevron Corporation.
+- Voice (owner's decision, 2026-10-02): the site is marketing for advocates and other people who sign, who are not technical. Say what Chevron7 does for them in plain Slovak and English; no file formats (PAdES, XAdES, ASiC-E beyond ".asice"), ports, engines, processes, PKCS#11, licences, notarization, code signing or other build and infrastructure details in the copy. The download section may say the app installs in a minute and updates itself.
+- No company names on the site (owner's decision, 2026-10-02): not Slovensko.Digital, Apple, the Software s.r.o. or Chevron Corporation. App and service names users need stay (Autogram v mobile, slovensko.sk, EZZK). The footer carries one neutral line instead of the former credits and disclaimers: Chevron7 is an independent project and its signing core builds on the open source Autogram project. Full attribution stays in the app's NOTICE and the repository.
+- For advocates the strongest promise is confidentiality: the security element AI runs on the Mac (Apple Vision and the on-device Apple model, the default `builtInOnDevice` mode), nothing goes to a server or the cloud and the learning bank stays on the Mac; cloud AI only when the advocate turns it on. The site says this in a callout in the guaranteed conversion section. Keep it true: if the default ever changes, change the site.
+- The hero offers only the download and the video; the source code is a quiet link in the download section, never a hero button.
 - Nothing that implies the site or app is an official state or Slovensko.Digital product.
 - The name comes from Stargate: the seventh chevron is the point of origin, where the connection comes from (Earth's is a pyramid with the sun above it). A qualified signature proves a document's origin, and Chevron7 signs locally, so the point of origin is the user's Mac. The owner wants this story in the background only (a quiet nod such as the seventh chevron locking at the moment of signing), never as the site's theme. An explicit section explaining the name was tried and rejected by the owner on 2026-09-23 as embarrassing: never explain the name on the site.
 - Internal vocabulary may appear sparingly (chevron as a locked step, the seventh chevron as the signature itself, iris as the trusted-origin gate). Never use Stargate names, the gate ring artwork, the 39 glyph designs or any MGM property.
