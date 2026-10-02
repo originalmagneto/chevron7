@@ -86,6 +86,9 @@ while IFS= read -r -d '' file_path; do
             sign --entitlements "$config/Chevron7Java.entitlements" "$file_path" ;;
         "$app/Contents/MacOS/pkcs11-helper")
             sign --entitlements "$config/Chevron7PKCS11Helper.entitlements" "$file_path" ;;
+        "$app/Contents/Helpers/chevron7-webbridge-agent")
+            # The app and the extension check the agent by this identifier.
+            sign --identifier chevron7-webbridge-agent "$file_path" ;;
         *)
             sign "$file_path" ;;
     esac

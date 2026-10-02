@@ -34,7 +34,10 @@ public class UserSettings implements PasswordManagerSettings, SignatureTokenSett
     private static final boolean DEFAULT_CORRECT_DOCUMENT_DISPLAY = true;
     private static final boolean DEFAULT_SIGNATURES_VALIDITY = true;
     private static final boolean DEFAULT_PDFA_COMPLIANCE = true;
-    private static final boolean DEFAULT_SERVER_ENABLED = true;
+    // The bundled engine runs only in CLI mode and must never open the local HTTP
+    // API (no authentication, CORS "*"). A stored SERVER_ENABLED=true from an
+    // upstream install still wins, so the launcher's --cli gate is the real guard.
+    private static final boolean DEFAULT_SERVER_ENABLED = false;
     private static final boolean DEFAULT_EXPIRED_CERTS_ENABLED = false;
     private static final String DEFAULT_TRUSTED_LIST = "SK,CZ,AT,PL,HU,BE,NL,ES";
     private static final String DEFAULT_CUSTOM_KEYSTORE_PATH = "";

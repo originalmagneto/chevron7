@@ -100,6 +100,13 @@ for helper in AutogramCLI-arm64 AutogramQuickActionRunner-arm64; do
 done
 [[ -x "${output_root}/runtime/bin/java" ]] || fail "jlink runtime has no java executable"
 
+echo "▸ smoke: the helper refuses a launch without --cli (GUI and its HTTP API)"
+set +e
+"${output_root}/Helpers/AutogramCLI-arm64" --url http://localhost:37200 >/dev/null 2>&1
+gui_status=$?
+set -e
+[[ "${gui_status}" == 64 ]] || fail "AutogramCLI-arm64 did not refuse a non-CLI launch (status ${gui_status})"
+
 echo "▸ smoke: CAPABILITIES over machine protocol v1"
 # Machine mode SIGKILLs its own process after flushing (PKCS#11 teardown can hang),
 # so the exit status is always 137; the terminal event is the success signal.

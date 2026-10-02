@@ -22,7 +22,7 @@ The same copy also reported "Annotations Deleted: Widget annot on page 1", altho
 
 The result is saved as an incremental update (PDFBox 3 tracks the changed objects), so the source stays a verbatim first revision, and the signature follows as a third revision. Every revision from the second on says `false`, and every widget carries an `/AP`, so the signed revision no longer asks Acrobat to redraw anything.
 
-The hook sits in `SigningJob.build`, not only in the machine service, so the Finder Quick Action (`CliApp`, `buildFromFile`) and the HTTP `SignEndpoint` are fixed too. Only PAdES: an ASiC-E (XAdES or CAdES) keeps the source byte-identical as its data object, which ZaKo relies on (the PDF/A SHA-256 is the clause fingerprint).
+The hook sits in `SigningJob.build`, not only in the machine service, so the Finder Quick Action (`CliApp`, `buildFromFile`) is fixed too, as is upstream's HTTP `SignEndpoint`, which the bundled helper never starts. Only PAdES: an ASiC-E (XAdES or CAdES) keeps the source byte-identical as its data object, which ZaKo relies on (the PDF/A SHA-256 is the clause fingerprint).
 
 Checked against the real file with the engine and the test keystore: three revisions, `qpdf --check` clean, `pdfsig` "Signature is Valid", the source a byte-identical prefix, every widget with `/AP` in the signed revision, page 1 `/Annots` only gaining the signature widget.
 

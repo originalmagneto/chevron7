@@ -78,6 +78,12 @@ descends from. The rename stops exactly at that line. A blind
    `.asice` files being recognised.
 5. **The machine protocol**, which is the wire contract with the engine.
 
+Addendum (2026-10-02): the old Autogram macOS bundle identifier also stays, in
+`FinderQuickActionService.legacyBundleIdentifier` only. Autogram macOS is
+another application now, and the Finder Quick Action cleanup looks it up by that
+identifier before moving its old workflow to the Trash. `check-rename-boundary.sh`
+requires the constant and allows exactly that line in `--strict`.
+
 ### Machine-enforced boundary
 
 The boundary becomes a test rather than a promise:

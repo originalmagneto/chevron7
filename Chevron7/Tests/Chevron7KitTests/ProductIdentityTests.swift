@@ -15,6 +15,8 @@ final class ProductIdentityTests: XCTestCase {
         XCTAssertEqual(ProductIdentity.bundleIdentifier, "app.slovensko.chevron7")
         XCTAssertEqual(ProductIdentity.webExtensionBundleIdentifier, "app.slovensko.chevron7.WebExtension")
         XCTAssertEqual(ProductIdentity.webBridgeServiceName, "app.slovensko.chevron7.webbridge")
+        XCTAssertEqual(ProductIdentity.webBridgeAgentIdentifier, "chevron7-webbridge-agent")
+        XCTAssertEqual(ProductIdentity.webBridgeProbeIdentifier, "webbridge-probe")
         XCTAssertEqual(ProductIdentity.urlScheme, "chevron7")
         XCTAssertEqual(ProductIdentity.installedAppURL.path, "/Applications/Chevron7.app")
     }

@@ -7,6 +7,14 @@
 #include <unistd.h>
 
 int main(int argc, char *const argv[]) {
+    // Every caller starts the engine in CLI mode. Without --cli the engine would
+    // launch its GUI, which can start the local HTTP API server (no
+    // authentication, CORS "*"), so any other launch is refused before Java runs.
+    if (argc < 2 || strcmp(argv[1], "--cli") != 0) {
+        fprintf(stderr, "This helper runs only in CLI mode: the first argument must be --cli.\n");
+        return 64;
+    }
+
     uint32_t executablePathLength = PATH_MAX;
     char executablePath[PATH_MAX];
 
