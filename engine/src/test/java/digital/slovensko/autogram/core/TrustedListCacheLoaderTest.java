@@ -159,6 +159,40 @@ class TrustedListCacheLoaderTest {
         assertTrue(Files.isRegularFile(loader.cacheFile(URL)));
     }
 
+    /// www.nccert.pl (PL) and nmhh.hu (HU) chain to Certum Trusted Root CA and Microsec
+    /// e-Szigno Root CA 2009, which macOS trusts and the JDK's cacerts does not: with the
+    /// JDK roots alone both lists failed with "PKIX path building failed" (2026-10-02).
+    @Test
+    void downloadsTrustTheMacRootsBesideTheJavaOnes() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name").startsWith("Mac"));
+        var subjects = new java.util.ArrayList<String>();
+        var store = TrustedListCacheLoader.tlsTrustStore();
+        for (var aliases = store.aliases(); aliases.hasMoreElements();) {
+            var certificate = (java.security.cert.X509Certificate) store.getCertificate(aliases.nextElement());
+            subjects.add(certificate.getSubjectX500Principal().getName());
+        }
+
+        assertTrue(subjects.stream().anyMatch(subject -> subject.contains("CN=Certum Trusted Root CA")), "Certum");
+        assertTrue(subjects.stream().anyMatch(subject -> subject.contains("CN=Microsec e-Szigno Root CA 2009")),
+                "Microsec");
+        assertTrue(subjects.stream().anyMatch(subject -> subject.contains("CN=DigiCert Global Root G2")), "JDK roots");
+    }
+
+    @Test
+    void anUnreadableRootSourceLeavesTheOthers() throws Exception {
+        var roots = java.security.KeyStore.getInstance("PKCS12");
+        roots.load(null, null);
+        var certificate = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory
+                .getInstance("X.509").generateCertificate(TrustedListCacheLoaderTest.class.getResourceAsStream(
+                        "/digital/slovensko/autogram/core/tl-test-root.pem"));
+        roots.setCertificateEntry("root", certificate);
+
+        var merged = TrustedListCacheLoader.tlsTrustStore(roots, null);
+
+        assertEquals(1, merged.size());
+        assertTrue(merged.isCertificateEntry(merged.aliases().nextElement()));
+    }
+
     private TrustedListCacheLoader loader(TrustedListCacheLoader.Fetcher fetcher) {
         return new TrustedListCacheLoader(cache, fetcher, CLOCK, TrustedListCacheLoader.FRESH_FOR,
                 TrustedListCacheLoader.MAX_FALLBACK_AGE, Duration.ofSeconds(5), null);

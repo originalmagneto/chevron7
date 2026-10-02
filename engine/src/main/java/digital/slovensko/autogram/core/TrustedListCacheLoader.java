@@ -15,6 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -100,13 +102,75 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
     }
 
     static Fetcher httpFetcher() {
-        var loader = new CommonsDataLoader();
+        var trustStore = tlsTrustStore();
+        var loader = new CommonsDataLoader() {
+            @Override
+            protected KeyStore getSSLTrustStore() {
+                return trustStore;
+            }
+        };
         loader.setTimeoutConnection(CONNECT_TIMEOUT_MILLIS);
         loader.setTimeoutConnectionRequest(CONNECT_TIMEOUT_MILLIS);
         loader.setTimeoutSocket(READ_TIMEOUT_MILLIS);
         loader.setTimeoutResponse(READ_TIMEOUT_MILLIS);
         loader.setRedirectsEnabled(true);
         return loader::get;
+    }
+
+    /**
+     * The roots the downloads trust: the JDK's and, on macOS, the system's. Several
+     * national list servers chain to roots only the system knows (www.nccert.pl to
+     * Certum Trusted Root CA, nmhh.hu to Microsec e-Szigno Root CA 2009), and a list's
+     * content is verified by its own XML signature anyway, so TLS here needs no stricter
+     * trust than the browser's.
+     */
+    static KeyStore tlsTrustStore() {
+        return tlsTrustStore(javaRoots(), macRoots());
+    }
+
+    static KeyStore tlsTrustStore(KeyStore... sources) {
+        try {
+            var merged = KeyStore.getInstance("PKCS12");
+            merged.load(null, null);
+            var index = 0;
+            for (var source : sources) {
+                if (source == null) {
+                    continue;
+                }
+                for (var aliases = source.aliases(); aliases.hasMoreElements();) {
+                    var alias = aliases.nextElement();
+                    if (source.isCertificateEntry(alias) && source.getCertificate(alias) != null) {
+                        merged.setCertificateEntry("root-" + index++, source.getCertificate(alias));
+                    }
+                }
+            }
+            return merged;
+        } catch (GeneralSecurityException | IOException exception) {
+            throw new IllegalStateException("Cannot build the trust store for trusted list downloads", exception);
+        }
+    }
+
+    private static KeyStore javaRoots() {
+        var cacerts = Path.of(System.getProperty("java.home"), "lib", "security", "cacerts");
+        try (var input = Files.newInputStream(cacerts)) {
+            var store = KeyStore.getInstance(KeyStore.getDefaultType());
+            store.load(input, null);
+            return store;
+        } catch (GeneralSecurityException | IOException exception) {
+            logger.warn("Cannot read the Java root certificates: {}", exception.getMessage());
+            return null;
+        }
+    }
+
+    private static KeyStore macRoots() {
+        try {
+            var store = KeyStore.getInstance("KeychainStore-ROOT");
+            store.load(null, null);
+            return store;
+        } catch (GeneralSecurityException | IOException exception) {
+            // Not macOS, or a JDK without the system root keystore.
+            return null;
+        }
     }
 
     @Override
