@@ -29,6 +29,7 @@ import eu.europa.esig.dss.service.crl.OnlineCRLSource;
 import eu.europa.esig.dss.service.http.commons.CommonsDataLoader;
 import eu.europa.esig.dss.service.http.commons.FileCacheDataLoader;
 import eu.europa.esig.dss.service.ocsp.OnlineOCSPSource;
+import eu.europa.esig.dss.spi.client.http.DSSCacheFileLoader;
 import eu.europa.esig.dss.spi.tsl.TrustedListsCertificateSource;
 import eu.europa.esig.dss.spi.x509.CertificateSource;
 import eu.europa.esig.dss.spi.x509.KeyStoreCertificateSource;
@@ -36,6 +37,7 @@ import eu.europa.esig.dss.tsl.function.OfficialJournalSchemeInformationURI;
 import eu.europa.esig.dss.tsl.function.TLPredicateFactory;
 import eu.europa.esig.dss.tsl.job.TLValidationJob;
 import eu.europa.esig.dss.tsl.source.LOTLSource;
+import eu.europa.esig.dss.tsl.sync.SynchronizationStrategy;
 import eu.europa.esig.dss.spi.validation.CertificateVerifier;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
 import eu.europa.esig.dss.validation.SignedDocumentValidator;
@@ -49,6 +51,8 @@ public class SignatureValidator {
     private CertificateVerifier verifier;
     private TLValidationJob validationJob;
     private ExecutorService executorService;
+    private final SynchronizationStrategy synchronizationStrategy = new CustomSynchronizationStrategy();
+    private List<String> configuredCountries = List.of();
     private static Logger logger = LoggerFactory.getLogger(SignatureValidator.class);
 
     // Singleton
@@ -85,7 +89,18 @@ public class SignatureValidator {
     }
 
     public synchronized void initialize(ExecutorService executorService, List<String> tlCountries) {
+        initialize(executorService, tlCountries, TrustedListCacheLoader.standard(null));
+    }
+
+    /**
+     * Loads the trusted lists of the given countries through {@code trustedListLoader}.
+     * The lists run in parallel on {@code executorService}, so it needs a thread for the
+     * caller's wait, one for the LOTL and one per country.
+     */
+    public synchronized void initialize(ExecutorService executorService, List<String> tlCountries,
+            DSSCacheFileLoader trustedListLoader) {
         this.executorService = executorService;
+        this.configuredCountries = List.copyOf(tlCountries);
 
         SimpleDateFormat formatter = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
         logger.debug("Initializing signature validator at {}", formatter.format(new Date()));
@@ -99,10 +114,7 @@ public class SignatureValidator {
         lotlSource.setPivotSupport(true);
         lotlSource.setTlPredicate(TLPredicateFactory.createEUTLCountryCodePredicate(tlCountries.toArray(new String[0])));
 
-        var offlineFileLoader = new FileCacheDataLoader();
-        offlineFileLoader.setCacheExpirationTime(21600000);
-        offlineFileLoader.setDataLoader(new CommonsDataLoader());
-        validationJob.setOfflineDataLoader(offlineFileLoader);
+        validationJob.setOfflineDataLoader(trustedListLoader);
 
         var onlineFileLoader = new FileCacheDataLoader();
         onlineFileLoader.setCacheExpirationTime(0);
@@ -112,7 +124,7 @@ public class SignatureValidator {
         var trustedListCertificateSource = new TrustedListsCertificateSource();
         validationJob.setTrustedListCertificateSource(trustedListCertificateSource);
         validationJob.setListOfTrustedListSources(lotlSource);
-        validationJob.setSynchronizationStrategy(new CustomSynchronizationStrategy());
+        validationJob.setSynchronizationStrategy(synchronizationStrategy);
         validationJob.setExecutorService(executorService);
         validationJob.setDebug(false);
 
@@ -195,6 +207,20 @@ public class SignatureValidator {
             return null;
 
         return report.getSignatureFormat(report.getSignatureIdList().get(0));
+    }
+
+    /** The configured countries whose trusted list the last load could not bring in. */
+    public synchronized List<String> unavailableTrustedListCountries() {
+        if (validationJob == null)
+            return List.of();
+
+        return TrustedListAvailability.unavailable(configuredCountries,
+                TrustedListAvailability.availableTerritories(validationJob.getSummary(), synchronizationStrategy));
+    }
+
+    /** True when at least one configured national trusted list came in. */
+    public synchronized boolean hasAvailableTrustedList() {
+        return validationJob != null && unavailableTrustedListCountries().size() < configuredCountries.size();
     }
 
     public synchronized boolean areTLsLoaded() {

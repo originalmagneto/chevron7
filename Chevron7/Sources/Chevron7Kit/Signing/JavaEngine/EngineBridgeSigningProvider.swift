@@ -852,6 +852,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         if code("TIMESTAMP_QUALIFICATION_FAILED") {
             return "Časová pečiatka nie je kvalifikovaná. Skontrolujte TSA a internet."
         }
+        if code("TRUSTED_LIST_UNAVAILABLE"), let country = trustedListCountry(in: message) {
+            return "Časová pečiatka pochádza od autority z krajiny \(country), ktorej dôveryhodný zoznam "
+                + "sa nepodarilo stiahnuť, preto nemožno overiť kvalifikáciu tejto časovej pečiatky. "
+                + "Vyberte inú autoritu časovej pečiatky (z inej krajiny) alebo to skúste neskôr."
+        }
         if code("TRUSTED_LIST_UNAVAILABLE") {
             return "EU zoznam dôveryhodných CA sa nepodarilo stiahnuť. Zapnite internet a skúste znova; vizuálna pečiatka tento zoznam potrebuje."
         }
@@ -859,6 +864,16 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return "Engine odmietol výsledok podpisu (výstupná validácia)."
         }
         return message
+    }
+
+    /// The Slovak name of the country `AutogramCLIEngine.fileFailureMessage` put in the
+    /// message as `[country:XX]`, or the code itself when macOS does not know it.
+    private static func trustedListCountry(in message: String) -> String? {
+        guard let start = message.range(of: "[country:"),
+              let end = message[start.upperBound...].firstIndex(of: "]") else { return nil }
+        let code = String(message[start.upperBound..<end])
+        guard code.count == 2 else { return nil }
+        return Locale(identifier: "sk").localizedString(forRegionCode: code) ?? code
     }
 
     /// Mapovanie ostatných chýb bridge vrstvy (session proces, launcher).

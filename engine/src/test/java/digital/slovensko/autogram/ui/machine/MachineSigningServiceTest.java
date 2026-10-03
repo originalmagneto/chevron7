@@ -510,6 +510,59 @@ class MachineSigningServiceTest {
         assertEquals("TIMESTAMP_QUALIFICATION_FAILED", writer.payloadCode(2));
     }
 
+    /// tsl.belgium.be was down for hours on 2026-10-02: a BOSA timestamp cannot be shown
+    /// qualified without the Belgian list, so the failure names the country instead of
+    /// blaming the timestamp, and the output is still never published.
+    @Test
+    void aTimestampWhoseNationalListIsMissingNamesThatCountry() throws Exception {
+        var writer = new RecordingWriter();
+        var target = target("timestamp-anchor-missing.pdf");
+        var inspection = new MachineInspectionService(path -> locallyValidTimestampReport("existing"), content ->
+                new String(content, java.nio.charset.StandardCharsets.ISO_8859_1).contains("signed")
+                        ? locallyValidTimestampReport("existing", "new") : locallyValidTimestampReport("existing"));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((file, completed) -> {
+            file.writeSignedContent("%PDF-1.7\nsigned\n%%EOF".getBytes());
+            completed.run();
+        }), new MachineSigningService.PdfOutputValidator(inspection, (content, signatureId) ->
+                "new".equals(signatureId) ? "BE" : null));
+
+        service.sign("request-1", request("1234".toCharArray(),
+                visibleFile("one", "source.pdf", target.getFileName().toString())));
+
+        assertFalse(Files.exists(target));
+        assertEquals("TRUSTED_LIST_UNAVAILABLE", writer.payloadCode(2));
+        assertEquals("BE", writer.payloadString(2, "country"));
+        assertEquals(List.of("session.started", "file.signingStarted", "file.failed", "session.completed"),
+                writer.lifecycleEventTypes());
+    }
+
+    @Test
+    void anUnqualifiedTimestampWithItsListAvailableStaysUnqualified() {
+        var report = locallyValidTimestampReport("new");
+        var consulted = new AtomicBoolean();
+        var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService(path -> report,
+                content -> report), (content, signatureId) -> {
+                    consulted.set(true);
+                    return null;
+                });
+        var output = "%PDF-1.7\nvalidated\n%%EOF".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+        assertEquals("TIMESTAMP_QUALIFICATION_FAILED", validator.validationFailure(output, java.util.Set.of(), true));
+        assertTrue(consulted.get());
+    }
+
+    @Test
+    void aQualifiedTimestampNeverAsksForItsTrustAnchor() {
+        var report = qualifiedReport("new");
+        var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService(path -> report,
+                content -> report), (content, signatureId) -> {
+                    throw new AssertionError("a qualified timestamp needs no anchor lookup");
+                });
+        var output = "%PDF-1.7\nvalidated\n%%EOF".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+
+        assertEquals(null, validator.validationFailure(output, java.util.Set.of(), true));
+    }
+
     @Test
     void productionTrustedInspectionAllowsQualifiedVisiblePadesPublication() {
         var inspection = MachineInspectionService.forTrustedValidation(ignored -> qualifiedReport("new"));
@@ -1976,6 +2029,13 @@ class MachineSigningServiceTest {
             return events().stream()
                     .filter(event -> !"file.progress".equals(event.get("type").getAsString()))
                     .toList().get(eventIndex).getAsJsonObject("payload").get("code").getAsString();
+        }
+
+        private String payloadString(int eventIndex, String field) {
+            var payload = events().stream()
+                    .filter(event -> !"file.progress".equals(event.get("type").getAsString()))
+                    .toList().get(eventIndex).getAsJsonObject("payload");
+            return payload.has(field) ? payload.get(field).getAsString() : null;
         }
 
         private String serialized() {
