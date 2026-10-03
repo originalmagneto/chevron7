@@ -253,8 +253,8 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
      *
      * <p>A timeout, a connection error and an answer that is not XML put the URL in the
      * cool-down. Running out of the shared deadline before asking and an interrupted caller
-     * do not: no server was found failing. A healthy server cut short by the deadline
-     * finishes in the background and clears its entry then.
+     * do not: no server was found failing. A healthy server cut short by the deadline, or by
+     * the load ending, finishes in the background, stores its copy and clears its entry then.
      */
     private byte[] download(String url, Path file) throws Exception {
         var wait = remainingWait();
@@ -283,7 +283,9 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
             cooldown.recordFailure(url);
             throw exception.getCause() instanceof Exception cause ? cause : exception;
         } catch (InterruptedException exception) {
-            task.cancel(true);
+            // The load is over (MachineTrustService shuts its pool down once enough lists are
+            // in), but the download goes on: cancelling it threw away a slow list such as
+            // tsl.digital.gob.es (3 MB at about 26 KB/s), which therefore never reached the cache.
             Thread.currentThread().interrupt();
             throw exception;
         }

@@ -203,6 +203,11 @@ public class UserSettings implements PasswordManagerSettings, SignatureTokenSett
                 .findFirst().orElse(SignatureLevel.PAdES_BASELINE_B);
     }
 
+    /** The countries whose trusted lists are loaded unless the GUI's settings say otherwise. */
+    public static List<String> defaultTrustedList() {
+        return List.of(DEFAULT_TRUSTED_LIST.split(","));
+    }
+
     private void setTrustedList(String trustedList) {
         this.trustedList = trustedList == null ? new ArrayList<>() : new ArrayList<>(List.of(trustedList.split(",")));
     }

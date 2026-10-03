@@ -321,6 +321,41 @@ class TrustedListCacheLoaderTest {
         assertEquals("<tl>late</tl>", Files.readString(loader.cacheFile(URL)));
     }
 
+    /// MachineTrustService shuts its pool down once enough lists are in, which interrupts a
+    /// caller still waiting for a slow list (tsl.digital.gob.es, about 115 s). The download
+    /// must go on and store its copy, or that list never reaches the cache.
+    @Test
+    void aDownloadWhoseCallerIsInterruptedStillStoresItsCopy() throws Exception {
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var loader = loader(url -> {
+            started.countDown();
+            release.await();
+            return xml("<tl>slow</tl>");
+        }, CLOCK, new TrustedListCooldown(CLOCK), Duration.ofSeconds(30));
+        var caller = new Thread(() -> {
+            try {
+                loader.getDocument(URL);
+            } catch (RuntimeException expected) {
+                // Interrupted: no list for this load.
+            }
+        });
+
+        caller.start();
+        started.await();
+        caller.interrupt();
+        caller.join(5_000);
+        release.countDown();
+
+        var file = loader.cacheFile(URL);
+        var giveUp = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (!Files.exists(file) && System.nanoTime() < giveUp) {
+            Thread.onSpinWait();
+        }
+        assertFalse(caller.isAlive());
+        assertEquals("<tl>slow</tl>", Files.readString(file));
+    }
+
     @Test
     void runningOutOfTheSharedDeadlineBeforeAskingStartsNoCooldown() throws Exception {
         cached(URL, "<tl>last good</tl>", Duration.ofDays(1));

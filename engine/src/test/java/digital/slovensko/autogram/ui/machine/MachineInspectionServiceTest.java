@@ -330,12 +330,13 @@ class MachineInspectionServiceTest {
         assertEquals("opaque-valid", events.get(2).get("fileId").getAsString());
     }
 
+    /// Machine mode no longer follows the GUI's stored list: the Java preferences are shared
+    /// with the upstream Autogram app, whose "SK,CZ,AT,PL,HU,BE,NL,LT" dropped Spain.
     @Test
-    void productionMachineSettingsUseTheHumanTrustedListConfiguration() {
-        var humanSettings = UserSettings.load();
+    void productionMachineSettingsUseTheirOwnTrustedListConfiguration() {
         var machineSettings = new MachineSettings();
 
-        assertEquals(humanSettings.getTrustedList(), machineSettings.getTrustedList());
+        assertEquals(UserSettings.defaultTrustedList(), machineSettings.getTrustedList());
         assertFalse(machineSettings.getTrustedList().isEmpty());
     }
 
