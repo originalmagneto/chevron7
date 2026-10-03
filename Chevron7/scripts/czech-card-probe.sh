@@ -43,7 +43,11 @@ section() { log ""; log "== $* =="; }
 bounded() {
     local seconds=$1
     shift
-    perl -e 'alarm shift; exec @ARGV' "$seconds" "$@" < /dev/null
+    if command -v perl > /dev/null 2>&1; then
+        perl -e 'alarm shift; exec @ARGV' "$seconds" "$@" < /dev/null
+    else
+        "$@" < /dev/null
+    fi
 }
 
 run() {
@@ -198,7 +202,14 @@ for lib in $PRESENT_LIBRARIES; do
             continue
             ;;
     esac
-    [ -n "$PKCS11_TOOL" ] || continue
+    if [ -z "$PKCS11_TOOL" ]; then
+        if signing_test_allowed "$lib"; then
+            add_verdict "$label: zkušební podpis v Chevron7 je povolen, jeden pokus podle návodu (stav karty nezjištěn bez pkcs11-tool)."
+        else
+            add_verdict "$label: zatím v Chevron7 nepodepisujte (samostatný QPIN), pošlete jen tento report."
+        fi
+        continue
+    fi
 
     log ""
     log "-- $label ($lib)"
