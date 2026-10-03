@@ -19,11 +19,13 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -38,7 +40,9 @@ import java.util.concurrent.TimeoutException;
  * large list never trips them), also gives up at a deadline shared by the whole load,
  * keeps the last good copy of each list in a persistent directory, and falls back to that
  * copy within {@link #MAX_FALLBACK_AGE} when its server is down. A copy is replaced only
- * by XML, so an error page never overwrites it.
+ * by XML, so an error page never overwrites it. A URL whose download just failed is not
+ * asked again for {@link TrustedListCooldown#COOLDOWN} while a fallback copy exists; the load
+ * treats it as failed at once and uses that copy. Without one the server is always asked.
  */
 public final class TrustedListCacheLoader implements DSSCacheFileLoader {
     /** The directory the app names for the cache; without it the temporary directory is used. */
@@ -66,6 +70,7 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
     private final Duration maxFallbackAge;
     private final Duration requestTimeout;
     private final Instant deadline;
+    private final transient TrustedListCooldown cooldown;
     private final transient ExecutorService downloads = Executors.newCachedThreadPool(runnable -> {
         var thread = new Thread(runnable, "trusted-list-download");
         thread.setDaemon(true);
@@ -78,6 +83,16 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
      */
     public TrustedListCacheLoader(Path cacheDirectory, Fetcher fetcher, Clock clock, Duration freshFor,
             Duration maxFallbackAge, Duration requestTimeout, Instant deadline) {
+        this(cacheDirectory, fetcher, clock, freshFor, maxFallbackAge, requestTimeout, deadline,
+                new TrustedListCooldown(clock));
+    }
+
+    /**
+     * @param cooldown the failed URLs this loader skips and records; production shares
+     *                 {@link TrustedListCooldown#shared()} across every load in the process.
+     */
+    public TrustedListCacheLoader(Path cacheDirectory, Fetcher fetcher, Clock clock, Duration freshFor,
+            Duration maxFallbackAge, Duration requestTimeout, Instant deadline, TrustedListCooldown cooldown) {
         this.cacheDirectory = cacheDirectory;
         this.fetcher = fetcher;
         this.clock = clock;
@@ -85,12 +100,14 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
         this.maxFallbackAge = maxFallbackAge;
         this.requestTimeout = requestTimeout;
         this.deadline = deadline;
+        this.cooldown = cooldown;
     }
 
     /** The production loader: HTTP with connect and read timeouts, the system clock, the app's cache. */
     public static TrustedListCacheLoader standard(Instant deadline) {
         return new TrustedListCacheLoader(cacheDirectory(System.getenv(), System.getProperty("java.io.tmpdir")),
-                httpFetcher(), Clock.systemUTC(), FRESH_FOR, MAX_FALLBACK_AGE, REQUEST_TIMEOUT, deadline);
+                httpFetcher(), Clock.systemUTC(), FRESH_FOR, MAX_FALLBACK_AGE, REQUEST_TIMEOUT, deadline,
+                TrustedListCooldown.shared());
     }
 
     static Path cacheDirectory(Map<String, String> environment, String temporaryDirectory) {
@@ -186,12 +203,22 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
             return document(cached, url);
         }
         Exception failure;
-        try {
-            return document(download(url, file), url);
-        } catch (Exception exception) {
-            failure = exception;
+        var hasFallback = cached != null && age(file).compareTo(maxFallbackAge) <= 0;
+        // Without a copy to fall back on, skipping would leave the list missing (for the LOTL,
+        // every visible signature failing) for minutes after the network returns: always ask.
+        var coolingDown = hasFallback ? cooldown.remaining(url) : Optional.<Duration>empty();
+        if (coolingDown.isPresent()) {
+            // Exactly as if the download had failed, without waiting for a server that just did.
+            failure = new IOException("not asked again for " + coolingDown.get().toSeconds()
+                    + " s after a failed download");
+        } else {
+            try {
+                return document(download(url, file), url);
+            } catch (Exception exception) {
+                failure = exception;
+            }
         }
-        if (cached != null && age(file).compareTo(maxFallbackAge) <= 0) {
+        if (hasFallback) {
             logger.warn("Using the cached copy of {} ({} old): {}", url, age(file), failure.getMessage());
             return document(cached, url);
         }
@@ -222,7 +249,12 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
     /**
      * Runs the download on its own daemon thread so the caller can stop waiting: blocking
      * HTTP ignores interrupts. A download that finishes after the caller gave up still
-     * stores its copy, which the next load then finds fresh.
+     * stores its copy, which the next load then finds fresh, and clears the cool-down.
+     *
+     * <p>A timeout, a connection error and an answer that is not XML put the URL in the
+     * cool-down. Running out of the shared deadline before asking and an interrupted caller
+     * do not: no server was found failing. A healthy server cut short by the deadline
+     * finishes in the background and clears its entry then.
      */
     private byte[] download(String url, Path file) throws Exception {
         var wait = remainingWait();
@@ -235,13 +267,20 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
                 throw new IOException("the server did not return XML");
             }
             store(file, bytes);
+            cooldown.recordSuccess(url);
             return bytes;
         });
         try {
             return task.get(wait.toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
+            cooldown.recordFailure(url);
+            if (task.state() == Future.State.SUCCESS) {
+                // It finished between the timeout and the record above.
+                cooldown.recordSuccess(url);
+            }
             throw new TimeoutException("no complete answer within " + wait.toMillis() + " ms");
         } catch (ExecutionException exception) {
+            cooldown.recordFailure(url);
             throw exception.getCause() instanceof Exception cause ? cause : exception;
         } catch (InterruptedException exception) {
             task.cancel(true);

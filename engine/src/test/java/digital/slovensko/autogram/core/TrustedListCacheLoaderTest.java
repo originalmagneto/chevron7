@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -191,6 +192,179 @@ class TrustedListCacheLoaderTest {
 
         assertEquals(1, merged.size());
         assertTrue(merged.isCertificateEntry(merged.aliases().nextElement()));
+    }
+
+    /// While tsl.belgium.be was down, every visible signature of a long-lived session waited
+    /// for it again (about 14 s warm, 34 s cold); a URL that just failed is now skipped.
+    @Test
+    void aFailedDownloadIsNotRetriedDuringTheCooldown() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(2));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var downloads = new AtomicInteger();
+        var loader = loader(url -> {
+            downloads.incrementAndGet();
+            throw new IOException("connection refused");
+        }, clock, cooldown, Duration.ofSeconds(5));
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        clock.advance(Duration.ofMinutes(4));
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL, true)));
+
+        assertEquals(1, downloads.get());
+        assertTrue(cooldown.isCoolingDown(URL));
+    }
+
+    @Test
+    void theServerIsAskedAgainOnceTheCooldownEnds() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(2));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var downloads = new AtomicInteger();
+        var loader = loader(url -> {
+            if (downloads.incrementAndGet() == 1) {
+                throw new IOException("connection refused");
+            }
+            return xml("<tl>new</tl>");
+        }, clock, cooldown, Duration.ofSeconds(5));
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        clock.advance(TrustedListCooldown.COOLDOWN);
+
+        assertEquals("<tl>new</tl>", text(loader.getDocument(URL)));
+        assertEquals(2, downloads.get());
+        assertFalse(cooldown.isCoolingDown(URL));
+    }
+
+    /// Skipping with nothing to fall back on would leave the list missing (for the LOTL, every
+    /// visible signature failing) for minutes after the network returns, so the server is asked.
+    @Test
+    void withNothingCachedTheServerIsAskedDespiteTheCooldown() throws Exception {
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var downloads = new AtomicInteger();
+        var loader = loader(url -> {
+            if (downloads.incrementAndGet() == 1) {
+                throw new IOException("connection refused");
+            }
+            return xml("<tl>back online</tl>");
+        }, clock, new TrustedListCooldown(clock), Duration.ofSeconds(5));
+
+        assertThrows(DSSException.class, () -> loader.getDocument(URL));
+        clock.advance(Duration.ofMinutes(1));
+        assertEquals("<tl>back online</tl>", text(loader.getDocument(URL)));
+        assertEquals(2, downloads.get());
+    }
+
+    @Test
+    void aCopyOlderThanTheFallbackAgeDoesNotTriggerTheSkip() throws Exception {
+        cached(URL, "<tl>too old</tl>", Duration.ofDays(30));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var downloads = new AtomicInteger();
+        var loader = loader(url -> {
+            downloads.incrementAndGet();
+            throw new IOException("connection refused");
+        }, clock, new TrustedListCooldown(clock), Duration.ofSeconds(5));
+
+        assertThrows(DSSException.class, () -> loader.getDocument(URL));
+        assertThrows(DSSException.class, () -> loader.getDocument(URL));
+        assertEquals(2, downloads.get());
+    }
+
+    @Test
+    void anAnswerThatIsNotXmlStartsTheCooldown() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(1));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var loader = loader(url -> "502 Bad Gateway".getBytes(StandardCharsets.UTF_8), clock, cooldown,
+                Duration.ofSeconds(5));
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        assertTrue(cooldown.isCoolingDown(URL));
+    }
+
+    @Test
+    void aHangingServerStartsTheCooldown() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(1));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var never = new CountDownLatch(1);
+        var loader = loader(url -> {
+            never.await();
+            return xml("<tl>never</tl>");
+        }, clock, cooldown, Duration.ofMillis(200));
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        assertTrue(cooldown.isCoolingDown(URL));
+    }
+
+    @Test
+    void aDownloadFinishingAfterTheCallerGaveUpClearsTheCooldown() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(1));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var release = new CountDownLatch(1);
+        var loader = loader(url -> {
+            release.await();
+            return xml("<tl>late</tl>");
+        }, clock, cooldown, Duration.ofMillis(200));
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        assertTrue(cooldown.isCoolingDown(URL));
+        release.countDown();
+
+        var giveUp = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (cooldown.isCoolingDown(URL) && System.nanoTime() < giveUp) {
+            Thread.onSpinWait();
+        }
+        assertFalse(cooldown.isCoolingDown(URL));
+        assertEquals("<tl>late</tl>", Files.readString(loader.cacheFile(URL)));
+    }
+
+    @Test
+    void runningOutOfTheSharedDeadlineBeforeAskingStartsNoCooldown() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(1));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var loader = new TrustedListCacheLoader(cache, url -> { throw new AssertionError("no time left to ask"); },
+                clock, TrustedListCacheLoader.FRESH_FOR, TrustedListCacheLoader.MAX_FALLBACK_AGE,
+                Duration.ofSeconds(5), NOW, cooldown);
+
+        assertEquals("<tl>last good</tl>", text(loader.getDocument(URL)));
+        assertFalse(cooldown.isCoolingDown(URL));
+    }
+
+    /// Every load builds a new loader, so the cool-down must outlive it.
+    @Test
+    void aLaterLoaderSharingTheCooldownSkipsAUrlAnEarlierOneFoundFailing() throws Exception {
+        cached(URL, "<tl>last good</tl>", Duration.ofDays(1));
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        var first = loader(url -> { throw new IOException("connection refused"); }, clock, cooldown,
+                Duration.ofSeconds(5));
+        assertEquals("<tl>last good</tl>", text(first.getDocument(URL)));
+
+        var second = loader(url -> { throw new AssertionError("the URL is cooling down"); }, clock, cooldown,
+                Duration.ofSeconds(5));
+
+        assertEquals("<tl>last good</tl>", text(second.getDocument(URL)));
+    }
+
+    @Test
+    void theCooldownLeavesOtherListsAlone() throws Exception {
+        var other = "https://tsl.example.test/tsl-cz.xml";
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var cooldown = new TrustedListCooldown(clock);
+        cooldown.recordFailure(URL);
+        var loader = loader(url -> xml("<tl>cz</tl>"), clock, cooldown, Duration.ofSeconds(5));
+
+        assertEquals("<tl>cz</tl>", text(loader.getDocument(other)));
+    }
+
+    private TrustedListCacheLoader loader(TrustedListCacheLoader.Fetcher fetcher, Clock clock,
+            TrustedListCooldown cooldown, Duration requestTimeout) {
+        return new TrustedListCacheLoader(cache, fetcher, clock, TrustedListCacheLoader.FRESH_FOR,
+                TrustedListCacheLoader.MAX_FALLBACK_AGE, requestTimeout, null, cooldown);
     }
 
     private TrustedListCacheLoader loader(TrustedListCacheLoader.Fetcher fetcher) {
