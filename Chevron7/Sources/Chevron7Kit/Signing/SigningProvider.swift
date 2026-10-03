@@ -172,6 +172,38 @@ public enum SigningError: LocalizedError, Equatable, Sendable {
     }
 }
 
+/// Whether a new signature's timestamp is qualified, as the engine judged it against the EU
+/// trusted lists right after signing. It informs; it never decides whether the signature is kept.
+public enum TimestampQualification: Equatable, Sendable {
+    case qualified
+    case notQualified
+    /// The list of the authority's country did not load, so qualification could not be checked.
+    case unverified(country: String?)
+
+    public init?(engineValue: String?, country: String?) {
+        switch engineValue {
+        case "qualified": self = .qualified
+        case "notQualified": self = .notQualified
+        case "unverified": self = .unverified(country: country)
+        default: return nil
+        }
+    }
+
+    /// One Slovak sentence for the result screen and the note under the authority picker.
+    public var slovakDescription: String {
+        switch self {
+        case .qualified:
+            return "Časová pečiatka je kvalifikovaná."
+        case .notQualified:
+            return "Časová pečiatka nie je kvalifikovaná: autorita nie je v dôveryhodnom zozname EÚ vedená ako kvalifikovaná. Podpis je platný."
+        case .unverified(let country):
+            let name = country.flatMap { Locale(identifier: "sk").localizedString(forRegionCode: $0) }
+            let list = name.map { "dôveryhodný zoznam krajiny \($0)" } ?? "dôveryhodný zoznam autority"
+            return "Kvalifikáciu časovej pečiatky sa nepodarilo overiť: \(list) sa nepodarilo stiahnuť. Podpis je platný."
+        }
+    }
+}
+
 public struct SignedConversionResult: Sendable {
     public var pdfData: Data
     public var asicData: Data?
@@ -180,10 +212,12 @@ public struct SignedConversionResult: Sendable {
     public var isLegallyBinding: Bool
     public var timestampGenTime: Date?
     public var timestampToken: Data?
+    public var timestampQualification: TimestampQualification?
 
     public init(pdfData: Data, asicData: Data?, signedAt: Date,
                 signatureLabel: String, isLegallyBinding: Bool,
-                timestampGenTime: Date? = nil, timestampToken: Data? = nil) {
+                timestampGenTime: Date? = nil, timestampToken: Data? = nil,
+                timestampQualification: TimestampQualification? = nil) {
         self.pdfData = pdfData
         self.asicData = asicData
         self.signedAt = signedAt
@@ -191,6 +225,7 @@ public struct SignedConversionResult: Sendable {
         self.isLegallyBinding = isLegallyBinding
         self.timestampGenTime = timestampGenTime
         self.timestampToken = timestampToken
+        self.timestampQualification = timestampQualification
     }
 }
 

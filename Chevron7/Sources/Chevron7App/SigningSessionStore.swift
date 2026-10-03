@@ -50,6 +50,10 @@ final class SigningSessionStore {
     private(set) var isSigningViaMobile = false
     /// Whether the last signature from `sign` carries a qualified timestamp, for the result screen.
     private(set) var lastSignatureTimestamped = false
+    /// The engine's verdict on the last signature's timestamp, when it judged one.
+    private(set) var lastTimestampQualification: TimestampQualification?
+    /// The last verdict per timestamp authority URL in this app run, shown under the pickers.
+    private(set) var timestampQualificationByAuthority: [String: TimestampQualification] = [:]
     var existingSignatureState = SignatureTreeState()
     var resultSignatureState = SignatureTreeState()
     /// Top-level signatures, for callers that predate the tree.
@@ -575,11 +579,12 @@ final class SigningSessionStore {
             ? Self.qualifiedSignatureLabel : nil
     }
 
-    /// Whether a signature gets a qualified timestamp: the switch, except that card signing
-    /// through the engine always adds one (it refuses Baseline B for ordinary files). The
-    /// phone follows the switch.
+    /// Whether a signature gets a qualified timestamp: the switch, as in upstream Autogram.
+    /// Extending an existing container always timestamps (the engine extends it at Baseline T),
+    /// and a provider that cannot sign without one forces it for the card.
     func addsQualifiedTimestamp(viaMobile: Bool) -> Bool {
-        includeQualifiedTimestamp || (!viaMobile && signingProvider.alwaysAddsQualifiedTimestamp)
+        includeQualifiedTimestamp
+            || (!viaMobile && (signingProvider.alwaysAddsQualifiedTimestamp || sourceSignatureKind == .asicContainer))
     }
 
     static let mobileTimestampAuthorityLabel = "služba podpisu mobilom"
@@ -591,9 +596,16 @@ final class SigningSessionStore {
         return viaMobile ? Self.mobileTimestampAuthorityLabel : settings.activeTSA.name
     }
 
-    /// Only the card can sign and it always adds the timestamp, so the switch shows on and locked.
+    /// The switch shows on and locked when the card must timestamp and nothing else can sign.
     var qualifiedTimestampIsLocked: Bool {
-        signingProvider.alwaysAddsQualifiedTimestamp && !isMobileSigningAvailable
+        sourceSignatureKind == .asicContainer
+            || (signingProvider.alwaysAddsQualifiedTimestamp && !isMobileSigningAvailable)
+    }
+
+    /// The last verdict for the authority chosen now, as a note under the picker.
+    var selectedAuthorityQualificationNote: (text: String, isWarning: Bool)? {
+        guard let verdict = timestampQualificationByAuthority[selectedTSAURL] else { return nil }
+        return ("Naposledy: \(verdict.slovakDescription)", verdict != .qualified)
     }
 
     var qualifiedTimestampSwitchIsOn: Bool {
@@ -607,8 +619,10 @@ final class SigningSessionStore {
     }
 
     static let cardAlwaysTimestampsNote = "Podpis kartou vždy obsahuje kvalifikovanú časovú pečiatku."
+    static let containerAlwaysTimestampsNote = "Pridanie podpisu do existujúceho kontajnera vždy obsahuje časovú pečiatku."
 
     var qualifiedTimestampNote: String? {
+        if sourceSignatureKind == .asicContainer { return Self.containerAlwaysTimestampsNote }
         guard signingProvider.alwaysAddsQualifiedTimestamp else { return nil }
         if qualifiedTimestampIsLocked { return Self.cardAlwaysTimestampsNote }
         return includeQualifiedTimestamp ? nil : "Vypnutie platí len pre podpis mobilom. \(Self.cardAlwaysTimestampsNote)"
@@ -643,6 +657,8 @@ final class SigningSessionStore {
         isSigningViaMobile = viaMobile
         let timestamped = addsQualifiedTimestamp(viaMobile: viaMobile)
         lastSignatureTimestamped = timestamped
+        lastTimestampQualification = nil
+        let authorityURL = selectedTSAURL
         statusText = includeVisibleSignature ? "Pripravujem vizuálny podpis…" : "Podpisujem…"
 
         do {
@@ -846,6 +862,10 @@ final class SigningSessionStore {
                 }
             }
 
+            lastTimestampQualification = signed.timestampQualification
+            if !viaMobile, timestamped, let verdict = signed.timestampQualification {
+                timestampQualificationByAuthority[authorityURL] = verdict
+            }
             statusText = "Ukladám…"
             let (directory, stem) = resolveOutputLocation()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

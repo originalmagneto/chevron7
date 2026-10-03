@@ -965,7 +965,7 @@ final class EngineBridgeLiveSignTests: XCTestCase {
                 case .started: events.append("started")
                 case .activity(let phase): events.append("activity:\(phase)")
                 case .fileSigning(let id): events.append("signing:\(id)")
-                case .completed(let id, let url): events.append("completed:\(id):\(url.lastPathComponent)")
+                case .completed(let id, let url, _): events.append("completed:\(id):\(url.lastPathComponent)")
                 case .failed(let id, let failure): events.append("failed:\(id):\(failure)")
                 case .cancelled: events.append("cancelled")
                 }
@@ -1033,7 +1033,7 @@ final class EngineBridgeLiveSignTests: XCTestCase {
                 case .started: events.append("started")
                 case .activity(let phase): events.append("activity:\(phase)")
                 case .fileSigning(let id): events.append("signing:\(id)")
-                case .completed(let id, _): events.append("completed:\(id)")
+                case .completed(let id, _, _): events.append("completed:\(id)")
                 case .failed(let id, let failure): events.append("failed:\(id):\(failure)")
                 case .cancelled: events.append("cancelled")
                 }

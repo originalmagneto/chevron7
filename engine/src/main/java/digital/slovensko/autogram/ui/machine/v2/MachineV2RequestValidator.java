@@ -31,8 +31,7 @@ public final class MachineV2RequestValidator {
             throw invalid();
         }
         var signatureLevel = payload.get("signatureLevel").getAsString();
-        validateTimestamp(payload.getAsJsonObject("timestamp"), signatureLevel,
-                payload.has("eform") || "XAdES_BASELINE_B".equals(signatureLevel));
+        validateTimestamp(payload.getAsJsonObject("timestamp"), signatureLevel);
         var files = new ArrayList<ValidatedSignFile>();
         for (var value : payload.getAsJsonArray("files")) {
             if (!value.isJsonObject()) {
@@ -45,7 +44,7 @@ public final class MachineV2RequestValidator {
             }
             VisibleSignatureAppearance.Snapshot appearance = null;
             if (file.has("visibleAppearance")) {
-                if (!"PAdES_BASELINE_T".equals(signatureLevel) || !isPdf(strictPath(file.get("source").getAsString()))) {
+                if (!signatureLevel.startsWith("PAdES_BASELINE_") || !isPdf(strictPath(file.get("source").getAsString()))) {
                     throw invalid();
                 }
                 appearance = visibleAppearance(file.get("visibleAppearance")).snapshot();
@@ -137,15 +136,14 @@ public final class MachineV2RequestValidator {
         return new Timestamp(List.copyOf(servers), authentication(value));
     }
 
-    private static void validateTimestamp(JsonObject value, String signatureLevel, boolean allowsBaselineB) {
+    private static void validateTimestamp(JsonObject value, String signatureLevel) {
         if ((value.size() != 2 && value.size() != 3) || !value.has("required") || !value.get("required").isJsonPrimitive()
                 || !value.has("servers") || !value.get("servers").isJsonArray()) {
             throw invalid();
         }
-        // Baseline B carries no timestamp and is only accepted where a portal asks
-        // for it: eForms and XAdES around a PDF, which becomes an ASiC-E.
+        // Baseline B carries no timestamp, so it names no authority.
         if (!signatureLevel.endsWith("_T")) {
-            if (!allowsBaselineB || value.get("required").getAsBoolean()
+            if (value.get("required").getAsBoolean()
                     || !value.getAsJsonArray("servers").isEmpty()) {
                 throw invalid();
             }

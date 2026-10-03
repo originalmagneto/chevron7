@@ -16,8 +16,6 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class MachineRequestValidator {
-    private static final Set<String> TIMESTAMPED_SIGNATURE_LEVELS = Set.of(
-            "PAdES_BASELINE_T", "XAdES_BASELINE_T");
     private static final Set<String> SUPPORTED_SIGNATURE_LEVELS = Set.of(
             "PAdES_BASELINE_T", "XAdES_BASELINE_T", "PAdES_BASELINE_B", "XAdES_BASELINE_B");
     /// Extensions of ASiC containers. With attachments DSS builds a new container, so an existing
@@ -55,15 +53,9 @@ public final class MachineRequestValidator {
                 || request.pin() == null || request.pin().length == 0 || request.files() == null || request.files().isEmpty()) {
             throw invalidRequest();
         }
-        // Baseline B produces a signature with no timestamp, which this app must
-        // never emit for ordinary file signing, and its own flows only ask for
-        // Baseline T. State portals do ask for it: on eForms, and as XAdES around a
-        // PDF, which always becomes an ASiC-E. PAdES Baseline B stays refused.
-        var portalEnvelope = "XAdES_BASELINE_B".equals(request.signatureLevel());
-        var allowedLevels = request.eform() != null || portalEnvelope
-                ? SUPPORTED_SIGNATURE_LEVELS
-                : TIMESTAMPED_SIGNATURE_LEVELS;
-        if (!allowedLevels.contains(request.signatureLevel())) {
+        // Baseline B is a signature without a timestamp: the person chose to sign without
+        // one, or a state portal asked for it (eForms, XAdES around a PDF).
+        if (!SUPPORTED_SIGNATURE_LEVELS.contains(request.signatureLevel())) {
             throw new MachineProtocolException("SIGNATURE_LEVEL_REQUIRED");
         }
         if (request.signatureLevel().endsWith("_T")) {

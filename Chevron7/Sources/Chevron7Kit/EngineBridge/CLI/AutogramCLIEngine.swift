@@ -265,6 +265,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                             let stream = await runner.run(request: secureRequest, configuration: configuration)
                             var machineEvents: [MachineEvent] = []
                             var completedFileIDs: [String] = []
+                            var qualifications: [String: TimestampQualification] = [:]
                             continuation.yield(.started)
                             for try await event in stream {
                                 guard event.sessionID == machineRequest.requestID else {
@@ -283,6 +284,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                                 case .fileCompleted:
                                     guard let fileID = event.fileID else { continue }
                                     completedFileIDs.append(fileID)
+                                    qualifications[fileID] = Self.timestampQualification(in: event.payload)
                                 case .fileFailed:
                                     if let fileID = event.fileID {
                                         let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
@@ -298,7 +300,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                             for fileID in completedFileIDs {
                                 do {
                                     let outputURL = try finalizeOutput(for: fileID)
-                                    continuation.yield(.completed(fileID, outputURL: outputURL))
+                                    continuation.yield(.completed(fileID, outputURL: outputURL,
+                                                                  timestamp: qualifications[fileID]))
                                 } catch {
                                     continuation.yield(.failed(fileID, .fileFailed(fileID)))
                                 }
@@ -374,6 +377,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         let events = try await runV2(SecureMachineV2Request(envelope: machineRequest, pin: request.pin,
             timestampAuthentication: timestamp.authentication))
         var completedFileIDs: [String] = []
+        var qualifications: [String: TimestampQualification] = [:]
         continuation.yield(.started)
         for event in events {
             guard event.requestID == requestID else {
@@ -387,7 +391,10 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
             case .fileSigningStarted:
                 if let fileID = event.fileID { continuation.yield(.fileSigning(fileID)) }
             case .fileCompleted:
-                if let fileID = event.fileID { completedFileIDs.append(fileID) }
+                if let fileID = event.fileID {
+                    completedFileIDs.append(fileID)
+                    qualifications[fileID] = Self.timestampQualification(in: event.payload)
+                }
             case .fileFailed:
                 if let fileID = event.fileID {
                     let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
@@ -409,7 +416,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }
         for fileID in completedFileIDs {
             do {
-                continuation.yield(.completed(fileID, outputURL: try finalizeOutput(for: fileID)))
+                continuation.yield(.completed(fileID, outputURL: try finalizeOutput(for: fileID),
+                                              timestamp: qualifications[fileID]))
             } catch {
                 continuation.yield(.failed(fileID, .fileFailed(fileID)))
             }
@@ -661,6 +669,17 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     /// file.failed payload); it travels in the message as `[country:XX]` for
     /// `EngineBridgeSigningProvider.localizedEngineMessage`. Anything but a two-letter
     /// code is dropped.
+    /// The engine's verdict on a visible signature's timestamp in `file.completed`.
+    static func timestampQualification(in payload: [String: JSONValue]) -> TimestampQualification? {
+        let country: String? = {
+            guard case .string(let value)? = payload["country"], value.count == 2,
+                  value.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+            return value.uppercased()
+        }()
+        guard case .string(let value)? = payload["timestampQualification"] else { return nil }
+        return TimestampQualification(engineValue: value, country: country)
+    }
+
     static func fileFailureMessage(code: String, country: String? = nil) -> String {
         let message = switch code {
         case "TIMESTAMP_FAILED":

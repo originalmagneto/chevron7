@@ -22,12 +22,22 @@ class MachineV2RequestValidatorTest {
         assertDoesNotThrow(() -> MachineV2RequestValidator.validateSign(signPayload("XAdES_BASELINE_B", pdf)));
     }
 
+    /// The QTS switch off signs a plain PDF without a timestamp.
     @Test
-    void keepsRejectingPadesBaselineBForAPlainPdf() throws Exception {
+    void acceptsPadesBaselineBForAPlainPdf() throws Exception {
         var pdf = Files.writeString(temporaryDirectory.resolve("source.pdf"), "%PDF-1.7\n%%EOF").toRealPath();
 
-        assertThrows(MachineProtocolException.class,
-                () -> MachineV2RequestValidator.validateSign(signPayload("PAdES_BASELINE_B", pdf)));
+        assertDoesNotThrow(() -> MachineV2RequestValidator.validateSign(signPayload("PAdES_BASELINE_B", pdf)));
+    }
+
+    /// Baseline B names no timestamp authority.
+    @Test
+    void rejectsBaselineBThatAsksForATimestamp() throws Exception {
+        var pdf = Files.writeString(temporaryDirectory.resolve("source.pdf"), "%PDF-1.7\n%%EOF").toRealPath();
+        var payload = signPayload("PAdES_BASELINE_B", pdf);
+        payload.getAsJsonObject("timestamp").addProperty("required", true);
+
+        assertThrows(MachineProtocolException.class, () -> MachineV2RequestValidator.validateSign(payload));
     }
 
     private com.google.gson.JsonObject signPayload(String level, Path source) throws Exception {
