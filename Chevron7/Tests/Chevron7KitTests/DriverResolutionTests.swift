@@ -131,6 +131,36 @@ final class DriverResolutionTests: XCTestCase {
         XCTAssertEqual(identities ?? [], [])
         XCTAssertEqual(provider.lastResolveError, reason)
     }
+
+    /// Signing with only an unusable driver left names it too, not a bare "no card".
+    func testSignNamesTheUnusableDriver() async {
+        let reason = "Ovládač karty „Starý“ nemá verziu pre Apple Silicon (ARM64)."
+        let provider = EngineBridgeSigningProvider(engine: FixedDriversEngine(drivers: [
+            SigningDriver(id: "legacy", displayName: "Starý", tokenPresent: true, unavailableReason: reason)
+        ]))
+
+        do {
+            _ = try await provider.sign(SigningRequest(pdfData: Data("d".utf8), identityID: "x", includeTimestamp: true, pin: "1234"))
+            XCTFail("Signing must fail without a usable driver.")
+        } catch SigningError.signingFailed(let message) {
+            XCTAssertEqual(message, reason)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    /// With no driver refused, signing without a card stays the plain "no identity" error.
+    func testSignWithoutDriversStaysIdentityUnavailable() async {
+        let provider = EngineBridgeSigningProvider(engine: FixedDriversEngine(drivers: []))
+
+        do {
+            _ = try await provider.sign(SigningRequest(pdfData: Data("d".utf8), identityID: "x", includeTimestamp: true, pin: "1234"))
+            XCTFail("Signing must fail without a driver.")
+        } catch SigningError.identityUnavailable {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 
 /// Reports a fixed driver list and nothing else.
