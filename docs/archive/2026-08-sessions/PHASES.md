@@ -16,7 +16,7 @@ podpisov.
 Autoritatívny register, porovnanie a akceptačné gates:
 
 - [`docs/ZAKO_EXTERNAL_REQUIREMENTS_SPEC_2026-08-28.md`](ZAKO_EXTERNAL_REQUIREMENTS_SPEC_2026-08-28.md)
-- [`Chevron7/docs/superpowers/plans/2026-08-28-zako-external-requirements.md`](../Chevron7/docs/superpowers/plans/2026-08-28-zako-external-requirements.md)
+- [`Chevron7/docs/superpowers/plans/2026-08-28-zako-external-requirements.md`](../../../Chevron7/docs/superpowers/plans/2026-08-28-zako-external-requirements.md)
 - [`docs/SESSION_HANDOFF_2026-08-28-ZAKO-SPEC.md`](SESSION_HANDOFF_2026-08-28-ZAKO-SPEC.md)
 
 Kým neprejdú Fáza 0 a externé validačné gates, označenie produktu zostáva kontrolovaný
