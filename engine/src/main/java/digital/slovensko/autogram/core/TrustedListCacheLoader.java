@@ -19,6 +19,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -40,8 +41,8 @@ import java.util.concurrent.TimeoutException;
  * keeps the last good copy of each list in a persistent directory, and falls back to that
  * copy within {@link #MAX_FALLBACK_AGE} when its server is down. A copy is replaced only
  * by XML, so an error page never overwrites it. A URL whose download just failed is not
- * asked again for {@link TrustedListCooldown#COOLDOWN}; the load treats it as failed at
- * once and uses the same fallback.
+ * asked again for {@link TrustedListCooldown#COOLDOWN} while a fallback copy exists; the load
+ * treats it as failed at once and uses that copy. Without one the server is always asked.
  */
 public final class TrustedListCacheLoader implements DSSCacheFileLoader {
     /** The directory the app names for the cache; without it the temporary directory is used. */
@@ -202,7 +203,10 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
             return document(cached, url);
         }
         Exception failure;
-        var coolingDown = cooldown.remaining(url);
+        var hasFallback = cached != null && age(file).compareTo(maxFallbackAge) <= 0;
+        // Without a copy to fall back on, skipping would leave the list missing (for the LOTL,
+        // every visible signature failing) for minutes after the network returns: always ask.
+        var coolingDown = hasFallback ? cooldown.remaining(url) : Optional.<Duration>empty();
         if (coolingDown.isPresent()) {
             // Exactly as if the download had failed, without waiting for a server that just did.
             failure = new IOException("not asked again for " + coolingDown.get().toSeconds()
@@ -214,7 +218,7 @@ public final class TrustedListCacheLoader implements DSSCacheFileLoader {
                 failure = exception;
             }
         }
-        if (cached != null && age(file).compareTo(maxFallbackAge) <= 0) {
+        if (hasFallback) {
             logger.warn("Using the cached copy of {} ({} old): {}", url, age(file), failure.getMessage());
             return document(cached, url);
         }

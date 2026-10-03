@@ -237,8 +237,28 @@ class TrustedListCacheLoaderTest {
         assertFalse(cooldown.isCoolingDown(URL));
     }
 
+    /// Skipping with nothing to fall back on would leave the list missing (for the LOTL, every
+    /// visible signature failing) for minutes after the network returns, so the server is asked.
     @Test
-    void withNothingCachedTheCooldownRefusesWithoutAskingTheServer() {
+    void withNothingCachedTheServerIsAskedDespiteTheCooldown() throws Exception {
+        var clock = new TrustedListCooldownTest.MutableClock(NOW);
+        var downloads = new AtomicInteger();
+        var loader = loader(url -> {
+            if (downloads.incrementAndGet() == 1) {
+                throw new IOException("connection refused");
+            }
+            return xml("<tl>back online</tl>");
+        }, clock, new TrustedListCooldown(clock), Duration.ofSeconds(5));
+
+        assertThrows(DSSException.class, () -> loader.getDocument(URL));
+        clock.advance(Duration.ofMinutes(1));
+        assertEquals("<tl>back online</tl>", text(loader.getDocument(URL)));
+        assertEquals(2, downloads.get());
+    }
+
+    @Test
+    void aCopyOlderThanTheFallbackAgeDoesNotTriggerTheSkip() throws Exception {
+        cached(URL, "<tl>too old</tl>", Duration.ofDays(30));
         var clock = new TrustedListCooldownTest.MutableClock(NOW);
         var downloads = new AtomicInteger();
         var loader = loader(url -> {
@@ -248,7 +268,7 @@ class TrustedListCacheLoaderTest {
 
         assertThrows(DSSException.class, () -> loader.getDocument(URL));
         assertThrows(DSSException.class, () -> loader.getDocument(URL));
-        assertEquals(1, downloads.get());
+        assertEquals(2, downloads.get());
     }
 
     @Test
