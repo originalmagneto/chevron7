@@ -48,6 +48,8 @@ Everything after this task assumes facts the research could not verify. This tas
 **Interfaces:**
 - Produces: the fact sheet table (library path, arm64, protected path flag, `CKA_ALWAYS_AUTHENTICATE`, issuer CN, key type and size, QC statements) that Tasks 2 to 5 cite; DER fixtures for Task 4.
 
+Remote measurement (2026-10-04): `Chevron7/scripts/czech-card-probe.sh` collects Steps 2 to 4 on a colleague's Mac without logging in (no PIN, no QPIN), and `Chevron7/docs/research/czech-card-test-guide.md` (Czech) tells the colleague how to run it and limits the Step 5 test signature to I.CA cards. Verified against the owner's I.CA Starcos 3.7 card: token flags, mechanisms (RSA up to 4096, ECDSA P-384 only), end-entity certificates and their QC statements.
+
 - [ ] **Step 1: Install the middleware on the Mac Studio** (each from the vendor; record version and date): eObčanka 3.7.0 (info.identita.gov.cz), I.CA SecureStore 8.3.1 (already installed), Thales SafeNet Authentication Client 10.9, Bit4id PKI Manager (if a PostSignum TokenME is available), MONET+ ProID+ (if a ProID+Q token is available).
 
 - [ ] **Step 2: Record architecture of every library**
@@ -350,6 +352,8 @@ git commit -m "feat(signing): name Czech cards and issuers"
 ---
 
 ### Task 5: QPIN, asked per signature and never remembered
+
+Finding (2026-10-04, read from the engine): the machine protocol carries one secret, and `MachineSecretUI` hands that same secret to `C_Login(CKU_USER)` and, for a key with `CKA_ALWAYS_AUTHENTICATE` on a token without the protected-path flag, to `C_Login(CKU_CONTEXT_SPECIFIC)` (`NativePkcs11SignatureToken.runContextSpecificLoginIfNeeded`). So today a typed PIN reaches such a key as its QPIN and spends one QPIN attempt per try, and asking the user for the QPIN alone would send it as the PIN. A token whose PIN and QPIN differ needs a second secret field in the machine protocol (or the middleware's own window); decide this with the Task 1 facts before Step 1. Until then the test guide allows a test signature with I.CA cards only.
 
 **Files:**
 - Modify: `Chevron7/Sources/Chevron7Kit/Signing/JavaEngine/EngineBridgeSigningProvider.swift` (new `pinKind`)
