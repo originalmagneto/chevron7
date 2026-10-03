@@ -20,7 +20,7 @@ xcuserdata/
 .vscode/
 .idea/
 
-# Referenčné vzory s osobnými údajmi — nepushovať
+# Referenčné vzory s osobnými údajmi: nepushovať
 EXAMPLES/
 
 # Java engine build output
@@ -38,3 +38,8 @@ website/
 .impeccable/loop/*
 !.impeccable/loop/bar.md
 !.impeccable/loop/*.mjs
+
+# Claude Code local state (personal settings, session worktrees, installed skills)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/skills/
