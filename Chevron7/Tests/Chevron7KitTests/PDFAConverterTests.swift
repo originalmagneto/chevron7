@@ -220,6 +220,100 @@ final class PDFAConverterTests: XCTestCase {
         XCTAssertGreaterThan(root.xrefOffset, 0)
     }
 
+    func testIncrementalUpdateXrefPointsAtObjectHeadersAndTrailerCarriesID() throws {
+        for mode in PDFAConversionMode.allCases {
+            let source = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.typicalContractPDF()))
+            let output = try PDFAConverter().convert(document: source, mode: mode, title: "t")
+            try Self.assertLastRevisionIsWellFormed(output, label: mode.rawValue)
+        }
+    }
+
+    func testEmbeddedFileUpdateXrefPointsAtObjectHeadersAndTrailerCarriesID() throws {
+        let source = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.typicalContractPDF()))
+        let pdfa = try PDFAConverter().convert(document: source, title: "t")
+        let withAttachment = try EmbeddedFileService().embed(
+            .init(fileName: "dolozka.xml", mimeType: "text/xml", data: Data("<a/>".utf8)),
+            into: pdfa)
+        try Self.assertLastRevisionIsWellFormed(withAttachment, label: "attachment")
+        let previousID = try XCTUnwrap(Self.trailerIDs(in: pdfa).last)
+        let newID = try XCTUnwrap(Self.trailerIDs(in: withAttachment).last)
+        XCTAssertEqual(newID.first, previousID.first, "the permanent identifier must survive an update")
+    }
+
+    func testEmbeddedFileUpdateBuildsOnTheLatestRevision() throws {
+        // The raster PDF/A carries its ICC profile in the last revision, so the
+        // earlier startxref still sits inside the tail the scanner reads.
+        for mode in PDFAConversionMode.allCases {
+            let source = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.typicalContractPDF()))
+            let pdfa = try PDFAConverter().convert(document: source, mode: mode, title: "t")
+            let latest = try XCTUnwrap(PDFObjectScanner.rootObjectNumber(in: pdfa))
+            let latestCatalog = try XCTUnwrap(PDFObjectScanner.catalogDictionary(number: latest.objectNumber, in: pdfa))
+            XCTAssertTrue(latestCatalog.contains("/OutputIntents"), mode.rawValue)
+
+            let withAttachment = try EmbeddedFileService().embed(
+                .init(fileName: "dolozka.xml", mimeType: "text/xml", data: Data("<a/>".utf8)),
+                into: pdfa)
+            let root = try XCTUnwrap(PDFObjectScanner.rootObjectNumber(in: withAttachment))
+            let catalog = try XCTUnwrap(PDFObjectScanner.catalogDictionary(number: root.objectNumber, in: withAttachment))
+            XCTAssertTrue(catalog.contains("/OutputIntents"), "\(mode.rawValue): \(catalog)")
+            XCTAssertTrue(catalog.contains("/Metadata"), "\(mode.rawValue): \(catalog)")
+            let tail = String(decoding: withAttachment.suffix(512), as: UTF8.self)
+            XCTAssertTrue(tail.contains("/Prev \(latest.xrefOffset)"), "\(mode.rawValue): \(tail)")
+        }
+    }
+
+    /// Reads the cross-reference section that `startxref` names and checks that
+    /// every in-use entry lands on the first byte of `N G obj`, and that the
+    /// trailer after it carries `/ID`, which PDF/A requires.
+    private static func assertLastRevisionIsWellFormed(_ data: Data, label: String,
+                                                       file: StaticString = #filePath,
+                                                       line: UInt = #line) throws {
+        let text = String(decoding: data, as: UTF8.self)
+        let startxref = try XCTUnwrap(text.range(of: "startxref", options: .backwards), file: file, line: line)
+        let offsetToken = text[startxref.upperBound...]
+            .split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+        let xrefOffset = try XCTUnwrap(Int(offsetToken), file: file, line: line)
+        let section = String(decoding: data[xrefOffset...], as: UTF8.self)
+        XCTAssertTrue(section.hasPrefix("xref"), "\(label): startxref must point at xref", file: file, line: line)
+        let trailerRange = try XCTUnwrap(section.range(of: "trailer"), file: file, line: line)
+        let lines = section[..<trailerRange.lowerBound]
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .dropFirst()
+        var objectNumber = 0
+        var checked = 0
+        for row in lines {
+            let fields = row.split(separator: " ")
+            if fields.count == 2 {
+                objectNumber = Int(fields[0]) ?? 0
+                continue
+            }
+            guard fields.count >= 3, let offset = Int(fields[0]), let generation = Int(fields[1]) else { continue }
+            defer { objectNumber += 1 }
+            guard fields[2] == "n" else { continue }
+            let header = Data("\(objectNumber) \(generation) obj".utf8)
+            XCTAssertEqual(data[offset..<min(offset + header.count, data.count)], header,
+                           "\(label): xref entry for object \(objectNumber) points at offset \(offset)",
+                           file: file, line: line)
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 0, "\(label): no in-use xref entries found", file: file, line: line)
+        let trailer = section[trailerRange.upperBound...]
+        let trailerEnd = trailer.range(of: "startxref")?.lowerBound ?? trailer.endIndex
+        XCTAssertTrue(trailer[..<trailerEnd].contains("/ID"), "\(label): trailer lacks /ID",
+                      file: file, line: line)
+    }
+
+    private static func trailerIDs(in data: Data) -> [[String]] {
+        let text = String(decoding: data, as: UTF8.self)
+        guard let regex = try? NSRegularExpression(
+            pattern: "/ID\\s*\\[\\s*<([0-9A-Fa-f]*)>\\s*<([0-9A-Fa-f]*)>\\s*\\]") else { return [] }
+        return regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
+            guard let first = Range(match.range(at: 1), in: text),
+                  let second = Range(match.range(at: 2), in: text) else { return nil }
+            return [String(text[first]).lowercased(), String(text[second]).lowercased()]
+        }
+    }
+
     func testEmbeddedFileIsInjectedAndDiscoverable() throws {
         let source = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.typicalContractPDF()))
         let converter = PDFAConverter()

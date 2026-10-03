@@ -314,7 +314,7 @@ public struct PDFAConverter: Sendable {
         let oiBody = "<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier (sRGB IEC61966-2.1)" +
             " /Info (sRGB IEC61966-2.1) /RegistryName (http://www.color.org)" +
             " /DestOutputProfile \(iccNumber) 0 R >>"
-        let oiObj = Data("\n\(oiNumber) 0 obj\n\(oiBody)\nendobj\n".utf8)
+        let oiObj = Data("\(oiNumber) 0 obj\n\(oiBody)\nendobj\n".utf8)
 
         var augmented = catalogDict
         if !augmented.contains("/OutputIntents") {
@@ -322,9 +322,9 @@ public struct PDFAConverter: Sendable {
                 augmented,
                 appending: " /Metadata \(metaNumber) 0 R /OutputIntents [\(oiNumber) 0 R]")
         }
-        let catalogObj = Data("\n\(newCatalogNumber) 0 obj\n\(augmented)\nendobj\n".utf8)
+        let catalogObj = Data("\(newCatalogNumber) 0 obj\n\(augmented)\nendobj\n".utf8)
 
-        var out = base
+        var out = PDFObjectScanner.endingWithEOL(base)
         var offsets: [(number: Int, offset: Int)] = []
 
         func trackAndAppend(_ chunk: Data, number: Int) {
@@ -347,9 +347,10 @@ public struct PDFAConverter: Sendable {
             let off = byNumber[n] ?? 0
             xref.append(Data(String(format: "%010d %05d n \n", off, 0).utf8))
         }
+        let fileID = PDFObjectScanner.updatedFileIdentifier(atXref: root.xrefOffset, in: base)
         let trailer = """
         trailer
-        << /Size \(newCatalogNumber + 1) /Root \(newCatalogNumber) 0 R /Prev \(root.xrefOffset) >>
+        << /Size \(newCatalogNumber + 1) /Root \(newCatalogNumber) 0 R /Prev \(root.xrefOffset) \(fileID) >>
         startxref
         \(xrefOffset)
         %%EOF
@@ -400,7 +401,9 @@ public enum PDFObjectScanner {
 
     public static func rootObjectNumber(in data: Data) -> RootRef? {
         let tailText = String(decoding: data.suffix(min(data.count, 16_384)), as: UTF8.self)
-        guard let xrefRange = tailText.range(of: "startxref") else { return nil }
+        // The last startxref names the newest revision; an earlier one can still
+        // sit inside the tail after a short incremental update.
+        guard let xrefRange = tailText.range(of: "startxref", options: .backwards) else { return nil }
         let afterStart = tailText[xrefRange.upperBound...]
         let tokens = afterStart.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\r" })
         guard let rawOffset = tokens.first,
@@ -479,6 +482,46 @@ public enum PDFObjectScanner {
     }
 
     static func isDigit(_ byte: UInt8) -> Bool { byte >= 0x30 && byte <= 0x39 }
+
+    /// The data with an end-of-line marker after it, so an object appended as an
+    /// incremental update starts on its own line and its cross-reference offset
+    /// is the first byte of `N 0 obj`, as ISO 32000 requires.
+    public static func endingWithEOL(_ data: Data) -> Data {
+        guard let last = data.last, last != 0x0A, last != 0x0D else { return data }
+        var out = data
+        out.append(0x0A)
+        return out
+    }
+
+    /// The `/ID` entry for the trailer of an incremental update to the revision
+    /// whose cross-reference section starts at `xrefOffset`. PDF/A requires `/ID`
+    /// in the trailer. The first identifier is permanent and is kept; the second
+    /// changes with every revision. A source without one gets a fresh pair.
+    public static func updatedFileIdentifier(atXref xrefOffset: Int, in data: Data) -> String {
+        let fresh = randomIdentifier()
+        let permanent = fileIdentifier(atXref: xrefOffset, in: data)?.permanent ?? fresh
+        return "/ID [<\(permanent)> <\(fresh)>]"
+    }
+
+    /// The `/ID` pair in the trailer that follows the cross-reference section at
+    /// `xrefOffset`, as hexadecimal strings.
+    public static func fileIdentifier(atXref xrefOffset: Int,
+                                      in data: Data) -> (permanent: String, changing: String)? {
+        guard xrefOffset >= 0, xrefOffset < data.count else { return nil }
+        let tail = data[(data.startIndex + xrefOffset)...]
+        let end = tail.range(of: Data("startxref".utf8))?.lowerBound ?? tail.endIndex
+        let section = String(decoding: tail[..<end], as: UTF8.self)
+        guard let regex = try? NSRegularExpression(
+                pattern: "/ID\\s*\\[\\s*<([0-9A-Fa-f]+)>\\s*<([0-9A-Fa-f]+)>\\s*\\]"),
+              let match = regex.firstMatch(in: section, range: NSRange(section.startIndex..., in: section)),
+              let first = Range(match.range(at: 1), in: section),
+              let second = Range(match.range(at: 2), in: section) else { return nil }
+        return (String(section[first]), String(section[second]))
+    }
+
+    static func randomIdentifier() -> String {
+        (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
+    }
 
     public static func firstPageObjectNumber(catalog: String, in data: Data) -> Int? {
         if let pagesNumber = integerReference(named: "Pages", in: catalog),
