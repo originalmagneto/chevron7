@@ -12,8 +12,19 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MachineSettingsTest {
+    /// The upstream Autogram app shares the Java preferences and stored "SK,CZ,AT,PL,HU,BE,NL,LT",
+    /// which dropped Spain (Sectigo's and Izenpe's timestamps). The machine path loads its own list.
+    @Test
+    void machineModeLoadsItsOwnCountriesWhateverTheGuiStored() {
+        var countries = new MachineSettings().getTrustedList();
+
+        assertEquals(digital.slovensko.autogram.core.UserSettings.defaultTrustedList(), countries);
+        assertTrue(countries.containsAll(java.util.List.of("SK", "CZ", "BE", "ES")));
+    }
+
     @Test
     void secureStoreUsesTheCardSlotWhenNoSlotIsConfigured() {
         assertEquals(-1, MachineSettings.secureStoreSlotIndex(-1));

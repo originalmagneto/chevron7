@@ -32,8 +32,11 @@ public final class MachineSettings extends UserSettings {
     }
 
     MachineSettings(boolean cacheContextSpecificPassword) {
-        var loaded = UserSettings.load();
-        trustedList = List.copyOf(loaded.getTrustedList());
+        // Java preferences are shared with the upstream Autogram app, whose stored TRUSTED_LIST
+        // ("SK,CZ,AT,PL,HU,BE,NL,LT" on machines that ran it) silently dropped Spain, so a
+        // Sectigo or Izenpe timestamp could never be shown qualified. The machine path
+        // always loads its own countries.
+        trustedList = UserSettings.defaultTrustedList();
         setCorrectDocumentDisplay(false);
         setBulkEnabled(cacheContextSpecificPassword);
         setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
