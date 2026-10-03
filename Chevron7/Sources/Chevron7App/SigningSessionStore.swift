@@ -23,6 +23,8 @@ final class SigningSessionStore {
 
     var includeQualifiedTimestamp = true
     var includeVisibleSignature = false
+    /// Set when a card signature needs a PIN nobody entered; the window asks for it in a sheet.
+    var isAskingForSigningPIN = false
     var selectedVisualAppearanceID = VisualSignatureAppearance.textID
     var convertToPDFA = false
     var outputFormat: SigningOutputFormat = .attachedASIC
@@ -633,8 +635,20 @@ final class SigningSessionStore {
                                  keyStore: agpKeyStore)
     }
 
+    /// The selected card takes its PIN from the app (not the eID's BOK window) and none is entered.
+    var signingNeedsPIN: Bool {
+        guard let selected = identities.first(where: { $0.id == selectedIdentityID }) else { return false }
+        return selected.requiresPIN && signingPIN.isEmpty
+    }
+
     func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
         guard let document else { return }
+        // Ask for the PIN instead of failing with "Certifikát nie je dostupný".
+        if !viaMobile, signingNeedsPIN {
+            lastError = nil
+            isAskingForSigningPIN = true
+            return
+        }
         // The panel switches this off too; a stamp that cannot be drawn must not
         // make signing wait for the card's certificate.
         if bakedVisualStampIsBlocked { includeVisibleSignature = false }
