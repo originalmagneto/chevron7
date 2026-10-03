@@ -22,7 +22,6 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     /// the switch "Kvalifikovaná časová pečiatka (QTS)" and card signing always timestamps.
     public static let builtIn: [TimestampAuthority] = [
         TimestampAuthority(name: "Belgium BOSA (kvalifikovaná)", url: "http://tsa.belgium.be/connect", isQualified: true),
-        TimestampAuthority(name: "Certum (PL)", url: "http://time.certum.pl", isQualified: true),
         TimestampAuthority(name: "CA Disig (SK, kvalifikovaná, vyžaduje zmluvu s Disig)", url: "http://tsa.disig.sk/qts", isQualified: true)
     ]
 
@@ -30,7 +29,11 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     /// settings and in a request, so they are never offered, sent or taken for custom servers.
     public static let retiredUnqualified: [TimestampAuthority] = [
         TimestampAuthority(name: "DigiCert (nekvalifikovaná)", url: "http://timestamp.digicert.com"),
-        TimestampAuthority(name: "Sectigo (nekvalifikovaná)", url: "http://timestamp.sectigo.com")
+        TimestampAuthority(name: "Sectigo (nekvalifikovaná)", url: "http://timestamp.sectigo.com"),
+        // Certum's public time.certum.pl signs with "Certum Timestamp 2026" under "Certum
+        // Timestamping 2021 CA", which the Polish trusted list does not grant as qualified
+        // (its granted units are Certum QTST 2017 and Certum QTSA G3, a paid service).
+        TimestampAuthority(name: "Certum (nekvalifikovaná)", url: "http://time.certum.pl")
     ]
 
     public static func isRetiredUnqualified(_ url: String) -> Bool {
