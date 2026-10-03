@@ -615,6 +615,34 @@ final class SigningBatchTests: XCTestCase {
 
     // MARK: - Existing signatures and container layout
 
+    /// A card that takes its PIN from the app, pressed "Podpísať KEP" with an empty field:
+    /// the window asks for the PIN instead of failing with "Certifikát nie je dostupný",
+    /// and nothing reaches the card until a PIN is entered.
+    func testSigningWithoutAPINAsksForItInsteadOfFailing() async throws {
+        let provider = RecordingSigningProvider(identityRequiresPIN: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.includeQualifiedTimestamp = false
+
+        await store.sign()
+
+        XCTAssertTrue(store.isAskingForSigningPIN)
+        XCTAssertNil(store.lastError)
+        XCTAssertFalse(store.isSigning)
+        let none = await provider.recordedRequests()
+        XCTAssertTrue(none.isEmpty)
+
+        store.signingPIN = "1234"
+        store.isAskingForSigningPIN = false
+        await store.sign()
+
+        let recorded = await provider.recordedRequests()
+        XCTAssertEqual(recorded.first?.pin, "1234")
+        XCTAssertFalse(store.isAskingForSigningPIN)
+    }
+
     /// The engine builds the ASiC-E around the PDF itself; a container packaged by the
     /// app first ended up nested (`kontajner.asice`) inside the signed one.
     func testSingleASiCSigningHandsTheEngineThePDFUnderItsName() async throws {

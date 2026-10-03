@@ -250,6 +250,54 @@ enum SigningOutputFormatPresentation: CaseIterable, Identifiable {
 }
 
 
+/// Asks for the card's PIN when "Podpísať KEP" was pressed without one, then signs.
+struct SigningPINSheet: View {
+    @Bindable var store: SigningSessionStore
+    @State private var pin = ""
+    @FocusState private var pinFocused: Bool
+
+    private var certificateLabel: String? {
+        store.identities.first(where: { $0.id == store.selectedIdentityID })?.label
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Zadajte PIN karty", systemImage: "lock.shield")
+                .font(.headline)
+            if let certificateLabel {
+                Text("Certifikát: \(certificateLabel)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            SecureField("PIN karty", text: $pin, prompt: Text("PIN karty"))
+                .textFieldStyle(.roundedBorder)
+                .focused($pinFocused)
+                .onSubmit(confirm)
+            Text("PIN sa použije len na tento podpis a neukladá sa.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Zrušiť", role: .cancel) { store.isAskingForSigningPIN = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Podpísať", action: confirm)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(pin.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear { pinFocused = true }
+    }
+
+    private func confirm() {
+        guard !pin.isEmpty else { return }
+        store.signingPIN = pin
+        store.isAskingForSigningPIN = false
+        Task { await store.sign() }
+    }
+}
+
 struct SigningPrepareView: View {
     @Bindable var store: SigningSessionStore
     @State private var customTSADraft = ""
@@ -306,6 +354,9 @@ struct SigningPrepareView: View {
                 }
                 .help("Zobraziť alebo skryť nastavenia podpisu")
             }
+        }
+        .sheet(isPresented: $store.isAskingForSigningPIN) {
+            SigningPINSheet(store: store)
         }
         .sheet(isPresented: Bindable(store.mobileSigning).isPresented) {
             if let session = store.mobileSigning.session {

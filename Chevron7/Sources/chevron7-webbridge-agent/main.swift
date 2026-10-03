@@ -95,18 +95,29 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     }
 
     /// The agent is installed inside the app bundle, so the app is three levels
-    /// up from the binary. Falls back to asking the system by bundle id, which
+    /// up from the binary. Under SMAppService `argv[0]` is the relative
+    /// `Contents/Helpers/chevron7-webbridge-agent`, so the path comes from the
+    /// executable itself. Falls back to asking the system by bundle id, which
     /// covers an agent copied elsewhere.
     private func appBundleURL() -> URL? {
-        let binary = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        if let candidate = Self.enclosingAppBundle(
+            ofExecutable: Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])) {
+            return candidate
+        }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: ProductIdentity.bundleIdentifier)
+    }
+
+    /// The Chevron7.app around `Contents/Helpers/<agent>`, only when it is this product.
+    static func enclosingAppBundle(ofExecutable executable: URL) -> URL? {
+        let binary = executable.standardizedFileURL.resolvingSymlinksInPath()
+        guard binary.path.hasPrefix("/") else { return nil }
         let candidate = binary
             .deletingLastPathComponent()   // Helpers
             .deletingLastPathComponent()   // Contents
             .deletingLastPathComponent()   // Chevron7.app
-        if candidate.pathExtension == "app", FileManager.default.fileExists(atPath: candidate.path) {
-            return candidate
-        }
-        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: ProductIdentity.bundleIdentifier)
+        guard candidate.pathExtension == "app",
+              Bundle(url: candidate)?.bundleIdentifier == ProductIdentity.bundleIdentifier else { return nil }
+        return candidate
     }
 
     private static func appIsRunning() -> Bool {
