@@ -132,6 +132,16 @@ final class TimestampClientTests: XCTestCase {
         XCTAssertFalse(fresh.activeTSAQualificationIsUnverified)
     }
 
+    /// time.certum.pl is not a qualified service, so ZaKo's qualified list never sends it and a
+    /// stored selection of it falls back to the default.
+    func testCertumIsNotOfferedOrSentAsQualified() throws {
+        XCTAssertFalse(TimestampAuthority.qualifiedURLs.map(\.absoluteString).contains("http://time.certum.pl"))
+        XCTAssertTrue(TimestampAuthority.isRetiredUnqualified("http://time.certum.pl"))
+        let stored = try JSONDecoder().decode(
+            AppSettings.self, from: Data("{\"selectedTSAURL\":\"http://time.certum.pl\"}".utf8))
+        XCTAssertEqual(stored.activeTSA.url, TimestampAuthority.legacyDefaultURL)
+    }
+
     /// A non-qualified authority chosen before it left the list falls back to the default,
     /// whichever way it was stored, and never becomes a custom server.
     func testARetiredUnqualifiedAuthorityFallsBackToTheDefault() throws {
