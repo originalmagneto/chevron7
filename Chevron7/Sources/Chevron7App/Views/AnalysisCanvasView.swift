@@ -219,7 +219,7 @@ struct AnalysisCanvasView: View {
                             }
                             if countOnPage > 0 {
                                 Text("\(countOnPage)")
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(.system(size: 10, weight: .bold))
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 2)
                                     .background(Color.green, in: Capsule())

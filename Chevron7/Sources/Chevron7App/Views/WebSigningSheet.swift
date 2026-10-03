@@ -114,7 +114,7 @@ struct WebSigningSheet: View {
                             )
                             .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
                         Text("1. strana")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
                 }
