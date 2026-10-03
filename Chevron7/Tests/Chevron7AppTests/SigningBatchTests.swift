@@ -1060,6 +1060,19 @@ final class SigningBatchTests: XCTestCase {
         XCTAssertEqual(request.tsaURL, "http://tsa.disig.sk/qts")
     }
 
+    /// A phone signature's stamp never names the Settings authority: the phone service
+    /// picks its own. The card names the chosen one, and no timestamp means no name.
+    func testTheStampNamesTheTimestampAuthorityOnlyForTheCard() {
+        let store = makeStore(provider: RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true))
+        XCTAssertEqual(store.stampTimestampAuthorityName(viaMobile: false, timestamped: true),
+                       store.settings.activeTSA.name)
+        XCTAssertEqual(store.stampTimestampAuthorityName(viaMobile: true, timestamped: true),
+                       SigningSessionStore.mobileTimestampAuthorityLabel)
+        XCTAssertNotEqual(SigningSessionStore.mobileTimestampAuthorityLabel, store.settings.activeTSA.name)
+        XCTAssertNil(store.stampTimestampAuthorityName(viaMobile: true, timestamped: false))
+        XCTAssertNil(store.stampTimestampAuthorityName(viaMobile: false, timestamped: false))
+    }
+
     /// The switch is shown on and locked when only the card can sign; with the phone
     /// available it stays usable and says that the card adds the timestamp anyway.
     func testTheTimestampSwitchTellsTheTruthAboutCardSigning() {
