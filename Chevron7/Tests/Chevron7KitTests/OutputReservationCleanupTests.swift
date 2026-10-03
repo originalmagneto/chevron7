@@ -101,7 +101,7 @@ final class OutputReservationCleanupTests: XCTestCase {
 
         let events = try await collect(engine.sign(request: signRequest(source: source)))
 
-        XCTAssertTrue(events.contains { if case .completed("document", _) = $0 { true } else { false } })
+        XCTAssertTrue(events.contains { if case .completed("document", _, _) = $0 { true } else { false } })
         XCTAssertEqual(try directoryContents(), ["dokument.pdf", "dokument_signed.pdf"])
     }
 

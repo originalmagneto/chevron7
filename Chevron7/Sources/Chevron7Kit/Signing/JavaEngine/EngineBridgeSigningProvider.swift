@@ -129,10 +129,19 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// service extends it (`SigningParameters.buildForExistingASiC`).
     public var addsSignatureToExistingContainer: Bool { true }
 
-    /// The engine refuses Baseline B for ordinary files (`MachineRequestValidator`), so every
-    /// signature of the app's own flows is Baseline T; only a portal's `signatureLevelOverride`
-    /// asks for Baseline B.
-    public var alwaysAddsQualifiedTimestamp: Bool { true }
+    /// As in upstream Autogram, the timestamp is the person's choice: with it off the engine
+    /// signs Baseline B. Extending an existing container still timestamps (`buildForExistingASiC`).
+    public var alwaysAddsQualifiedTimestamp: Bool { false }
+
+    /// The level for a request without a timestamp: Baseline B, unless a portal named its own
+    /// level or the source is an existing container, which the engine extends at Baseline T.
+    static func untimestampedLevel(for request: SigningRequest, wantsPAdES: Bool,
+                                   sourceIsContainer: Bool) -> String? {
+        guard request.signatureLevelOverride == nil, !request.includeTimestamp, !sourceIsContainer else {
+            return nil
+        }
+        return wantsPAdES ? "PAdES_BASELINE_B" : "XAdES_BASELINE_B"
+    }
 
     public func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult {
         let canonical = EnginePaths.canonical(fileURL)
@@ -551,18 +560,22 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             files: [signingFile],
             outputFormat: wantsPAdES ? .pades : .asiceXAdES,
             eform: request.eform,
-            signatureLevelOverride: request.signatureLevelOverride,
+            signatureLevelOverride: request.signatureLevelOverride
+                ?? Self.untimestampedLevel(for: request, wantsPAdES: wantsPAdES,
+                                           sourceIsContainer: sourceURL.pathExtension.lowercased() == "asice"),
             timestampServersOverride: Self.timestampServers(for: request))
 
         statusLog("Podpisujem kvalifikovaným podpisom (DSS)…")
         var outputURL: URL?
+        var timestampQualification: TimestampQualification?
         do {
             for try await event in engine.sign(request: engineRequest) {
                 switch event {
                 case .activity(let phase):
                     statusLog("Engine: \(phase.label)")
-                case .completed(_, let url):
+                case .completed(_, let url, let timestamp):
                     outputURL = url
+                    timestampQualification = timestamp
                 case .failed(_, let failure):
                     throw failure
                 case .started, .fileSigning:
@@ -597,13 +610,15 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
                                           asicData: nil,
                                           signedAt: Date(),
                                           signatureLabel: signerName,
-                                          isLegallyBinding: true)
+                                          isLegallyBinding: true,
+                                          timestampQualification: timestampQualification)
         }
         return SignedConversionResult(pdfData: request.pdfData,
                                       asicData: signedData,
                                       signedAt: Date(),
                                       signatureLabel: signerName,
-                                      isLegallyBinding: true)
+                                      isLegallyBinding: true,
+                                      timestampQualification: timestampQualification)
     }
 
     // MARK: - Vizuálny podpis (port VisibleSignatureRenderer + PDFCoordinateConverter)

@@ -22,6 +22,9 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     /// the switch "Kvalifikovaná časová pečiatka (QTS)" and card signing always timestamps.
     public static let builtIn: [TimestampAuthority] = [
         TimestampAuthority(name: "Belgium BOSA (kvalifikovaná)", url: "http://tsa.belgium.be/connect", isQualified: true),
+        // Upstream Autogram's first default authority (UserSettings.DEFAULT_TSA_SERVER), free and
+        // signed by "Sectigo Qualified Time Stamping Signer" of Sectigo (Europe) SL, Spain.
+        TimestampAuthority(name: "Sectigo (ES, kvalifikovaná)", url: "http://timestamp.sectigo.com/qualified", isQualified: true),
         TimestampAuthority(name: "CA Disig (SK, kvalifikovaná, vyžaduje zmluvu s Disig)", url: "http://tsa.disig.sk/qts", isQualified: true)
     ]
 

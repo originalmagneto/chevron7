@@ -183,7 +183,7 @@ enum SigningEvent: Sendable, Equatable {
     case started
     case activity(SigningActivityPhase)
     case fileSigning(String)
-    case completed(String, outputURL: URL)
+    case completed(String, outputURL: URL, timestamp: TimestampQualification? = nil)
     case failed(String, SigningFailure)
     case cancelled
 }

@@ -103,8 +103,11 @@ public final class MachineSigningService {
             // A state-portal eForm travels as plain XML; without its attributes such a
             // source stays refused below, so ordinary file signing never changes shape.
             preparedFiles = prepare(requestId, validatedRequest.files(), validatedRequest.request().eform() != null);
-            if (preparedFiles.stream().anyMatch(PreparedFile::hasVisibleAppearance)) {
-                trustInitializer.run();
+            // The lists only tell whether a visible signature's timestamp is qualified, which
+            // the result reports and never decides: Baseline B has no timestamp to judge.
+            if (preparedFiles.stream().anyMatch(PreparedFile::hasVisibleAppearance)
+                    && validatedRequest.request().signatureLevel().endsWith("_T")) {
+                initializeTrustForQualification();
             }
             for (var prepared : preparedFiles) {
                 prepared.setPreviousSignatureIds(previousSignatureIds(prepared));
@@ -144,7 +147,8 @@ public final class MachineSigningService {
                     file.appearance())).toList();
             var authentication = request.timestamp().authentication();
             return sign(requestId, new SignRequest(request.driver(), request.certificateSerial(), pin,
-                    request.signatureLevel(), new QualifiedTimestampRequest(true, request.timestamp().servers(),
+                    request.signatureLevel(), new QualifiedTimestampRequest(request.signatureLevel().endsWith("_T"),
+                    request.timestamp().servers(),
                     authentication == null ? null : new TimestampAuthentication(authentication.type(), authentication.username(),
                             authentication.secret())), files, request.eform()));
         } finally {
@@ -190,9 +194,11 @@ public final class MachineSigningService {
             if (validationFailure != null) {
                 throw MachineProtocolException.fromFailure(validationFailure);
             }
+            var qualification = timestampQualification(signedContent, previousSignatureIds,
+                    prepared.hasVisibleAppearance(), requestedLevel);
             progress(requestId, file, "saving");
             prepared.publish();
-            writer.write("file.completed", requestId, file.id(), new JsonObject());
+            writer.write("file.completed", requestId, file.id(), completion(qualification));
         } catch (Throwable exception) {
             var code = failureCode(exception, "SIGNING_FAILED");
             if (!prepared.cleanup()) {
@@ -201,6 +207,41 @@ public final class MachineSigningService {
             writer.write("file.failed", requestId, file.id(), failure(code,
                     "TRUSTED_LIST_UNAVAILABLE".equals(code) ? failureCountry(exception) : null));
         }
+    }
+
+    /// A trusted list that does not load leaves the timestamp's qualification unverified;
+    /// it never stops the signature.
+    private void initializeTrustForQualification() {
+        try {
+            trustInitializer.run();
+        } catch (RuntimeException exception) {
+            System.err.println("Trusted lists unavailable, timestamp qualification stays unverified: "
+                    + exception.getMessage());
+        }
+    }
+
+    private String timestampQualification(byte[] content, Set<String> previousSignatureIds,
+            boolean visibleAppearance, String requestedLevel) {
+        try {
+            return outputValidator.timestampQualification(content, previousSignatureIds, visibleAppearance,
+                    requestedLevel);
+        } catch (Throwable exception) {
+            return null;
+        }
+    }
+
+    /// `timestampQualification` is `qualified`, `notQualified`, or `unverified` with the
+    /// `country` whose trusted list did not load; absent when it was not checked.
+    static JsonObject completion(String qualification) {
+        var payload = new JsonObject();
+        if (qualification != null) {
+            var parts = qualification.split(":", 2);
+            payload.addProperty("timestampQualification", parts[0]);
+            if (parts.length == 2) {
+                payload.addProperty("country", parts[1]);
+            }
+        }
+        return payload;
     }
 
     private void progress(String requestId, MachineFile file, String phase) {
@@ -642,6 +683,13 @@ public final class MachineSigningService {
             return validationFailure(content, previousSignatureIds, visibleAppearance);
         }
 
+        /// Whether the new signature's timestamp is qualified (`qualified`, `notQualified`,
+        /// `unverified:<country>`), or null when this validator does not judge it.
+        default String timestampQualification(byte[] content, Set<String> previousSignatureIds,
+                boolean visibleAppearance, String requestedLevel) throws Exception {
+            return null;
+        }
+
         /// A signed source wrapped into a new container must come back byte-identical as the
         /// container's signed data object. A validator that cannot prove that refuses.
         default String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
@@ -1014,17 +1062,18 @@ public final class MachineSigningService {
         }
 
         /**
-         * Baseline B carries no timestamp, and only a portal asks for it, so such an
-         * output is checked for exactly one new signature of the requested level with
-         * intact cryptography. Everything else keeps the qualified Baseline T checks.
+         * Baseline B carries no timestamp, so such an output is checked for exactly one new
+         * signature of the requested level with intact cryptography (a visible one must be a
+         * PDF). Everything else keeps the Baseline T checks.
          */
         @Override
         public String validationFailure(byte[] content, Set<String> previousSignatureIds,
                 boolean visibleAppearance, String requestedLevel) {
-            if (visibleAppearance || requestedLevel == null || !requestedLevel.endsWith("_B")) {
+            if (requestedLevel == null || !requestedLevel.endsWith("_B")) {
                 return validationFailure(content, previousSignatureIds, visibleAppearance);
             }
-            if (!hasPdfHeaderAndEof(content) && !isAsic("output.asice", content)) {
+            if (visibleAppearance ? !hasPdfHeaderAndEof(content)
+                    : !hasPdfHeaderAndEof(content) && !isAsic("output.asice", content)) {
                 return "OUTPUT_VALIDATION_FAILED";
             }
             var signatures = inspectionService.inspect(content).getAsJsonArray("signatures");
@@ -1064,14 +1113,33 @@ public final class MachineSigningService {
             if (visibleAppearance && !"PAdES_BASELINE_T".equals(string(added.getFirst(), "format"))) {
                 return "OUTPUT_VALIDATION_FAILED";
             }
-            if (!visibleAppearance || hasQualifiedTimestamp(added.getFirst())) {
+            // The timestamp's qualification is reported by timestampQualification, never
+            // refused here: the signature itself is valid either way.
+            return null;
+        }
+
+        /**
+         * A visible Baseline T signature's timestamp: qualified, not qualified, or unverified
+         * because its own country's list did not load (a BOSA timestamp while tsl.belgium.be
+         * is down), naming that country.
+         */
+        @Override
+        public String timestampQualification(byte[] content, Set<String> previousSignatureIds,
+                boolean visibleAppearance, String requestedLevel) {
+            if (!visibleAppearance || requestedLevel == null || !requestedLevel.endsWith("_T")) {
                 return null;
             }
-            // Unqualified only because its own country's list did not load (a BOSA
-            // timestamp while tsl.belgium.be is down): say so, naming the country.
+            var added = inspectionService.inspect(content).getAsJsonArray("signatures").asList().stream()
+                    .map(value -> value.getAsJsonObject())
+                    .filter(signature -> !previousSignatureIds.contains(string(signature, "id"))).toList();
+            if (added.size() != 1) {
+                return null;
+            }
+            if (hasQualifiedTimestamp(added.getFirst())) {
+                return "qualified";
+            }
             var missingCountry = trustAnchors.missingCountry(content, string(added.getFirst(), "id"));
-            return missingCountry == null ? "TIMESTAMP_QUALIFICATION_FAILED"
-                    : "TRUSTED_LIST_UNAVAILABLE:" + missingCountry;
+            return missingCountry == null ? "notQualified" : "unverified:" + missingCountry;
         }
 
         /**

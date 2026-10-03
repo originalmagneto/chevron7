@@ -736,6 +736,12 @@ struct SigningPrepareView: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let note = store.selectedAuthorityQualificationNote {
+                            Label(note.text, systemImage: note.isWarning ? "exclamationmark.triangle.fill" : "checkmark.seal")
+                                .font(.caption2)
+                                .foregroundStyle(note.isWarning ? Color.orange : Color.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.leading, 8)
                 }
@@ -1072,10 +1078,17 @@ struct SigningDoneView: View {
             }
 
             if store.lastSignatureTimestamped {
-                GroupBox("Kvalifikovaná časová pečiatka") {
+                GroupBox("Časová pečiatka") {
                     VStack(alignment: .leading, spacing: 5) {
                         detailRow("Autorita", store.settings.activeTSA.name)
                         detailRow("Adresa", store.settings.activeTSA.url)
+                        if let verdict = store.lastTimestampQualification {
+                            Label(verdict.slovakDescription,
+                                  systemImage: verdict == .qualified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(verdict == .qualified ? Color.green : Color.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let signature = store.resultSignatures.first,
                            let signingTime = signature.signingTime {
                             detailRow("Čas podpisu", signingTime.formatted(date: .abbreviated, time: .standard))

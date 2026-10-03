@@ -16,22 +16,25 @@ class MachineRequestValidatorTest {
     @TempDir
     Path temporaryDirectory;
 
+    /// A signature without a timestamp is the person's choice (the QTS switch off).
     @Test
-    void rejectsBaselineBEvenWhenRequestedByCaller() throws Exception {
+    void acceptsBaselineBForAPlainFile() throws Exception {
         var request = signRequest("PAdES_BASELINE_B", files(pdf("source.pdf"), target("signed.pdf")));
 
-        var failure = assertThrows(MachineProtocolException.class,
-                () -> MachineRequestValidator.validateSign(request));
-
-        assertEquals("SIGNATURE_LEVEL_REQUIRED", failure.getMessage());
+        assertDoesNotThrow(() -> MachineRequestValidator.validateSign(request));
     }
 
     @Test
-    void acceptsPadesBaselineBOnlyForEFormRequests() throws Exception {
+    void rejectsAnUnknownSignatureLevel() throws Exception {
+        var request = signRequest("CAdES_BASELINE_B", files(pdf("source.pdf"), target("signed.pdf")));
+
+        assertEquals("SIGNATURE_LEVEL_REQUIRED", assertThrows(MachineProtocolException.class,
+                () -> MachineRequestValidator.validateSign(request)).getMessage());
+    }
+
+    @Test
+    void acceptsXadesBaselineBForEFormRequests() throws Exception {
         var plain = signRequest("PAdES_BASELINE_B", files(pdf("source.pdf"), target("signed.asice")));
-        assertEquals("SIGNATURE_LEVEL_REQUIRED",
-                assertThrows(MachineProtocolException.class,
-                        () -> MachineRequestValidator.validateSign(plain)).getMessage());
 
         var eform = new SignRequest(plain.driver(), plain.certificateSerial(), plain.pin(),
                 "XAdES_BASELINE_B", plain.timestamp(), plain.files(),
@@ -44,7 +47,7 @@ class MachineRequestValidatorTest {
 
     /// nove.slovensko.sk asks for XAdES Baseline B around a PDF
     /// (getSignatureWithASiCEnvelopeBase64). XAdES on a PDF always becomes an
-    /// ASiC-E, and the app's own flows only ever ask for Baseline T.
+    /// ASiC-E.
     @Test
     void acceptsXadesBaselineBForAPdfAPortalWrapsInAsic() throws Exception {
         var request = signRequest("XAdES_BASELINE_B", files(pdf("source.pdf"), target("signed.asice")));

@@ -140,35 +140,53 @@ class MachineSigningServiceTest {
                 writer.lifecycleEventTypes());
     }
 
+    /// The trusted lists only judge the timestamp: when none loads, the visible signature is
+    /// still made and published, and its timestamp is reported unverified.
     @Test
-    void visibleSigningRequiresTrustedListsBeforeTokenWork() throws Exception {
+    void visibleSigningContinuesWhenNoTrustedListLoads() throws Exception {
         var writer = new RecordingWriter();
         var target = target("visible-signed.pdf");
-        var sessionOpened = new AtomicBoolean();
-        var signatureInspected = new AtomicBoolean();
-        var service = new MachineSigningService(writer.writer(), request -> {
-            sessionOpened.set(true);
-            throw new AssertionError("Token work must not start without trusted lists");
-        }, new MachineSigningService.OutputValidator() {
-            @Override
-            public boolean isValid(byte[] content) {
-                return true;
-            }
-
-            @Override
-            public java.util.Set<String> signatureIds(byte[] content) {
-                signatureInspected.set(true);
-                return java.util.Set.of();
-            }
-        }, () -> { throw new MachineProtocolException("TRUSTED_LIST_UNAVAILABLE"); });
+        var inspection = new MachineInspectionService(path -> locallyValidTimestampReport("existing"), content ->
+                new String(content, java.nio.charset.StandardCharsets.ISO_8859_1).contains("signed")
+                        ? locallyValidTimestampReport("existing", "new") : locallyValidTimestampReport("existing"));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((file, completed) -> {
+            file.writeSignedContent("%PDF-1.7\nsigned\n%%EOF".getBytes());
+            completed.run();
+        }), new MachineSigningService.PdfOutputValidator(inspection, (content, signatureId) ->
+                "new".equals(signatureId) ? "BE" : null),
+                () -> { throw new MachineProtocolException("TRUSTED_LIST_UNAVAILABLE"); });
 
         service.sign("request-1", request("1234".toCharArray(),
                 visibleFile("one", "visible-source.pdf", target.getFileName().toString())));
 
-        assertFalse(sessionOpened.get());
-        assertFalse(signatureInspected.get());
-        assertFalse(Files.exists(target));
-        assertEquals("TRUSTED_LIST_UNAVAILABLE", writer.payloadCode(2));
+        assertTrue(Files.exists(target));
+        assertEquals("unverified", writer.payloadString(2, "timestampQualification"));
+        assertEquals("BE", writer.payloadString(2, "country"));
+    }
+
+    /// Without a timestamp there is nothing to judge, so the lists are never loaded.
+    @Test
+    void visibleBaselineBNeverLoadsTrustedLists() throws Exception {
+        var writer = new RecordingWriter();
+        var target = target("visible-baseline-b.pdf");
+        var trustLoaded = new AtomicBoolean();
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((file, completed) -> {
+            file.writeSignedContent("%PDF-1.7\nsigned\n%%EOF".getBytes());
+            completed.run();
+        }), new MachineSigningService.OutputValidator() {
+            @Override
+            public boolean isValid(byte[] content) {
+                return true;
+            }
+        }, () -> trustLoaded.set(true));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "PAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(visibleFile("one", "visible-source.pdf", target.getFileName().toString()))));
+
+        assertFalse(trustLoaded.get());
+        assertTrue(Files.exists(target));
+        assertEquals(null, writer.payloadString(2, "timestampQualification"));
     }
 
     @Test
@@ -491,8 +509,10 @@ class MachineSigningServiceTest {
         assertFalse(validator.isValid(Files.readAllBytes(target), java.util.Set.of("existing", "new")));
     }
 
+    /// An unqualified timestamp (time.certum.pl) no longer throws the signature away: it is
+    /// published and the result says the timestamp is not qualified.
     @Test
-    void unavailableTimestampQualificationPreventsPublication() throws Exception {
+    void anUnqualifiedTimestampIsPublishedAndReported() throws Exception {
         var writer = new RecordingWriter();
         var target = target("timestamp-unqualified.pdf");
         var inspection = new MachineInspectionService(path -> locallyValidTimestampReport("existing"), content ->
@@ -506,15 +526,16 @@ class MachineSigningServiceTest {
         service.sign("request-1", request("1234".toCharArray(),
                 visibleFile("one", "source.pdf", target.getFileName().toString())));
 
-        assertFalse(Files.exists(target));
-        assertEquals("TIMESTAMP_QUALIFICATION_FAILED", writer.payloadCode(2));
+        assertTrue(Files.exists(target));
+        assertEquals("notQualified", writer.payloadString(2, "timestampQualification"));
+        assertEquals(null, writer.payloadString(2, "country"));
     }
 
-    /// tsl.belgium.be was down for hours on 2026-10-02: a BOSA timestamp cannot be shown
-    /// qualified without the Belgian list, so the failure names the country instead of
-    /// blaming the timestamp, and the output is still never published.
+    /// tsl.belgium.be was down on 2026-10-02 and 03: a BOSA timestamp cannot be shown
+    /// qualified without the Belgian list, so the result says unverified and names the
+    /// country, and the signature is kept.
     @Test
-    void aTimestampWhoseNationalListIsMissingNamesThatCountry() throws Exception {
+    void aTimestampWhoseNationalListIsMissingIsReportedUnverified() throws Exception {
         var writer = new RecordingWriter();
         var target = target("timestamp-anchor-missing.pdf");
         var inspection = new MachineInspectionService(path -> locallyValidTimestampReport("existing"), content ->
@@ -529,10 +550,10 @@ class MachineSigningServiceTest {
         service.sign("request-1", request("1234".toCharArray(),
                 visibleFile("one", "source.pdf", target.getFileName().toString())));
 
-        assertFalse(Files.exists(target));
-        assertEquals("TRUSTED_LIST_UNAVAILABLE", writer.payloadCode(2));
+        assertTrue(Files.exists(target));
+        assertEquals("unverified", writer.payloadString(2, "timestampQualification"));
         assertEquals("BE", writer.payloadString(2, "country"));
-        assertEquals(List.of("session.started", "file.signingStarted", "file.failed", "session.completed"),
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
                 writer.lifecycleEventTypes());
     }
 
@@ -547,7 +568,9 @@ class MachineSigningServiceTest {
                 });
         var output = "%PDF-1.7\nvalidated\n%%EOF".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
 
-        assertEquals("TIMESTAMP_QUALIFICATION_FAILED", validator.validationFailure(output, java.util.Set.of(), true));
+        assertEquals(null, validator.validationFailure(output, java.util.Set.of(), true));
+        assertEquals("notQualified",
+                validator.timestampQualification(output, java.util.Set.of(), true, "PAdES_BASELINE_T"));
         assertTrue(consulted.get());
     }
 
@@ -561,6 +584,17 @@ class MachineSigningServiceTest {
         var output = "%PDF-1.7\nvalidated\n%%EOF".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
 
         assertEquals(null, validator.validationFailure(output, java.util.Set.of(), true));
+        assertEquals("qualified",
+                validator.timestampQualification(output, java.util.Set.of(), true, "PAdES_BASELINE_T"));
+    }
+
+    @Test
+    void theCompletionPayloadSplitsTheCountry() {
+        assertEquals("{}", MachineSigningService.completion(null).toString());
+        assertEquals("{\"timestampQualification\":\"qualified\"}",
+                MachineSigningService.completion("qualified").toString());
+        assertEquals("{\"timestampQualification\":\"unverified\",\"country\":\"BE\"}",
+                MachineSigningService.completion("unverified:BE").toString());
     }
 
     @Test
