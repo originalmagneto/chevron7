@@ -321,7 +321,7 @@ struct AttestationFormView: View {
                         .multilineTextAlignment(.center)
 
                     Text("podľa § 35 až 39 zákona č. 305/2013 Z. z. o e-Governmente")
-                        .font(.system(size: 9, design: .serif))
+                        .font(.system(size: 10, design: .serif))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
 
@@ -343,7 +343,7 @@ struct AttestationFormView: View {
                         .padding(.vertical, 2)
 
                     Text("Tento elektronický dokument vznikol zaručenou konverziou z listinnej podoby a má rovnaké právne účinky ako pôvodný dokument.")
-                        .font(.system(size: 9, design: .serif))
+                        .font(.system(size: 10, design: .serif))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -393,7 +393,7 @@ struct AttestationFormView: View {
                 .frame(width: 14, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
-                    .font(.system(size: 9, design: .serif))
+                    .font(.system(size: 10, design: .serif))
                     .foregroundStyle(.secondary)
                 Text(value)
                     .font(.system(size: 10, weight: .semibold, design: .serif))

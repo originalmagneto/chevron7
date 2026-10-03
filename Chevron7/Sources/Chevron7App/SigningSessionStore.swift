@@ -582,6 +582,15 @@ final class SigningSessionStore {
         includeQualifiedTimestamp || (!viaMobile && signingProvider.alwaysAddsQualifiedTimestamp)
     }
 
+    static let mobileTimestampAuthorityLabel = "služba podpisu mobilom"
+
+    /// The authority a visible stamp names. The phone services pick their own timestamp
+    /// authority, so the Settings choice would be a false claim on that path.
+    func stampTimestampAuthorityName(viaMobile: Bool, timestamped: Bool) -> String? {
+        guard timestamped else { return nil }
+        return viaMobile ? Self.mobileTimestampAuthorityLabel : settings.activeTSA.name
+    }
+
     /// Only the card can sign and it always adds the timestamp, so the switch shows on and locked.
     var qualifiedTimestampIsLocked: Bool {
         signingProvider.alwaysAddsQualifiedTimestamp && !isMobileSigningAvailable
@@ -686,7 +695,7 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped))
                 let stampedData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,
@@ -734,7 +743,7 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped))
                 pdfData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,

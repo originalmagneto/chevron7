@@ -71,8 +71,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             let drivers = try await engine.drivers()
             let usable = Self.usableDrivers(drivers)
             guard let driverID = (usable.first(where: { $0.id == Self.driverID }) ?? usable.first)?.id else {
-                let reason = drivers.first(where: { $0.tokenPresent == true && $0.unavailableReason != nil })?
-                    .unavailableReason ?? drivers.compactMap(\.unavailableReason).first
+                let reason = Self.unusableDriverReason(drivers)
                 lastResolveErrorLock.withLock { $0 = reason ?? "Karta nie je dostupná: vložte ju do čítačky." }
                 return []
             }
@@ -323,6 +322,13 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// Drivers certificate discovery and signing may use: those with a card in the reader,
     /// or, when no reader reports one, every driver that did not report an empty reader.
     /// A driver that cannot run on this Mac is never one of them.
+    /// Why no card can be used: the unusable driver with a card in the reader first,
+    /// otherwise the first reason reported. Nil when no driver was refused.
+    static func unusableDriverReason(_ drivers: [SigningDriver]) -> String? {
+        drivers.first(where: { $0.tokenPresent == true && $0.unavailableReason != nil })?
+            .unavailableReason ?? drivers.compactMap(\.unavailableReason).first
+    }
+
     static func usableDrivers(_ drivers: [SigningDriver]) -> [SigningDriver] {
         let drivers = drivers.filter { $0.unavailableReason == nil }
         let present = drivers.filter { $0.tokenPresent == true }
@@ -395,11 +401,15 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     public func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
-        let usable = Self.usableDrivers((try? await engine.drivers()) ?? [])
+        let drivers = (try? await engine.drivers()) ?? []
+        let usable = Self.usableDrivers(drivers)
         let connectedDriver = usable.first(where: { $0.id == Self.driverID }) ?? usable.first
         guard let driverID = connectedDriver?.id else {
             cachedCertificates.withLock { $0 = [] }
             invalidateIdentityCache()
+            if let reason = Self.unusableDriverReason(drivers) {
+                throw SigningError.signingFailed(reason)
+            }
             throw SigningError.identityUnavailable
         }
         guard let pin = Self.enginePIN(entered: request.pin ?? "", driverID: driverID) else {
