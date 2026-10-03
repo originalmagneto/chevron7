@@ -31,7 +31,7 @@ public struct EmbeddedFileService: Sendable {
         let newCatalogNumber = maxNumber + 3
         let escapedMimeType = attachment.mimeType.replacingOccurrences(of: "/", with: "#2F")
 
-        var fileObj = Data("\n\(fileNumber) 0 obj\n<< /Type /EmbeddedFile /Subtype /\(escapedMimeType) /Length \(attachment.data.count) >>\nstream\n".utf8)
+        var fileObj = Data("\(fileNumber) 0 obj\n<< /Type /EmbeddedFile /Subtype /\(escapedMimeType) /Length \(attachment.data.count) >>\nstream\n".utf8)
         fileObj.append(attachment.data)
         fileObj.append(Data("\nendstream\nendobj\n".utf8))
 
@@ -42,16 +42,16 @@ public struct EmbeddedFileService: Sendable {
         let specBody = "<< /Type /Filespec /F (\(nameASCII)) /UF <FEFF\(ufHex)>" +
             " /AFRelationship /Data /Desc (\(escapedDesc))" +
             " /EF << /F \(fileNumber) 0 R /UF \(fileNumber) 0 R >> >>"
-        let specObj = Data("\n\(specNumber) 0 obj\n\(specBody)\nendobj\n".utf8)
+        let specObj = Data("\(specNumber) 0 obj\n\(specBody)\nendobj\n".utf8)
 
         var augmented = Self.addAttachmentToCatalog(catalogDict,
                                                     fileName: nameASCII,
                                                     specificationNumber: specNumber)
         augmented = Self.addAssociatedFileToCatalog(augmented,
                                                     specificationNumber: specNumber)
-        let catalogObj = Data("\n\(newCatalogNumber) 0 obj\n\(augmented)\nendobj\n".utf8)
+        let catalogObj = Data("\(newCatalogNumber) 0 obj\n\(augmented)\nendobj\n".utf8)
 
-        var out = pdf
+        var out = PDFObjectScanner.endingWithEOL(pdf)
         var offsets: [(Int, Int)] = []
         func append(_ chunk: Data, number: Int) {
             offsets.append((number, out.count))
@@ -70,9 +70,10 @@ public struct EmbeddedFileService: Sendable {
         for n in firstNew...newCatalogNumber {
             xref.append(Data(String(format: "%010d %05d n \n", byNumber[n] ?? 0, 0).utf8))
         }
+        let fileID = PDFObjectScanner.updatedFileIdentifier(atXref: root.xrefOffset, in: pdf)
         let trailer = """
         trailer
-        << /Size \(newCatalogNumber + 1) /Root \(newCatalogNumber) 0 R /Prev \(root.xrefOffset) >>
+        << /Size \(newCatalogNumber + 1) /Root \(newCatalogNumber) 0 R /Prev \(root.xrefOffset) \(fileID) >>
         startxref
         \(xrefOffset)
         %%EOF
