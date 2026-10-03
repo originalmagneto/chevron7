@@ -226,8 +226,11 @@ public struct PDFAConverter: Sendable {
         for offset in offsets {
             out.append(Data(String(format: "%010d 00000 n \n", offset).utf8))
         }
+        // A newly written file starts with both identifiers equal (ISO 32000-1, 14.4),
+        // and incremental updates keep the first, so each document needs its own.
+        let identifier = PDFObjectScanner.randomIdentifier()
         let trailer = "trailer\n<< /Size \(objectCount + 1) /Root 1 0 R"
-            + " /ID [<0123456789abcdef0123456789abcdef> <0123456789abcdef0123456789abcdef>] >>\n"
+            + " /ID [<\(identifier)> <\(identifier)>] >>\n"
             + "startxref\n\(xrefOffset)\n%%EOF\n"
         out.append(Data(trailer.utf8))
         return out

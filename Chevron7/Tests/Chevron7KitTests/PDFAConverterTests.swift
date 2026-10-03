@@ -240,6 +240,18 @@ final class PDFAConverterTests: XCTestCase {
         XCTAssertEqual(newID.first, previousID.first, "the permanent identifier must survive an update")
     }
 
+    func testRasterConversionsGetTheirOwnFileIdentifier() throws {
+        let source = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.typicalContractPDF()))
+        let first = try PDFAConverter().convert(document: source, mode: .rasterGuaranteed, title: "t")
+        let second = try PDFAConverter().convert(document: source, mode: .rasterGuaranteed, title: "t")
+        let firstID = try XCTUnwrap(Self.trailerIDs(in: first).first)
+        let secondID = try XCTUnwrap(Self.trailerIDs(in: second).first)
+        XCTAssertEqual(firstID[0].count, 32)
+        XCTAssertEqual(firstID[0], firstID[1], "a newly written file starts with both identifiers equal")
+        XCTAssertNotEqual(firstID[0], secondID[0], "every raster PDF/A needs its own permanent identifier")
+        XCTAssertNotEqual(Self.trailerIDs(in: first).last?.first, Self.trailerIDs(in: second).last?.first)
+    }
+
     func testEmbeddedFileUpdateBuildsOnTheLatestRevision() throws {
         // The raster PDF/A carries its ICC profile in the last revision, so the
         // earlier startxref still sits inside the tail the scanner reads.
