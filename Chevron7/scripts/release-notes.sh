@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Marián Čuprík
 # SPDX-License-Identifier: EUPL-1.2
-# Writes the release notes for VERSION to stdout. A hand-written
-# docs/releases/vVERSION.md wins; otherwise the notes list the feat, fix and
-# perf commits since the last native-v* tag and add the install section.
+# Writes the release notes for VERSION to stdout, in Slovak. A hand-written
+# docs/releases/vVERSION.md wins. Otherwise the notes collect the change notes
+# added since the last native-v* tag under docs/releases/changes/ (one Slovak
+# paragraph per feat, fix or perf change, named feat-*.md, fix-*.md or
+# perf-*.md, written in the change's own pull request), and only without any
+# fall back to the commit subjects. The install section follows either way.
 #
 # Usage: release-notes.sh VERSION
 
@@ -34,9 +37,32 @@ section() {
     printf '## %s\n\n%s\n\n' "$title" "$lines"
 }
 
+# Change notes added in the range, oldest first, still present at HEAD.
+changes_dir="docs/releases/changes"
+change_notes="$(git -C "$repo_root" log --reverse --diff-filter=A --format= --name-only "$range" -- "$changes_dir" \
+    | grep -E '/(feat|fix|perf)-[^/]*\.md$' \
+    | awk '!seen[$0]++' \
+    | while read -r path; do [[ -f "$repo_root/$path" ]] && printf '%s\n' "$path"; done || true)"
+
+notes_section() {
+    local title="$1" pattern="$2" paths
+    paths="$(printf '%s\n' "$change_notes" | grep -E "/($pattern)-[^/]*\.md$" || true)"
+    [[ -z "$paths" ]] && return 0
+    printf '## %s\n\n' "$title"
+    while read -r path; do
+        cat "$repo_root/$path"
+        printf '\n'
+    done <<< "$paths"
+}
+
 printf '# Chevron7 v%s\n\n' "$version"
-section "Čo je nové" '^feat(\([^)]*\))?!?:'
-section "Opravy" '^(fix|perf)(\([^)]*\))?!?:'
+if [[ -n "$change_notes" ]]; then
+    notes_section "Čo je nové" 'feat'
+    notes_section "Opravy" 'fix|perf'
+else
+    section "Čo je nové" '^feat(\([^)]*\))?!?:'
+    section "Opravy" '^(fix|perf)(\([^)]*\))?!?:'
+fi
 cat <<NOTES
 ## Požiadavky
 
@@ -47,7 +73,7 @@ cat <<NOTES
 ## Inštalácia
 
 1. Otvorte \`Chevron7-v$version.dmg\` a presuňte \`Chevron7.app\` do **Applications**.
-2. Aplikácia je podpísaná Developer ID (the Software s.r.o., Q7AU96CW7H) a notarizovaná Apple. Pri prvom spustení macOS raz potvrdí otvorenie aplikácie stiahnutej z internetu.
+2. Pri prvom spustení macOS raz potvrdí otvorenie aplikácie stiahnutej z internetu.
 3. Na podpisovanie zo Safari si aplikácia pri prvom spustení sama zaregistruje prepojenie (macOS ho ohlási ako položku na pozadí). Potom v Safari zapnite rozšírenie **Chevron7** v **Settings > Extensions**.
 
 Najnovšia verzia je vždy na https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg
