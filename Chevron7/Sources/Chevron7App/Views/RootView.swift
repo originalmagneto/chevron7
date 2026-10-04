@@ -705,9 +705,15 @@ private struct DonateButton: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Color.black.opacity(isHovering ? 0.35 : 0.12))
+                            .strokeBorder(ink.opacity(isHovering ? 0.35 : 0.12))
                     )
-                    .shadow(color: .black.opacity(isHovering ? 0.16 : 0.06), radius: isHovering ? 3 : 1.5, y: 1)
+                    // Without the group the shadow is drawn for each layer, and the logo's
+                    // own shadow outlines it as a smaller box inside the bar.
+                    .compositingGroup()
+                    // Hover lifts the whole button and keeps the brand yellow: any tint over
+                    // it reads as grey.
+                    .shadow(color: .black.opacity(isHovering ? 0.22 : 0.06), radius: isHovering ? 4 : 1.5, y: isHovering ? 2 : 1)
+                    .scaleEffect(isHovering ? 1.015 : 1)
                     .animation(.easeOut(duration: 0.12), value: isHovering)
                     .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
