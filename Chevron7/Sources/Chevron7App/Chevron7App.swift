@@ -32,9 +32,9 @@ final class Chevron7AppModel {
         signedDocumentStore = signedDocuments
         signingStore.signedDocumentStore = signedDocuments
         webSigning = WebSigningCoordinator(settingsStore: settings, signedDocumentStore: signedDocuments)
-        cardReader = CardReaderStatus { [settings] in
-            await settings.signingProvider.availableIdentities()
-        }
+        cardReader = CardReaderStatus(
+            discover: { [settings] in await settings.signingProvider.availableIdentities() },
+            readCardATRs: { await SmartcardSlotReader.cardATRs() })
         updater = AppUpdater()
         let signing = signingStore
         let zako = zakoStore

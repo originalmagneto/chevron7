@@ -489,12 +489,15 @@ struct RootView: View {
                     reader: model.cardReader.identities,
                     signingSelectedID: signingStore.selectedIdentityID,
                     zakoSelectedID: zakoStore.selectedIdentityID,
-                    isDemo: settingsStore.signingProvider is DemoSigningProvider)
+                    isDemo: settingsStore.signingProvider is DemoSigningProvider,
+                    missingDriver: model.cardReader.missingDriver)
 
                 SmartcardHUDStatus(
                     isConnected: badge.isConnected,
                     label: badge.label,
-                    detail: badge.detail
+                    detail: badge.detail,
+                    needsDriver: badge.needsDriver,
+                    drivers: badge.drivers
                 )
 
                 VStack(alignment: .leading, spacing: 6) {

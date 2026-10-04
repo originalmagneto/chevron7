@@ -100,6 +100,7 @@ if [[ -d "$appex" ]]; then
 fi
 
 # 5. The app bundle last; do not use --deep, it would drop the entitlements above.
-sign "$app"
+#    The app's own entitlements let CryptoTokenKit read the ATR of a card in the reader.
+sign --entitlements "$config/Chevron7App.entitlements" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 echo "✔ Developer ID signed: $app"

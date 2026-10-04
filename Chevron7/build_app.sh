@@ -371,7 +371,10 @@ APPEXPLIST
     echo "▸ Safari rozšírenie: $APPEX"
 fi
 
-codesign --force --sign - "$APP_DIR" >/dev/null 2>&1 || true
+# The app's own entitlements (Config/Chevron7App.entitlements): CryptoTokenKit slot
+# access for the missing card driver hint.
+APP_ENTITLEMENTS="Config/Chevron7App.entitlements"
+codesign --force --sign - --entitlements "$APP_ENTITLEMENTS" "$APP_DIR" >/dev/null 2>&1 || true
 
 echo "✔ Hotovo: $APP_DIR ($VERSION)"
 echo "  Spustenie: open \"$APP_DIR\""
@@ -382,7 +385,7 @@ strip_build_product_extension() {
     local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
     pluginkit -r "$APP_DIR/Contents/PlugIns/Chevron7WebExtension.appex" >/dev/null 2>&1 || true
     rm -rf "$APP_DIR/Contents/PlugIns"
-    codesign --force --sign - "$APP_DIR" >/dev/null 2>&1 || true
+    codesign --force --sign - --entitlements "$APP_ENTITLEMENTS" "$APP_DIR" >/dev/null 2>&1 || true
     "$lsregister" -u "$APP_DIR" >/dev/null 2>&1 || true
 }
 

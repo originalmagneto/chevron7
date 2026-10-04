@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- CryptoTokenKit's slot manager reads the ATR of a card in the reader, so the
+         sidebar can name a card whose vendor driver is missing (SmartcardSlotReader).
+         Without it TKSmartCardSlotManager.default is nil, even outside the sandbox. -->
+    <key>com.apple.security.smartcard</key>
+    <true/>
+</dict>
+</plist>

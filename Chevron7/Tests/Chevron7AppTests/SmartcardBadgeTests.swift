@@ -110,6 +110,44 @@ final class SmartcardBadgeTests: XCTestCase {
         XCTAssertFalse(badge.isConnected)
         XCTAssertEqual(badge.label, "DEMO režim")
     }
+
+    private let missingSecureStore = MissingDriverAdvice(
+        label: "Chýba ovládač karty", detail: "Karta I.CA je v čítačke", drivers: [.icaSecureStore])
+
+    func testACardWithoutItsDriverAsksForTheDriver() {
+        let badge = SmartcardBadge(
+            section: .signing, reader: [],
+            signingSelectedID: nil, zakoSelectedID: nil, isDemo: false,
+            missingDriver: missingSecureStore)
+
+        XCTAssertFalse(badge.isConnected)
+        XCTAssertTrue(badge.needsDriver)
+        XCTAssertEqual(badge.label, "Chýba ovládač karty")
+        XCTAssertEqual(badge.detail, "Karta I.CA je v čítačke")
+        XCTAssertEqual(badge.drivers, [.icaSecureStore])
+    }
+
+    func testAReadCardWinsOverStaleDriverAdvice() {
+        let badge = SmartcardBadge(
+            section: .signing, reader: [icaCard],
+            signingSelectedID: nil, zakoSelectedID: nil, isDemo: false,
+            missingDriver: missingSecureStore)
+
+        XCTAssertTrue(badge.isConnected)
+        XCTAssertFalse(badge.needsDriver)
+        XCTAssertEqual(badge.drivers, [])
+    }
+
+    func testDemoProviderKeepsSayingDemo() {
+        // The Demo provider signs without a card, so a missing driver is not its problem.
+        let badge = SmartcardBadge(
+            section: .signing, reader: [],
+            signingSelectedID: nil, zakoSelectedID: nil, isDemo: true,
+            missingDriver: missingSecureStore)
+
+        XCTAssertFalse(badge.needsDriver)
+        XCTAssertEqual(badge.label, "DEMO režim")
+    }
 }
 
 @MainActor
@@ -175,6 +213,44 @@ final class CardReaderStatusTests: XCTestCase {
 
         XCTAssertGreaterThan(discoveries, 1)
         XCTAssertEqual(status.identities, [card])
+    }
+
+    private let icaATR: [UInt8] = [0x3B, 0xDA, 0x96, 0xFF, 0x81, 0xB1, 0xFE, 0x45, 0x1F, 0x07, 0x80,
+                                   0x58, 0x49, 0x43, 0x41, 0x20, 0x56, 0x32, 0x2E, 0x30, 0xE9]
+
+    func testACardNoDriverReadNamesTheMissingDriver() async {
+        let status = CardReaderStatus(
+            discover: { [] }, readCardATRs: { [icaATR] in [icaATR] }, isDriverInstalled: { _ in false })
+
+        await status.refresh()
+
+        XCTAssertEqual(status.missingDriver?.drivers, [.icaSecureStore])
+    }
+
+    func testAReadCardLeavesTheSlotsAlone() async {
+        var slotReads = 0
+        let status = CardReaderStatus(
+            discover: { [card] in [card] },
+            readCardATRs: { [icaATR] in slotReads += 1; return [icaATR] },
+            isDriverInstalled: { _ in false })
+
+        await status.refresh()
+
+        XCTAssertEqual(slotReads, 0)
+        XCTAssertNil(status.missingDriver)
+    }
+
+    func testTheAdviceGoesOnceTheDriverReadsTheCard() async {
+        var identities: [SigningIdentityInfo] = []
+        let status = CardReaderStatus(
+            discover: { identities }, readCardATRs: { [icaATR] in [icaATR] }, isDriverInstalled: { _ in false })
+        await status.refresh()
+        XCTAssertNotNil(status.missingDriver)
+
+        identities = [card]
+        await status.refresh()
+
+        XCTAssertNil(status.missingDriver)
     }
 }
 
