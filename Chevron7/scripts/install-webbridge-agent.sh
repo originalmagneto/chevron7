@@ -80,7 +80,8 @@ ENTPLIST
         exit 1
     fi
     rm -f "$APPEX_ENTITLEMENTS"
-    if ! codesign --force --sign - "$APP"; then
+    # Keep the app's own entitlements (Config/Chevron7App.entitlements, smart card slots).
+    if ! codesign --force --sign - --preserve-metadata=entitlements "$APP"; then
         echo "CHYBA: aplikáciu sa nepodarilo znova podpísať, registrácia sa preskakuje." >&2
         exit 1
     fi

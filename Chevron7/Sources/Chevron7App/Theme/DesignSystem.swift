@@ -48,28 +48,55 @@ struct SmartcardHUDStatus: View {
     let isConnected: Bool
     let label: String
     let detail: String?
+    /// A card is in the reader but its driver is missing: a warning with download links.
+    var needsDriver: Bool = false
+    var drivers: [CardDriver] = []
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: isConnected ? "creditcard.fill" : "creditcard")
-                .foregroundStyle(isConnected ? Color.green : Color.secondary)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.callout)
-                    .lineLimit(1)
-                if let detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(.callout)
                         .lineLimit(1)
+                    if let detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(label)
+            .accessibilityValue(detail ?? "")
+
+            if needsDriver {
+                ForEach(drivers, id: \.self) { driver in
+                    Button("Stiahnuť \(driver.name)…") {
+                        NSWorkspace.shared.open(driver.downloadURL)
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .padding(.leading, 24)
+                    .help("Otvorí stránku výrobcu ovládača. Po inštalácii kartu vyberte a znova vložte do čítačky.")
                 }
             }
-            Spacer(minLength: 0)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(label)
-        .accessibilityValue(detail ?? "")
+    }
+
+    private var symbol: String {
+        if needsDriver { return "exclamationmark.triangle.fill" }
+        return isConnected ? "creditcard.fill" : "creditcard"
+    }
+
+    private var tint: Color {
+        if needsDriver { return .orange }
+        return isConnected ? .green : .secondary
     }
 }
 
