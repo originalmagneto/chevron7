@@ -43,7 +43,7 @@ final class WebSigningCoordinator {
             case .busy:
                 return "Chevron7 už spracúva inú požiadavku na podpis."
             case .cancelled:
-                return "Podpisovanie ste zrušili."
+                return WebSigningBridge.cancelledMessage
             case .tooLarge(let bytes):
                 let megabytes = Double(bytes) / 1_048_576
                 return String(format: "Dokument má %.1f MB, čo je nad limitom pre podpis z prehliadača.", megabytes)
@@ -118,7 +118,9 @@ final class WebSigningCoordinator {
         return effectiveLevel(for: pending.request).replacingOccurrences(of: "_", with: " ")
     }
 
-    private var continuation: CheckedContinuation<WebSignResponse, Error>?
+    /// The open request and its token: a signature that finishes after its request
+    /// was cancelled must not answer the page's next request.
+    private let session = WebSignSessionGate<WebSignResponse>()
     private let settingsStore: AppSettingsStore
     private let signedDocumentStore: SignedDocumentStore
     private let prompt = WebSigningPrompt()
@@ -181,7 +183,9 @@ final class WebSigningCoordinator {
 
     /// Called from the XPC bridge. Suspends until the person signs or cancels.
     func handle(_ request: WebSignRequest) async throws -> WebSignResponse {
-        guard pending == nil else { throw Failure.busy }
+        // isWorking too: after a cancel the engine may still be signing the old
+        // request, and it holds the card until it ends.
+        guard pending == nil, !isWorking, !session.isOpen else { throw Failure.busy }
 
         let bytes = try Self.decode(request)
         guard bytes.count <= WebSigningBridge.maximumPayloadBytes else {
@@ -221,7 +225,9 @@ final class WebSigningCoordinator {
         startCardWatch()
 
         return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
+            if session.open(continuation) == nil {
+                continuation.resume(throwing: Failure.busy)
+            }
         }
     }
 
@@ -277,13 +283,14 @@ final class WebSigningCoordinator {
             requestPINFocus()
             return
         }
+        let token = session.currentToken
         isReadingCertificates = true
         errorText = nil
         if !needsPIN { prompt.beginMiddlewareInput() }
         let resolved = await provider.resolveIdentities(pin: needsPIN ? pin : "")
         if !needsPIN { prompt.endMiddlewareInput() }
         isReadingCertificates = false
-        guard pending != nil else { return }
+        guard session.isCurrent(token) else { return }
 
         if let resolved, !resolved.isEmpty {
             identities = resolved
@@ -314,7 +321,11 @@ final class WebSigningCoordinator {
     }
 
     func cancel() {
-        finish(.failure(Failure.cancelled))
+        // A phone signature in progress would otherwise keep the panel's slot
+        // busy until the relay times out; the card's engine call cannot be
+        // stopped, and its late result is dropped by the session token.
+        mobileSigning.cancel()
+        finish(.failure(Failure.cancelled), token: session.currentToken)
     }
 
     /// Signs with the eID over NFC on a phone through the Autogram v mobile
@@ -328,6 +339,7 @@ final class WebSigningCoordinator {
             errorText = "Podpis textu a obrázkov mobilom zatiaľ nie je k dispozícii. Použite podpis kartou."
             return
         }
+        let token = session.currentToken
         isWorking = true
         errorText = nil
         defer { isWorking = false }
@@ -353,6 +365,8 @@ final class WebSigningCoordinator {
                 eform: pending.request.eform)
 
             let document = try await mobileSigning.sign(upload)
+            // Cancelled while the phone signed: this result belongs to no one.
+            guard session.isCurrent(token) else { return }
             guard let content = document.data else {
                 throw Failure.malformedPayload
             }
@@ -369,10 +383,12 @@ final class WebSigningCoordinator {
                 requestID: pending.request.requestID,
                 content: content.base64EncodedString(),
                 signedBy: AVMResultMapper.signatureLabel(signers: signers),
-                issuedBy: signers.first?.issuedBy ?? "")))
+                issuedBy: signers.first?.issuedBy ?? "")), token: token)
         } catch is CancellationError {
+            guard session.isCurrent(token) else { return }
             errorText = "Podpisovanie mobilom ste zrušili."
         } catch {
+            guard session.isCurrent(token) else { return }
             errorText = error.localizedDescription
         }
     }
@@ -388,6 +404,7 @@ final class WebSigningCoordinator {
             requestPINFocus()
             return
         }
+        let token = session.currentToken
         isWorking = true
         errorText = nil
         defer { isWorking = false }
@@ -425,6 +442,9 @@ final class WebSigningCoordinator {
                 if !needsPIN { prompt.endMiddlewareInput() }
                 throw error
             }
+            // Cancelled while the card signed: neither archived nor handed to the
+            // page's next request.
+            guard session.isCurrent(token) else { return }
             let payload = wantsContainer ? (signed.asicData ?? signed.pdfData) : signed.pdfData
             let saved = archive(payload, for: pending.request)
             signedDocumentStore.record(displayName: pending.request.filename,
@@ -438,8 +458,9 @@ final class WebSigningCoordinator {
                 requestID: pending.request.requestID,
                 content: payload.base64EncodedString(),
                 signedBy: signed.signatureLabel,
-                issuedBy: identities.first(where: { $0.id == identityID })?.issuerSummary ?? "")))
+                issuedBy: identities.first(where: { $0.id == identityID })?.issuerSummary ?? "")), token: token)
         } catch {
+            guard session.isCurrent(token) else { return }
             // Kept open so a mistyped PIN can be corrected without the page
             // having to start over.
             errorText = error.localizedDescription
@@ -447,16 +468,15 @@ final class WebSigningCoordinator {
         }
     }
 
-    private func finish(_ result: Result<WebSignResponse, Error>) {
-        guard let continuation else { return }
-        self.continuation = nil
+    private func finish(_ result: Result<WebSignResponse, Error>, token: UUID?) {
+        guard session.isCurrent(token) else { return }
         cardWatch?.cancel()
         cardWatch = nil
         cardPresent = false
         pending = nil
         pin = ""
         prompt.hide()
-        continuation.resume(with: result)
+        session.close(token, with: result)
     }
 
     private static func decode(_ request: WebSignRequest) throws -> Data {

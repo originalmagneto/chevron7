@@ -190,16 +190,15 @@ await scenario('BpPdf request', async (ditec, page) => {
     check('BpPdf no eform', req.eform == null, JSON.stringify(req.eform));
 });
 
+// The portals pass a ready-made base64 XML Data Container here (third argument
+// the form identifier), never raw form XML. Until the app signs an existing
+// container on the web path it is refused with a message, not wrapped twice.
 await scenario('Bp2Xml request', async (ditec, page) => {
     const added = cbPair();
-    ditec.dSigXadesBpJs.addXmlObject2('form2', 'desc', NS, XML, XSD, XSLT, added.callback);
-    check('Bp2Xml addXmlObject2 ok', (await added.promise).status === 'success');
-    const signed = cbPair();
-    ditec.dSigXadesBpJs.sign('sig-5', ditec.dSigXadesBpJs.SHA256, null, { onSuccess: () => {} });
-    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
-    check('Bp2Xml signs', (await signed.promise).status === 'success');
-    const req = page.requests[0] || {};
-    check('Bp2Xml identifier', req.eform && req.eform.identifier === NS, req.eform && req.eform.identifier);
+    ditec.dSigXadesBpJs.addXmlObject2('form2', 'desc', NS, b64('<XMLDataContainer/>'), XSD, XSLT, added.callback);
+    const r = await added.promise;
+    check('Bp2Xml addXmlObject2 refused', r.status === 'error' && r.value.includes('XML Data Container'), JSON.stringify(r));
+    check('Bp2Xml sends nothing', page.requests.length === 0, String(page.requests.length));
 });
 
 // --- new branches ---

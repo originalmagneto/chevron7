@@ -78,6 +78,20 @@ public enum WebSigningBridge {
     /// reached, so no file handover is needed. The cap exists only so a runaway
     /// page cannot wedge the app.
     public static let maximumPayloadBytes = 32 * 1024 * 1024
+
+    /// The error the app returns when the person closes the signing panel.
+    public static let cancelledMessage = "Podpisovanie ste zrušili."
+
+    /// A failed request as the extension handler answers ditec.js. A cancellation
+    /// carries `cancelled: true`, which ditec.js reports to the portal as
+    /// D.Bridge's ERROR_CANCELLED (code 1): the portals stay silent on that code
+    /// and show every other one.
+    public static func failureReply(error: String, done: Bool? = nil) -> [String: Any] {
+        var reply: [String: Any] = ["ok": false, "error": error]
+        if let done { reply["done"] = done }
+        if error == cancelledMessage { reply["cancelled"] = true }
+        return reply
+    }
 }
 
 /// Rendezvous published by the launchd agent.
