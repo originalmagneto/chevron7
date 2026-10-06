@@ -189,6 +189,37 @@ final class WebSigningCoordinator {
         return pending.map({ Self.mobileRefusal(for: $0.request) == nil }) ?? true
     }
 
+    /// The Autogram Portal is set up for eIDENTITA: an organization id and a key in
+    /// the Keychain. Read once per request, so the panel never touches the Keychain
+    /// while it redraws.
+    private(set) var eidentitaConfigured = false
+
+    /// eIDENTITA is offered next to Autogram v mobile only when the portal is set
+    /// up and the request is one it signs.
+    var eidentitaAvailable: Bool {
+        guard eidentitaConfigured, mobileSigningAvailable, let pending else { return false }
+        return Self.eidentitaRefusal(for: pending.request) == nil
+    }
+
+    private let agpKeyStore: any AGPKeyStoring = AGPKeyStore()
+
+    private func readEidentitaConfiguration() -> Bool {
+        let organization = settingsStore.settings.agpUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard settingsStore.settings.mobileSigningEnabled, !organization.isEmpty else { return false }
+        return ((try? agpKeyStore.loadPrivateKey()) ?? nil) != nil
+    }
+
+    /// Why eIDENTITA cannot sign this request, nil when it can. On top of what the
+    /// phone refuses anyway, eIDENTITA signs no electronic forms yet: the MV SR
+    /// integration guide (v1.1, 2026-03-05) lists XML forms as planned only.
+    nonisolated static func eidentitaRefusal(for request: WebSignRequest) -> String? {
+        if let refusal = mobileRefusal(for: request) { return refusal }
+        if request.eform != nil || request.payloadMimeType.lowercased().contains("xml") {
+            return "Elektronický formulár aplikácia eIDENTITA zatiaľ nepodpisuje. Použite Autogram v mobile alebo kartu."
+        }
+        return nil
+    }
+
     /// Why the phone cannot sign this request, nil when it can. The relay has only
     /// been shown PDFs and form XML: TXT/PNG, a finished container and several
     /// documents stay with the card until avm-probe verifies the relay takes them.
@@ -260,6 +291,7 @@ final class WebSigningCoordinator {
         pin = ""
         errorText = nil
         addsQualifiedTimestamp = false
+        eidentitaConfigured = readEidentitaConfiguration()
         prompt.show(coordinator: self)
         startCardWatch()
 
@@ -364,16 +396,20 @@ final class WebSigningCoordinator {
         // busy until the relay times out; the card's engine call cannot be
         // stopped, and its late result is dropped by the session token.
         mobileSigning.cancel()
+        mobileSigning.cancelEidentita()
         finish(.failure(Failure.cancelled), token: session.currentToken)
     }
 
-    /// Signs with the eID over NFC on a phone through the Autogram v mobile
-    /// relay. Needs no card reader and no PIN here: the phone collects both.
-    /// The relay accepts the same eForm attributes as the local engine, so a
-    /// state-portal form works on this path too.
-    func confirmViaMobile() async {
+    /// Signs with the eID over NFC on a phone, through the Autogram v mobile relay
+    /// or through eIDENTITA on the Autogram Portal. Needs no card reader and no PIN
+    /// here: the phone collects both. The relay accepts the same eForm attributes as
+    /// the local engine, so a state-portal form works there; eIDENTITA signs PDFs.
+    func confirmViaMobile(method: MobileSigningMethod = .autogramMobile) async {
         guard let pending else { return }
-        if let refusal = Self.mobileRefusal(for: pending.request) {
+        let refusal = method == .eidentita
+            ? Self.eidentitaRefusal(for: pending.request)
+            : Self.mobileRefusal(for: pending.request)
+        if let refusal {
             errorText = refusal
             return
         }
@@ -394,34 +430,60 @@ final class WebSigningCoordinator {
                 ? (wantsTimestamp ? .xadesT : .xadesB)
                 : (wantsTimestamp ? .padesT : .padesB)
 
-            let upload = AVMUploadRequest(
-                filename: pending.request.filename,
-                data: bytes,
-                mimeType: isEForm ? AVMUploadRequest.xmlMimeType : AVMUploadRequest.pdfMimeType,
-                level: level,
-                container: wantsContainer ? .asicE : nil,
-                eform: pending.request.eform)
-
-            let document = try await mobileSigning.sign(upload)
-            // Cancelled while the phone signed: this result belongs to no one.
-            guard session.isCurrent(token) else { return }
-            guard let content = document.data else {
-                throw Failure.malformedPayload
+            let content: Data
+            let signedBy: String
+            let issuedBy: String
+            switch method {
+            case .autogramMobile:
+                let upload = AVMUploadRequest(
+                    filename: pending.request.filename,
+                    data: bytes,
+                    mimeType: isEForm ? AVMUploadRequest.xmlMimeType : AVMUploadRequest.pdfMimeType,
+                    level: level,
+                    container: wantsContainer ? .asicE : nil,
+                    eform: pending.request.eform)
+                let document = try await mobileSigning.sign(upload)
+                // Cancelled while the phone signed: this result belongs to no one.
+                guard session.isCurrent(token) else { return }
+                guard let data = document.data else {
+                    throw Failure.malformedPayload
+                }
+                let signers = document.signers ?? []
+                content = data
+                signedBy = AVMResultMapper.signatureLabel(signers: signers)
+                issuedBy = signers.first?.issuedBy ?? ""
+            case .eidentita:
+                // The portal builds the container around the PDF for a XAdES request,
+                // as the relay does; Baseline B is eIDENTITA's signature without a timestamp.
+                let request = AGPSigningRequest(filename: pending.request.filename,
+                                                data: bytes,
+                                                mimeType: AVMUploadRequest.pdfMimeType,
+                                                format: wantsContainer ? .xades : .pades,
+                                                level: wantsTimestamp ? .baselineT : .baselineB)
+                let client = try AGPClient.configured(userID: settingsStore.settings.agpUserID,
+                                                      baseURL: settingsStore.settings.agpBaseURLValue,
+                                                      keyStore: agpKeyStore)
+                let file = try await mobileSigning.signViaEidentita(request, client: client)
+                guard session.isCurrent(token) else { return }
+                content = file.data
+                signedBy = SigningSessionStore.eidentitaSignatureLabel
+                // The portal returns the file only; the issuer would need the
+                // certificate, which an eID signature on this path never reads here.
+                issuedBy = ""
             }
-            let signers = document.signers ?? []
             let saved = archive(content, for: pending.request)
             signedDocumentStore.record(displayName: pending.request.filename,
                                        origin: .browser,
                                        method: .mobile,
                                        signatureLevel: requested,
-                                       signedBy: AVMResultMapper.signatureLabel(signers: signers),
+                                       signedBy: signedBy,
                                        url: saved)
             signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
             finish(.success(WebSignResponse(
                 requestID: pending.request.requestID,
                 content: content.base64EncodedString(),
-                signedBy: AVMResultMapper.signatureLabel(signers: signers),
-                issuedBy: signers.first?.issuedBy ?? "")), token: token)
+                signedBy: signedBy,
+                issuedBy: issuedBy)), token: token)
         } catch is CancellationError {
             guard session.isCurrent(token) else { return }
             errorText = "Podpisovanie mobilom ste zrušili."
