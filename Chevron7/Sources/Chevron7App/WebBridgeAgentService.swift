@@ -77,32 +77,75 @@ enum WebBridgeAgentService {
     }
 
     /// Replaces the job the old installer bootstrapped with the bundled agent.
-    /// Both use the same label, so the old job is unloaded first; its plist goes
-    /// to the Trash only once the new registration has succeeded, and on failure
-    /// the old job is loaded again, so Safari never loses its bridge.
+    ///
+    /// Both use the same label. Registering while the old plist still lay in
+    /// `~/Library/LaunchAgents`, right after a bootout launchd had not finished,
+    /// was refused with "Operation not permitted" on every launch (MacBook Air,
+    /// 2026-10-06), so the old job is unloaded, waited for, and its plist moved
+    /// aside before registering. On failure the plist goes back and the old job is
+    /// loaded again, so Safari never loses its bridge; on success it goes to the Trash.
     @discardableResult
     static func migrateLegacyAgent(
         at url: URL = legacyPlistURL(),
         userID: uid_t = getuid(),
         register: () throws -> Void,
         launchctl: ([String]) -> Void = runLaunchctl,
+        waitUntilUnloaded: (String) -> Void = waitUntilUnloaded,
+        moveItem: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) },
+        stagingURL: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(plistName)"),
         moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     ) -> Bool {
         let domain = "gui/\(userID)"
-        launchctl(["bootout", "\(domain)/\(label)"])
+        let service = "\(domain)/\(label)"
+        launchctl(["bootout", service])
+        waitUntilUnloaded(service)
+        var staged: URL?
+        do {
+            try moveItem(url, stagingURL)
+            staged = stagingURL
+        } catch {
+            log.error("Old web bridge agent plist not moved aside: \(error.localizedDescription, privacy: .public)")
+        }
         do {
             try register()
         } catch {
-            log.error("Web bridge agent not registered, old agent restored: \(error.localizedDescription, privacy: .public)")
+            let nsError = error as NSError
+            log.error("""
+                Web bridge agent not registered, old agent restored: \(error.localizedDescription, privacy: .public) \
+                domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public)
+                """)
+            if let staged {
+                do {
+                    try moveItem(staged, url)
+                } catch {
+                    log.error("Old web bridge agent plist not put back: \(error.localizedDescription, privacy: .public)")
+                }
+            }
             launchctl(["bootstrap", domain, url.path])
             return false
         }
         do {
-            try moveToTrash(url)
+            try moveToTrash(staged ?? url)
         } catch {
             log.error("Old web bridge agent plist not removed: \(error.localizedDescription, privacy: .public)")
         }
         return true
+    }
+
+    /// Waits up to about three seconds for launchd to drop the service after a bootout.
+    private static func waitUntilUnloaded(_ service: String) {
+        for _ in 0..<15 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = ["print", service]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return }
+            process.waitUntilExit()
+            if process.terminationStatus != 0 { return }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
     }
 
     /// Runs before `WebBridgeListener.start()`, which connects to the agent.
@@ -146,8 +189,26 @@ enum WebBridgeAgentService {
 
     /// Registers again on demand, for the Settings button.
     static func registerNow() -> Status {
+        let service = SMAppService.agent(plistName: plistName)
+        // The old installer's job holds the same label; it has to go through the
+        // same replacement as at launch, or the registration is refused again.
+        if legacyAgentInstalled() {
+            var failure: Error?
+            migrateLegacyAgent(register: {
+                do {
+                    try service.register()
+                } catch {
+                    failure = error
+                    throw error
+                }
+            })
+            if let failure, currentStatus() != .enabled {
+                return .failed(failure.localizedDescription)
+            }
+            return currentStatus()
+        }
         do {
-            try SMAppService.agent(plistName: plistName).register()
+            try service.register()
         } catch {
             if currentStatus() != .enabled {
                 return .failed(error.localizedDescription)

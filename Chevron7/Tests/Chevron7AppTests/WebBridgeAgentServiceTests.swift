@@ -37,15 +37,23 @@ final class WebBridgeAgentServiceTests: XCTestCase {
 
     private struct RegistrationRefused: Error {}
 
+    private var staging: URL { directory.appendingPathComponent("staged.plist") }
+
+    /// Records every step in order; moves are real, inside the test's own directory.
     private func migrate(_ url: URL, registerSucceeds: Bool) -> Bool {
         WebBridgeAgentService.migrateLegacyAgent(
             at: url,
             userID: 501,
             register: {
-                self.launchctlCalls.append(["<register>"])
+                // The old plist must be out of the way when the registration runs.
+                self.launchctlCalls.append(["<register>",
+                                            FileManager.default.fileExists(atPath: url.path) ? "plist present" : "plist aside"])
                 if !registerSucceeds { throw RegistrationRefused() }
             },
             launchctl: { self.launchctlCalls.append($0) },
+            waitUntilUnloaded: { self.launchctlCalls.append(["<wait>", $0]) },
+            moveItem: { try FileManager.default.moveItem(at: $0, to: $1) },
+            stagingURL: staging,
             moveToTrash: { self.trashed.append($0) }
         )
     }
@@ -117,8 +125,11 @@ final class WebBridgeAgentServiceTests: XCTestCase {
                                  program: "/Applications/Chevron7.app/Contents/Helpers/chevron7-webbridge-agent")
 
         XCTAssertTrue(migrate(url, registerSucceeds: true))
-        XCTAssertEqual(launchctlCalls, [["bootout", "gui/501/app.slovensko.chevron7.webbridge"], ["<register>"]])
-        XCTAssertEqual(trashed, [url])
+        XCTAssertEqual(launchctlCalls, [["bootout", "gui/501/app.slovensko.chevron7.webbridge"],
+                                        ["<wait>", "gui/501/app.slovensko.chevron7.webbridge"],
+                                        ["<register>", "plist aside"]])
+        XCTAssertEqual(trashed, [staging])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
     /// Safari must never lose its bridge: a refused registration loads the old
@@ -129,9 +140,12 @@ final class WebBridgeAgentServiceTests: XCTestCase {
 
         XCTAssertFalse(migrate(url, registerSucceeds: false))
         XCTAssertEqual(launchctlCalls, [["bootout", "gui/501/app.slovensko.chevron7.webbridge"],
-                                        ["<register>"],
+                                        ["<wait>", "gui/501/app.slovensko.chevron7.webbridge"],
+                                        ["<register>", "plist aside"],
                                         ["bootstrap", "gui/501", url.path]])
         XCTAssertEqual(trashed, [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "The old plist must be back in place.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path))
     }
 
     func testForeignPlistWithOurNameIsNotTreatedAsTheOldAgent() throws {
