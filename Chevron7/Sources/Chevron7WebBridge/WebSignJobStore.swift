@@ -12,9 +12,7 @@ import Foundation
 public final class WebSignJobStore: @unchecked Sendable {
     public enum State: Equatable, Sendable {
         case pending
-        /// `cancelled` tells the page the person closed the prompt, which the
-        /// portals treat apart from a failure (`ERROR_CANCELLED` in `ditec.js`).
-        case finished(response: Data?, error: String?, cancelled: Bool)
+        case finished(response: Data?, error: String?)
         case unknown
     }
 
@@ -44,12 +42,11 @@ public final class WebSignJobStore: @unchecked Sendable {
         return id
     }
 
-    public func finish(_ id: String, response: Data?, error: String?, cancelled: Bool = false) {
+    public func finish(_ id: String, response: Data?, error: String?) {
         lock.lock()
         defer { lock.unlock() }
         guard jobs[id] != nil else { return }
-        jobs[id] = Job(state: .finished(response: response, error: error, cancelled: cancelled),
-                       finishedAt: clock())
+        jobs[id] = Job(state: .finished(response: response, error: error), finishedAt: clock())
     }
 
     /// The job's state. A finished job is removed as it is read, so the result

@@ -28,7 +28,7 @@ function check(name, cond, extra) {
 
 // One fresh page per scenario: the shim owns window.ditec's transport and
 // answers like the extension would, with the result arriving on the 2nd poll.
-function newPage(finalReply) {
+function newPage() {
     const requests = [];
     let polls = 0;
      const realSetImmediate = setImmediate;
@@ -57,7 +57,7 @@ function newPage(finalReply) {
                     polls += 1;
                     const done = polls >= 2;
                     const reply = done
-                        ? (finalReply || { done: true, ok: true, response: JSON.stringify({ content: 'c2lnbmVk', signedBy: 'Test User', issuedBy: 'Test CA' }) })
+                        ? { done: true, ok: true, response: JSON.stringify({ content: 'c2lnbmVk', signedBy: 'Test User', issuedBy: 'Test CA' }) }
                         : { done: false, ok: true };
                     realSetImmediate(() => replyTo(reply));
                 } else {
@@ -99,13 +99,13 @@ function cbPair() {
         promise: promise.finally(() => clearTimeout(timer)),
         callback: {
             onSuccess: (v) => resolve({ status: 'success', value: v }),
-            onError: (e) => resolve({ status: 'error', value: String(e && e.message ? e.message : e), error: e }),
+            onError: (e) => resolve({ status: 'error', value: String(e && e.message ? e.message : e) }),
         },
     };
 }
 
-async function scenario(name, drive, finalReply) {
-    const page = newPage(finalReply);
+async function scenario(name, drive) {
+    const page = newPage();
     const ditec = page.window.ditec;
     if (!ditec) {
         check(name, false, 'window.ditec missing');
@@ -267,44 +267,6 @@ await scenario('Xades addXmlObject2', async (ditec, page) => {
 await scenario('Xades addTxt/addPng', async (ditec) => {
     check('Xades addTxtObject exists', typeof ditec.dSigXadesJs.addTxtObject === 'function');
     check('Xades addPngObject exists', typeof ditec.dSigXadesJs.addPngObject === 'function');
-});
-
-// --- errors reach the page as DitecError objects ---
-
-async function signPdfExpectingError(ditec) {
-    const added = cbPair();
-    ditec.dSigXadesBpJs.addPdfObject('doc.pdf', 'desc', b64('%PDF-1.4 fake'), '', 'fmt', 0, false, added.callback);
-    await added.promise;
-    const signed = cbPair();
-    ditec.dSigXadesBpJs.sign('sig-c', ditec.dSigXadesBpJs.SHA256, null, { onSuccess: () => {} });
-    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
-    return signed.promise;
-}
-
-await scenario('cancel is ERROR_CANCELLED', async (ditec) => {
-    // schranka.slovensko.sk: `if (e.name === 'DitecError') ... else throw e`, code 1 silenced.
-    const out = await signPdfExpectingError(ditec);
-    const e = out.error;
-    check('cancel reaches onError', out.status === 'error', out.status);
-    check('cancel is an Error', e instanceof Error || (e && typeof e.stack === 'string'), typeof e);
-    check('cancel name DitecError', e && e.name === 'DitecError', e && e.name);
-    check('cancel code', e && e.code === ditec.utils.ERROR_CANCELLED, e && e.code);
-    check('cancel message', out.value === 'Podpisovanie ste zrušili.', out.value);
-    check('cancel isDitecError', ditec.utils.isDitecError(e) === true);
-    check('cancel toString', String(e) === 'DitecError(1) Podpisovanie ste zrušili.', String(e));
-}, { done: true, ok: false, cancelled: true, error: 'Podpisovanie ste zrušili.' });
-
-await scenario('failure is ERROR_GENERAL', async (ditec) => {
-    const out = await signPdfExpectingError(ditec);
-    const e = out.error;
-    check('failure name DitecError', e && e.name === 'DitecError', e && e.name);
-    check('failure code', e && e.code === ditec.utils.ERROR_GENERAL, e && e.code);
-    check('failure message', out.value === 'Certifikáty z karty sa nepodarilo načítať.', out.value);
-}, { done: true, ok: false, cancelled: false, error: 'Certifikáty z karty sa nepodarilo načítať.' });
-
-await scenario('isDitecError rejects other values', async (ditec) => {
-    check('isDitecError string', ditec.utils.isDitecError('boom') === false);
-    check('isDitecError plain Error', ditec.utils.isDitecError(new Error('x')) === false);
 });
 
 if (failures > 0) {

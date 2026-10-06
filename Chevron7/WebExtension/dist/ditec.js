@@ -33,35 +33,6 @@
     resolve(detail.reply);
   });
 
-  var ERROR_CANCELLED = 1;
-  var ERROR_GENERAL = -200;
-
-  // What `onError` receives, as `ditec.utils.createDitecError` builds it in the
-  // original D.Bridge scripts: a real Error named "DitecError" with a numeric
-  // code. The portals branch on exactly that (schranka.slovensko.sk does
-  // `if (e.name === 'DitecError') ... else throw e`), so a plain string left
-  // their "waiting for the signing app" modal open after a cancellation.
-  function createDitecError(code, message, detail) {
-    var error = new Error(message);
-    error.name = "DitecError";
-    error.code = code;
-    error.detail = detail;
-    error.toString = function () {
-      return error.name + "(" + error.code + ") " + error.message;
-    };
-    return error;
-  }
-
-  function isDitecError(error) {
-    return error != null && typeof error === "object" && error.name === "DitecError";
-  }
-
-  function reportError(callback, message, code) {
-    if (callback && callback.onError) {
-      callback.onError(createDitecError(code === undefined ? ERROR_GENERAL : code, message));
-    }
-  }
-
   function call(kind, request) {
     var id = "chevron7-" + Date.now() + "-" + counter++;
     return new Promise(function (resolve) {
@@ -241,12 +212,12 @@
     try {
       request = buildRequest(overrides);
     } catch (error) {
-      reportError(callback, error.message);
+      if (callback && callback.onError) callback.onError(error.message);
       return;
     }
 
-    function fail(message, code) {
-      reportError(callback, message, code);
+    function fail(message) {
+      if (callback && callback.onError) callback.onError(message);
     }
 
     function deliver(responseText) {
@@ -290,8 +261,7 @@
           return;
         }
         if (reply.ok !== true) {
-          fail(reply.error || "Podpisovanie zlyhalo.",
-               reply.cancelled === true ? ERROR_CANCELLED : ERROR_GENERAL);
+          fail(reply.error || "Podpisovanie zlyhalo.");
           return;
         }
         deliver(reply.response);
@@ -337,14 +307,14 @@
     PDF_CONFORMANCE_LEVEL_1A: 0,
     PDF_CONFORMANCE_LEVEL_1B: 1,
     PDF_CONFORMANCE_LEVEL_NONE: 2,
-    ERROR_SIGNING_CANCELLED: ERROR_CANCELLED,
+    ERROR_SIGNING_CANCELLED: 1,
 
     initialize: function (callback) {
       call("status", null).then(function (reply) {
         if (reply && reply.ok) {
           if (callback && callback.onSuccess) callback.onSuccess();
-        } else {
-          reportError(callback, (reply && reply.error) || "Chevron7 nie je dostupný.");
+        } else if (callback && callback.onError) {
+          callback.onError((reply && reply.error) || "Chevron7 nie je dostupný.");
         }
       });
     },
@@ -490,8 +460,8 @@
       || object.xdcXMLData || object.sourceXml || object.sourceTxt);
     if (original != null) {
       if (callback && callback.onSuccess) callback.onSuccess(original);
-    } else {
-      reportError(callback, "Nie je pripravený žiadny dokument.");
+    } else if (callback && callback.onError) {
+      callback.onError("Nie je pripravený žiadny dokument.");
     }
   };
 
@@ -614,13 +584,12 @@
     isChevron7: true,
     config: { downloadPage: { url: "", title: "" } },
     utils: {
-      ERROR_CANCELLED: ERROR_CANCELLED,
-      ERROR_GENERAL: ERROR_GENERAL,
+      ERROR_CANCELLED: 1,
+      ERROR_GENERAL: -200,
       ERROR_NOT_INSTALLED: -201,
       ERROR_LAUNCH_FAILED: -202,
       ERROR_LAUNCH_FORBIDDEN: -203,
-      createDitecError: createDitecError,
-      isDitecError: isDitecError,
+      isDitecError: function () { return true; },
       extendClass: function () {}
     },
     versions: {},

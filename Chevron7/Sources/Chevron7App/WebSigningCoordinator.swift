@@ -55,13 +55,6 @@ final class WebSigningCoordinator {
         }
     }
 
-    /// Whether a signing request ended because the person closed the prompt, which
-    /// the page hears as a cancellation rather than a failure.
-    nonisolated static func isCancellation(_ error: any Error) -> Bool {
-        if case .cancelled? = error as? Failure { return true }
-        return false
-    }
-
     private(set) var pending: Pending?
     var pin: String = ""
     var selectedIdentityID: String?
