@@ -8,33 +8,6 @@ import Chevron7Kit
 import AppKit
 import FoundationModels
 
-enum AIPromptPreset: String, CaseIterable, Identifiable {
-    case legalDocuments = "Právne dokumenty"
-    case conservativeReview = "Konzervatívna kontrola"
-    case signaturesAndInitials = "Podpisy a parafy"
-    case stampsAndEmbossedElements = "Pečiatky a reliéfne prvky"
-    case customPrompt = "Vlastný prompt"
-
-    var id: String { rawValue }
-
-    var promptText: String? {
-        switch self {
-        case .legalDocuments:
-            return LLMVisionParser.systemPrompt
-        case .conservativeReview:
-            return LLMVisionParser.systemPrompt
-                + "\nBuď pri klasifikácii mimoriadne konzervatívny a prvok vynechaj pri akejkoľvek neistote."
-        case .signaturesAndInitials:
-            return LLMVisionParser.systemPrompt
-                + "\nZameraj sa najmä na každý fyzicky viditeľný podpis alebo parafu."
-        case .stampsAndEmbossedElements:
-            return LLMVisionParser.systemPrompt
-                + "\nZameraj sa najmä na každý fyzicky viditeľný výskyt pečiatky alebo reliéfneho prvku."
-        case .customPrompt:
-            return nil
-        }
-    }
-}
 
 struct SettingsView: View {
     @Bindable var settingsStore: AppSettingsStore
@@ -1268,16 +1241,6 @@ struct SettingsView: View {
     }
 }
 
-enum LearningCardText {
-    static func summary(counts: [BankLabel: Int]) -> String {
-        func n(_ label: BankLabel) -> Int { counts[label] ?? 0 }
-        return "Pečiatky: \(n(.kind(.officialStamp))) · Podpisy: \(n(.kind(.handwrittenSignature))) · " +
-               "Slepotlač: \(n(.kind(.embossedSeal))) · Parafy: \(n(.kind(.initial))) · " +
-               "Šnúrky: \(n(.kind(.bindingCord))) · Pásky: \(n(.kind(.securityTape))) · Pečate: \(n(.kind(.waxSeal))) · " +
-               "Ochranné prvky: \([SecurityElement.Kind.watermark, .securityPattern, .opticallyVariable, .securityFoil, .lamination].reduce(0) { $0 + n(.kind($1)) }) · " +
-               "Iné: \(n(.kind(.other))) · Zamietnuté: \(n(.negative))"
-    }
-}
 
 struct LearningDatasetCard: View {
     @Bindable var settingsStore: AppSettingsStore
