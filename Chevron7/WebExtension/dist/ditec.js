@@ -38,9 +38,9 @@
 
   // What `onError` receives, as `ditec.utils.createDitecError` builds it in the
   // original D.Bridge scripts: a real Error named "DitecError" with a numeric
-  // code. The portals branch on exactly that (schranka.slovensko.sk does
-  // `if (e.name === 'DitecError') ... else throw e`), so a plain string left
-  // their "waiting for the signing app" modal open after a cancellation.
+  // code. The portals branch on exactly that (DSignerMulti.js on slovensko.sk
+  // does `if (e.name === 'DitecError') ... else throw e` and ignores code 1),
+  // so a plain string was rethrown as an uncaught exception on the page.
   function createDitecError(code, message, detail) {
     var error = new Error(message);
     error.name = "DitecError";
