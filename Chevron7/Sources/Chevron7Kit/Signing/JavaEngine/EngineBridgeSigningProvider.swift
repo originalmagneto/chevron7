@@ -431,6 +431,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         let signingSerial: String
         let signerName: String
         let signerQualification: String?
+        let signerIssuer: String?
         if Self.signsWithoutCertificateDiscovery(driverID: driverID, preferredSerial: preferredSerial,
                                                  hasVisualStamp: request.visualStamp != nil) {
             // The eID signing slot holds one qualified key. Reading its certificates
@@ -439,6 +440,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             signingSerial = Self.signingKeyOnToken
             signerName = Self.eidSignerLabel
             signerQualification = nil
+            signerIssuer = nil
         } else {
             // eID PKCS#11: every C_Login opens the eID client's BOK window. When the
             // certificates were already read from this eID, reuse them so signing asks
@@ -481,6 +483,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             signingSerial = certificate.serialNumber
             signerName = certificate.displayName
             signerQualification = certificate.certificateQualification
+            signerIssuer = certificate.issuer
         }
 
         let workDirectory = try Self.makeWorkspace()
@@ -611,14 +614,16 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
                                           signedAt: Date(),
                                           signatureLabel: signerName,
                                           isLegallyBinding: true,
-                                          timestampQualification: timestampQualification)
+                                          timestampQualification: timestampQualification,
+                                          signerIssuer: signerIssuer)
         }
         return SignedConversionResult(pdfData: request.pdfData,
                                       asicData: signedData,
                                       signedAt: Date(),
                                       signatureLabel: signerName,
                                       isLegallyBinding: true,
-                                      timestampQualification: timestampQualification)
+                                      timestampQualification: timestampQualification,
+                                      signerIssuer: signerIssuer)
     }
 
     // MARK: - Vizuálny podpis (port VisibleSignatureRenderer + PDFCoordinateConverter)
