@@ -125,9 +125,9 @@ struct Chevron7App: App {
         Window("Nastavenia", id: SettingsWindow.id) {
             SettingsView(settingsStore: model.settingsStore, waitForLearningWrites: { await model.zakoStore.waitForBankWrites() })
                 .environment(model.ezzkAccountController)
-                .frame(minWidth: 900, minHeight: 560)
+                .frame(minWidth: 760, minHeight: 560)
         }
-        .defaultSize(width: 940, height: 720)
+        .defaultSize(width: 900, height: 640)
         .windowResizability(.contentMinSize)
         Window("Trénovanie detektora", id: DetectorTrainingWindow.id) {
             DetectorTrainingView(settingsStore: model.settingsStore)
