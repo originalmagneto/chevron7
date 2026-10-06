@@ -38,6 +38,9 @@ final class WebSigningPrompt {
     private var middlewareInputDepth = 0
     private let log = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "web-signing")
     private var keyboardHandoff: Task<Void, Never>?
+    /// The app in front when the request arrived, normally Safari; it gets the
+    /// keyboard back when the panel closes (`WebSigningFocusReturn`).
+    private var requester: NSRunningApplication?
 
     func show(coordinator: WebSigningCoordinator) {
         if let panel {
@@ -46,6 +49,7 @@ final class WebSigningPrompt {
             return
         }
 
+        requester = NSWorkspace.shared.frontmostApplication
         let hosting = NSHostingView(rootView: WebSigningSheet(coordinator: coordinator))
         hosting.layoutSubtreeIfNeeded()
         let size = hosting.fittingSize
@@ -197,10 +201,41 @@ final class WebSigningPrompt {
         keyboardHandoff?.cancel()
         keyboardHandoff = nil
         middlewareInputDepth = 0
+        // Before the panel closes: closing the key panel of the active app would
+        // first bring up the main window over the browser.
+        returnActivationToRequester()
         panel?.delegate = nil
         panel?.close()
         panel = nil
         delegate = nil
+        requester = nil
+    }
+
+    /// Gives activation back to the browser that asked, when this app took it
+    /// during the request (a click on the panel, the PIN, the BOK handoff). An
+    /// activated app orders all its windows front, so without this the main
+    /// window, or after a `--web-signing` launch no window at all, held the
+    /// keyboard once the panel closed.
+    private func returnActivationToRequester() {
+        let running = NSWorkspace.shared.runningApplications
+        let pid = WebSigningFocusReturn.target(requester: requester.map(Self.snapshot),
+                                               running: running.map(Self.snapshot),
+                                               ownProcessIdentifier: NSRunningApplication.current.processIdentifier,
+                                               isActive: NSApp.isActive)
+        guard let pid, let app = running.first(where: { $0.processIdentifier == pid }) else { return }
+        NSApp.yieldActivation(to: app)
+        let accepted = app.activate(from: .current, options: [])
+        log.notice("""
+            Activation returned pid=\(pid, privacy: .public) \
+            bundle=\(app.bundleIdentifier ?? "-", privacy: .public) accepted=\(accepted, privacy: .public)
+            """)
+    }
+
+    private static func snapshot(_ app: NSRunningApplication) -> WebSigningFocusReturn.App {
+        WebSigningFocusReturn.App(processIdentifier: app.processIdentifier,
+                                  bundleIdentifier: app.bundleIdentifier,
+                                  executableName: app.executableURL?.lastPathComponent,
+                                  isTerminated: app.isTerminated)
     }
 }
 
