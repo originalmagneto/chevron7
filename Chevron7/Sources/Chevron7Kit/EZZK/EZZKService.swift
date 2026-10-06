@@ -103,9 +103,9 @@ public enum EZZKError: LocalizedError, Equatable, Sendable {
         case .untrustedCertificate:
             return "Certifikát testovacieho prostredia EZZK sa zmenil. Aktualizujte odtlačok v aplikácii."
         case .productionAllocationDisabled:
-            return "Pridelenie evidenčných čísel na Produkcii je v tejto verzii zamknuté, hoci je Produkcia zvolená v Nastaveniach. Na skúšku použite režim Demo alebo Test."
+            return "Pridelenie evidenčných čísel v ostrej evidencii je v tejto verzii zamknuté, hoci je ostrá evidencia zvolená v Nastaveniach. Na skúšku použite skúšobný režim alebo testovaciu evidenciu."
         case .submissionUnavailable:
-            return "Odosielanie záznamov do produkčného EZZK zatiaľ nie je zapnuté. Príde v ďalšej verzii."
+            return "Odosielanie záznamov do ostrej evidencie EZZK zatiaľ nie je zapnuté. Príde v ďalšej verzii."
         case .evidenceNumberExpired:
             return "Evidenčné číslo bolo pridelené v iný deň a EZZK ho o polnoci spotreboval. Kliknite znova na Autorizovať, pridelí sa nové."
         case .evidenceNumberFromOtherMode:
@@ -113,7 +113,7 @@ public enum EZZKError: LocalizedError, Equatable, Sendable {
         case .outcomeUnknown:
             return "EZZK neodpovedalo zrozumiteľne (prerušené spojenie alebo chyba servera) a nie je isté, či požiadavku spracovalo. Pred opakovaním overte stav v EZZK."
         case .demoSignatureOutsideDemo:
-            return "Bez podpisového enginu alebo karty aplikácia podpisuje iba ukážkovo (Demo). Mimo režimu Demo preto nepridelí evidenčné číslo ani neodošle záznam. Vložte kartu SAK a skontrolujte inštaláciu Chevron7."
+            return "Bez podpisového enginu alebo karty aplikácia podpisuje iba ukážkovo (Demo). Mimo skúšobného režimu EZZK preto nepridelí evidenčné číslo ani neodošle záznam. Vložte kartu SAK a skontrolujte inštaláciu Chevron7."
         }
     }
 }

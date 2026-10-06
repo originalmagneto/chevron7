@@ -54,8 +54,8 @@ enum SidebarConversionRows {
         let isDemo = record.ezzkMode == .demo
         return Row(id: record.id,
                    name: displayName(for: record),
-                   evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · Demo" : ""),
-                   stateLabel: isDemo ? "Demo, mimo EZZK" : stateLabel,
+                   evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · skúšobný režim" : ""),
+                   stateLabel: isDemo ? "Skúšobný režim, mimo EZZK" : stateLabel,
                    symbol: showsOverdue ? "clock.badge.exclamationmark" : record.status.sfSymbol,
                    tone: showsOverdue ? .failure : EZZKRecordPresentation.tone(for: record.status))
     }

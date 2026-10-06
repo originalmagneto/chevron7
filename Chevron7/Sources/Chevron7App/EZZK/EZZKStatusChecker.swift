@@ -77,7 +77,7 @@ final class EZZKStatusChecker {
                 notes.append("Záznamy spred odosielania do EZZK: \(legacy). \(EZZKStatusChecker.preB2RowMessage)")
             }
             if production > 0 {
-                notes.append("Záznamy v režime Produkcia: \(production). \(EZZKStatusChecker.productionRefusal)")
+                notes.append("Záznamy v ostrej evidencii: \(production). \(EZZKStatusChecker.productionRefusal)")
             }
             let all = parts + notes
             return all.isEmpty ? "Žiadny záznam nečaká na odoslanie." : all.joined(separator: " ")
@@ -91,7 +91,7 @@ final class EZZKStatusChecker {
     static let automaticAttemptsPerDay = 3
 
     nonisolated static let recordFromOtherModeMessage =
-        "Záznam bol vytvorený v inom režime EZZK, preto sa v tomto režime neodošle. Prepnite režim EZZK späť a odošlite ho znova."
+        "Záznam bol vytvorený v inom prostredí EZZK, preto sa v tomto prostredí neodošle. Prepnite prostredie EZZK späť (Nastavenia, EZZK, Rozšírené nastavenia) a odošlite ho znova."
     nonisolated static let rowBusyMessage =
         "Záznam sa práve odosiela alebo overuje v EZZK. Skúste to o chvíľu."
     /// Ruling R15: a row written before part B2 has no EZZK mode and no signed record.

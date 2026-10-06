@@ -259,8 +259,8 @@ struct EvidenceDashboardView: View {
             SummaryCard(title: "Odmietnuté alebo nepodpísané", value: "\(summary.failed)", symbol: "xmark.seal.fill", tint: summary.failed > 0 ? .red : .secondary)
             SummaryCard(title: "Po lehote 24 h", value: "\(overdue)", symbol: "clock.badge.exclamationmark", tint: overdue > 0 ? .red : .secondary)
             if summary.demo > 0 {
-                SummaryCard(title: "Demo (mimo EZZK)", value: "\(summary.demo)", symbol: "theatermasks", tint: .secondary)
-                    .help("Demo konverzie sú lokálna simulácia. Do EZZK sa nikdy neodoslali.")
+                SummaryCard(title: "Skúšobný režim (mimo EZZK)", value: "\(summary.demo)", symbol: "theatermasks", tint: .secondary)
+                    .help("Konverzie v skúšobnom režime sú lokálna simulácia. Do EZZK sa nikdy neodoslali.")
             }
             Spacer()
             if let feedback = submitFeedback {
@@ -433,8 +433,8 @@ struct DemoBadge: View {
             .padding(.vertical, 2)
             .background(Color.secondary.opacity(0.16), in: Capsule())
             .foregroundStyle(.secondary)
-            .help("Demo konverzia: lokálna simulácia, do EZZK sa neodoslala.")
-            .accessibilityLabel("Demo, mimo EZZK")
+            .help("Konverzia v skúšobnom režime: lokálna simulácia, do EZZK sa neodoslala.")
+            .accessibilityLabel("DEMO: skúšobný režim, mimo EZZK")
     }
 }
 

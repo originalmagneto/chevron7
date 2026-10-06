@@ -133,7 +133,7 @@ final class ZakoSessionStore {
     static let recordFromOtherModeMessage = EZZKStatusChecker.recordFromOtherModeMessage
 
     static let mobileOutsideDemoMessage =
-        "Zaručenú konverziu s EZZK podpisujte kartou SAK. Podpis z mobilu je zatiaľ dostupný iba v režime Demo."
+        "Zaručenú konverziu s EZZK podpisujte kartou SAK. Podpis z mobilu je zatiaľ dostupný iba v skúšobnom režime EZZK (lokálne, bez zápisu do evidencie)."
 
     var isMobileSigningAvailable: Bool {
         settings.mobileSigningEnabled && !signingProviderIsDemo && settingsStore.ezzkAccountController.isDemoMode
