@@ -139,4 +139,29 @@ enum FinderQuickActionService {
             return false
         }
     }
+
+    /// Whether Finder offers the Quick Action. Its file nearly always exists (every launch
+    /// reinstalls it), so what tells the person something is the `pbs` entry: Finder's
+    /// context menu reads `presentation_modes`, and a person who unchecked the action in
+    /// Customize… has a zero there.
+    static func visibility(workflowInstalled: Bool, statuses: [String: Any]) -> QuickActionVisibility {
+        guard workflowInstalled else { return .notInstalled }
+        let entry = statuses[statusKey(menuTitle)] as? [String: Any]
+        let modes = entry?["presentation_modes"] as? [String: Any]
+        let contextMenu = (modes?["ContextMenu"] as? NSNumber)?.intValue ?? 0
+        return contextMenu == 1 ? .visible : .hiddenInFinder
+    }
+
+    static func currentVisibility() -> QuickActionVisibility {
+        let installed = FileManager.default.fileExists(
+            atPath: servicesDirectory.appendingPathComponent(workflowInstallName).path)
+        let statuses = UserDefaults(suiteName: "pbs")?.dictionary(forKey: "NSServicesStatus") ?? [:]
+        return visibility(workflowInstalled: installed, statuses: statuses)
+    }
+}
+
+enum QuickActionVisibility: Equatable {
+    case visible
+    case hiddenInFinder
+    case notInstalled
 }

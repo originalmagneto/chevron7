@@ -122,4 +122,23 @@ final class FinderQuickActionServiceTests: XCTestCase {
 
         XCTAssertEqual(retire(legacyAppInstalled: false), [])
     }
+
+    func testVisibilityNeedsTheWorkflow() {
+        XCTAssertEqual(FinderQuickActionService.visibility(workflowInstalled: false, statuses: [:]), .notInstalled)
+    }
+
+    func testVisibleWhenFinderShowsItInTheContextMenu() {
+        let statuses = FinderQuickActionService.servicesStatus(updating: [:])
+        XCTAssertEqual(FinderQuickActionService.visibility(workflowInstalled: true, statuses: statuses), .visible)
+    }
+
+    func testHiddenWhenThePersonUnchecksIt() {
+        let key = "(null) - \(FinderQuickActionService.menuTitle) - runWorkflowAsService"
+        let statuses: [String: Any] = [key: ["presentation_modes": ["ContextMenu": 0, "ServicesMenu": 0]]]
+        XCTAssertEqual(FinderQuickActionService.visibility(workflowInstalled: true, statuses: statuses), .hiddenInFinder)
+    }
+
+    func testHiddenWithoutAModernEntry() {
+        XCTAssertEqual(FinderQuickActionService.visibility(workflowInstalled: true, statuses: [:]), .hiddenInFinder)
+    }
 }
