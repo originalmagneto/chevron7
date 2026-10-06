@@ -28,7 +28,7 @@ final class EZZKRecordPresentationTests: XCTestCase {
     func testDoneReadsTheModeTheRowWasSignedIn() {
         let test = ZakoDonePresentation(record: row(.queuedForSubmission, mode: .test), lastError: nil,
                                         lastErrorStatus: nil, nextStatusCheck: nil, now: now)
-        XCTAssertTrue(test.lines.contains("Režim EZZK pri podpise: Test"), "\(test.lines)")
+        XCTAssertTrue(test.lines.contains("Režim EZZK pri podpise: Testovacia evidencia"), "\(test.lines)")
         XCTAssertEqual(test.action, .send)
 
         let demo = ZakoDonePresentation(record: row(.queuedForSubmission, mode: .demo), lastError: nil,
@@ -227,7 +227,7 @@ final class EZZKRecordPresentationTests: XCTestCase {
         record.lastLookupAt = now.addingTimeInterval(3600)
         let facts = Dictionary(uniqueKeysWithValues: EvidenceRegisterDetail.submissionFacts(for: record).map { ($0.label, $0.value) })
         XCTAssertEqual(facts["Stav"], "Odmietnutý v EZZK")
-        XCTAssertEqual(facts["Režim EZZK"], "Test")
+        XCTAssertEqual(facts["Režim EZZK"], "Testovacia evidencia")
         XCTAssertEqual(facts["Odoslané"], "24. 9. 2026 12:00")
         XCTAssertEqual(facts["ID správy"], "ae6fbf72-1")
         XCTAssertEqual(facts["Výsledok EZZK"], "12: Neznámy obsah")

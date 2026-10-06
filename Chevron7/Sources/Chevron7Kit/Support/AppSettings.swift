@@ -82,9 +82,9 @@ public struct AppSettings: Codable, Sendable {
 
         public var label: String {
             switch self {
-            case .demo: "Demo (lokálne)"
-            case .test: "Test"
-            case .production: "Produkcia"
+            case .demo: "Skúšobný režim (lokálne)"
+            case .test: "Testovacia evidencia"
+            case .production: "Ostrá evidencia"
             }
         }
     }
