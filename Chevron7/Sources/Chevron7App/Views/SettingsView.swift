@@ -1268,12 +1268,6 @@ struct SettingsView: View {
     }
 }
 
-extension AdvocateProfile {
-    var displayName: String {
-        fullName.isEmpty ? officeName : fullName
-    }
-}
-
 enum LearningCardText {
     static func summary(counts: [BankLabel: Int]) -> String {
         func n(_ label: BankLabel) -> Int { counts[label] ?? 0 }
