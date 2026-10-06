@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import ServiceManagement
 import XCTest
 @testable import Chevron7App
 
@@ -158,5 +159,30 @@ final class WebBridgeAgentServiceTests: XCTestCase {
 
     func testPlistNameMatchesTheBundledAgentPlist() {
         XCTAssertEqual(WebBridgeAgentService.plistName, "app.slovensko.chevron7.webbridge.plist")
+    }
+
+    // MARK: - Status
+
+    /// The MacBook Air case: "Povoliť na pozadí" off for the developer, every
+    /// registration refused with SMAppServiceErrorDomain code 1.
+    func testRefusalWithEPERMPointsToBackgroundItems() {
+        let refused = NSError(domain: "SMAppServiceErrorDomain", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Operation not permitted"])
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: refused), .deniedInBackgroundItems)
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: NSError(domain: NSPOSIXErrorDomain, code: 1)),
+                       .deniedInBackgroundItems)
+    }
+
+    func testOtherRefusalsKeepTheirMessage() {
+        let other = NSError(domain: "SMAppServiceErrorDomain", code: 22,
+                            userInfo: [NSLocalizedDescriptionKey: "Invalid argument"])
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: other), .failed("Invalid argument"))
+    }
+
+    func testOldAgentStillRunningIsNotShownAsMissing() {
+        XCTAssertEqual(WebBridgeAgentService.status(service: .notRegistered, legacyAgentInstalled: true), .legacyAgentOnly)
+        XCTAssertEqual(WebBridgeAgentService.status(service: .notRegistered, legacyAgentInstalled: false), .notRegistered)
+        XCTAssertEqual(WebBridgeAgentService.status(service: .enabled, legacyAgentInstalled: true), .enabled)
+        XCTAssertEqual(WebBridgeAgentService.status(service: .requiresApproval, legacyAgentInstalled: true), .requiresApproval)
     }
 }

@@ -40,6 +40,10 @@ enum WebBridgeAgentService {
         case notRegistered
         case unsignedBuild
         case translocated
+        /// The bundled agent is not registered, but the old installer's job still runs.
+        case legacyAgentOnly
+        /// macOS refused the registration because "Povoliť na pozadí" has Chevron7 off.
+        case deniedInBackgroundItems
         case failed(String)
     }
 
@@ -179,42 +183,58 @@ enum WebBridgeAgentService {
     static func currentStatus() -> Status {
         guard ownTeamIdentifier() != nil else { return .unsignedBuild }
         guard !isTranslocated() else { return .translocated }
-        switch SMAppService.agent(plistName: plistName).status {
+        return status(service: SMAppService.agent(plistName: plistName).status,
+                      legacyAgentInstalled: legacyAgentInstalled())
+    }
+
+    /// What Settings show for the registration state. The old installer's job still
+    /// answers Safari while the bundled agent is not registered, but launchd does not
+    /// start it again at login once Background Task Management has it switched off.
+    static func status(service: SMAppService.Status, legacyAgentInstalled: Bool) -> Status {
+        switch service {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
-        case .notRegistered, .notFound: return .notRegistered
-        @unknown default: return .notRegistered
+        case .notRegistered, .notFound: return legacyAgentInstalled ? .legacyAgentOnly : .notRegistered
+        @unknown default: return legacyAgentInstalled ? .legacyAgentOnly : .notRegistered
         }
+    }
+
+    /// A refused registration. `SMAppServiceErrorDomain` code 1 (EPERM) is what macOS
+    /// answers while "Povoliť na pozadí" has the developer switched off: on the owner's
+    /// MacBook Air (2026-10-06) `sfltool dumpbtm` listed the old agent of "the Software
+    /// s.r.o." as `[disabled, allowed, notified]`, and every registration of the
+    /// bundled agent of the same team failed that way.
+    static func status(afterRegistrationError error: Error) -> Status {
+        let nsError = error as NSError
+        let isEPERM = (nsError.domain == "SMAppServiceErrorDomain" || nsError.domain == NSPOSIXErrorDomain)
+            && nsError.code == Int(EPERM)
+        return isEPERM ? .deniedInBackgroundItems : .failed(error.localizedDescription)
     }
 
     /// Registers again on demand, for the Settings button.
     static func registerNow() -> Status {
         let service = SMAppService.agent(plistName: plistName)
+        var failure: Error?
+        let register = {
+            do {
+                try service.register()
+            } catch {
+                failure = error
+                throw error
+            }
+        }
         // The old installer's job holds the same label; it has to go through the
         // same replacement as at launch, or the registration is refused again.
         if legacyAgentInstalled() {
-            var failure: Error?
-            migrateLegacyAgent(register: {
-                do {
-                    try service.register()
-                } catch {
-                    failure = error
-                    throw error
-                }
-            })
-            if let failure, currentStatus() != .enabled {
-                return .failed(failure.localizedDescription)
-            }
-            return currentStatus()
+            migrateLegacyAgent(register: register)
+        } else {
+            try? register()
         }
-        do {
-            try service.register()
-        } catch {
-            if currentStatus() != .enabled {
-                return .failed(error.localizedDescription)
-            }
+        let current = currentStatus()
+        if let failure, current != .enabled {
+            return status(afterRegistrationError: failure)
         }
-        return currentStatus()
+        return current
     }
 
     static func openLoginItemsSettings() {
