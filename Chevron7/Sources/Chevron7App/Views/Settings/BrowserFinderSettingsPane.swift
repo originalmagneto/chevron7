@@ -38,9 +38,15 @@ struct BrowserFinderSettingsPane: View {
                     Text(quickActionText).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button("Ako aktivovať vo Findere…") { showFinderGuide = true }
+                    // Installed but switched off in Finder: the guide is the fix, not a reinstall.
+                    if quickAction == .hiddenInFinder {
+                        Button("Ako aktivovať vo Findere…") { showFinderGuide = true }
+                            .buttonStyle(.glassProminent)
+                    } else {
+                        Button("Ako aktivovať vo Findere…") { showFinderGuide = true }
+                    }
                     Spacer()
-                    if quickAction != .visible {
+                    if quickAction == .notInstalled {
                         Button("Nainštalovať Quick Action") { install() }
                             .buttonStyle(.glassProminent)
                     }

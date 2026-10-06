@@ -43,6 +43,8 @@ extension StatusPillModel.Tone {
 /// A tinted capsule, not glass: glass belongs to the navigation layer.
 struct StatusPill: View {
     let model: StatusPillModel
+    /// The pane the pill describes, so VoiceOver reads its full meaning ("EZZK: Pripojené").
+    var paneTitle: String?
 
     var body: some View {
         Label(model.text, systemImage: model.tone.symbol)
@@ -52,7 +54,8 @@ struct StatusPill: View {
             .padding(.vertical, 3)
             .background(model.tone.color.opacity(0.15), in: Capsule())
             .lineLimit(1)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(paneTitle.map { "\($0): \(model.text)" } ?? model.text)
     }
 }
 
@@ -84,7 +87,7 @@ struct SettingsPaneHeader: View {
     }
 
     private var pillViews: some View {
-        ForEach(pills.indices, id: \.self) { StatusPill(model: pills[$0]) }
+        ForEach(pills.indices, id: \.self) { StatusPill(model: pills[$0], paneTitle: pane.title) }
     }
 }
 
