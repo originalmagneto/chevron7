@@ -64,6 +64,22 @@ if (disabledAtLoad) {
     (document.head || document.documentElement).appendChild(script);
     script.remove();
   }
+  pinComposerSigningMethod();
+}
+
+// The nove.slovensko.sk message composer keeps its signing method in the page's
+// localStorage and reads it once while booting. Its own "Autogram" method calls
+// http://localhost:37200 directly, which Chevron7 never serves, so a person who
+// once picked it could not sign. "Dsigner" goes through window.ditec, which is
+// ours. Set on every load, before the composer's bundle runs (as upstream
+// autogram-extension does in fixed-signer.ts).
+function pinComposerSigningMethod() {
+  if (location.hostname !== "message-constructor-web.slovensko.sk") return;
+  try {
+    window.localStorage.setItem("signer-type", "Dsigner");
+  } catch (error) {
+    console.warn("[Chevron7] spôsob podpisovania v skladači správ sa nepodarilo nastaviť", error);
+  }
 }
 
 // browser.storage is the authority. It brings the copy up to date for the next

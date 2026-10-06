@@ -22,6 +22,53 @@
   var CHANNEL_RESPONSE = "chevron7-response";
   var XDC_XMLNS = "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1";
 
+  // D.Bridge error codes (ditec.utils.ERROR_*). Portals branch on them: code 1
+  // is a cancellation they ignore, any other code they show or rethrow.
+  var ERROR_CANCELLED = 1;
+  var ERROR_GENERAL = -200;
+
+  /**
+   * What `onError` must receive. The portals check `e.name === "DitecError"`
+   * and otherwise rethrow, so a plain string never reached the person, and
+   * they silence `code === 1` only inside that branch. ERROR_GENERAL makes
+   * them fall back to our message instead of their own D.Signer text.
+   */
+  function createDitecError(code, message) {
+    var error = new Error(message);
+    error.name = "DitecError";
+    error.code = code;
+    error.toString = function () {
+      return error.name + "(" + error.code + ") " + error.message;
+    };
+    return error;
+  }
+
+  function generalError(message) {
+    return createDitecError(ERROR_GENERAL, message);
+  }
+
+  function unsupported(name, callback) {
+    if (callback && callback.onError) {
+      callback.onError(generalError("Funkcia " + name + " nie je podporovaná rozšírením Chevron7."));
+    }
+  }
+
+  /**
+   * Reported by getVersion. A compatibility gate, not decoration:
+   * schranka.slovensko.sk and nove.slovensko.sk parse it as JSON and require
+   * the XmlBpPlugin at 2.0.0.13 or later before they call addXmlObject2.
+   * Value from slovensko-digital/autogram-extension (dsigner-version.ts).
+   */
+  var DSIGNER_VERSION_JSON = '{"name":"D.Signer/XAdES BP Java","version":"2.0.0.23","plugins":['
+    + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.xmlplugin.XmlBpPlugin","version":"2.0.0.23"},'
+    + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.txtplugin.TxtBpPlugin","version":"2.0.0.23"},'
+    + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.pngplugin.PngBpPlugin","version":"2.0.0.23"},'
+    + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.pdfplugin.PdfBpPlugin","version":"2.0.0.23"}]}';
+
+  /// Shown by getSignerIdentification before a signature exists: PFS asks for
+  /// the name first and parses whatever follows "CN=".
+  var SIGNER_PLACEHOLDER = "CN=(Používateľ Chevron7)";
+
   var counter = 0;
   var pending = new Map();
 
@@ -74,6 +121,16 @@
     var base = String(objectId || fallback);
     base = base.replace(/\.(txt|png)$/i, "");
     return base + extension;
+  }
+
+  /// The canonical form identifier ends with the form version. PFS passes the
+  /// namespace URI without it, so a check for any "/" kept it unversioned; the
+  /// version is appended unless it is already the last segment (as upstream
+  /// autogram-extension and the PFS bundle itself derive it).
+  function formIdentifierWithVersion(identifier, version) {
+    if (!identifier) return identifier;
+    if (!version || String(identifier).split("/").pop() === String(version)) return identifier;
+    return identifier + "/" + version;
   }
 
   function emptyToNull(value) {
@@ -164,9 +221,7 @@
       xml = object.xdcXMLData;
       schema = fromBase64(object.xdcUsedXSD);
       transformation = fromBase64(object.xdcUsedXSLT);
-      identifier = object.xdcIdentifier && object.xdcIdentifier.indexOf("/") !== -1
-        ? object.xdcIdentifier
-        : object.xdcIdentifier + "/" + object.xdcVersion;
+      identifier = formIdentifierWithVersion(object.xdcIdentifier, object.xdcVersion);
     } else if (object.type === "XadesBp2Xml") {
       xml = object.sourceXml;
       schema = object.sourceXsd;
@@ -212,12 +267,26 @@
     try {
       request = buildRequest(overrides);
     } catch (error) {
-      if (callback && callback.onError) callback.onError(error.message);
+      reset();
+      if (callback && callback.onError) callback.onError(generalError(error.message));
       return;
     }
 
-    function fail(message) {
-      if (callback && callback.onError) callback.onError(message);
+    // A failed or cancelled signature drops the document, so the portal's next
+    // attempt starts clean instead of being refused as a second document.
+    function fail(message, code) {
+      reset();
+      if (callback && callback.onError) {
+        callback.onError(createDitecError(code || ERROR_GENERAL, message));
+      }
+    }
+
+    function failWithReply(reply) {
+      if (reply.cancelled === true) {
+        fail(reply.error || "Podpisovanie ste zrušili.", ERROR_CANCELLED);
+      } else {
+        fail(reply.error || "Podpisovanie zlyhalo.");
+      }
     }
 
     function deliver(responseText) {
@@ -254,14 +323,14 @@
         missingReplies = 0;
         if (reply.done !== true) {
           if (reply.ok !== true) {
-            fail(reply.error || "Podpisovanie zlyhalo.");
+            failWithReply(reply);
             return;
           }
           setTimeout(function () { poll(jobID); }, POLL_INTERVAL_MS);
           return;
         }
         if (reply.ok !== true) {
-          fail(reply.error || "Podpisovanie zlyhalo.");
+          failWithReply(reply);
           return;
         }
         deliver(reply.response);
@@ -281,7 +350,7 @@
         }
         missingReplies = 0;
         if (reply.ok !== true || !reply.jobID) {
-          fail(reply.error || "Podpisovanie zlyhalo.");
+          failWithReply(reply);
           return;
         }
         poll(reply.jobID);
@@ -314,7 +383,7 @@
         if (reply && reply.ok) {
           if (callback && callback.onSuccess) callback.onSuccess();
         } else if (callback && callback.onError) {
-          callback.onError((reply && reply.error) || "Chevron7 nie je dostupný.");
+          callback.onError(generalError((reply && reply.error) || "Chevron7 nie je dostupný."));
         }
       });
     },
@@ -332,18 +401,40 @@
       if (callback && callback.onSuccess) callback.onSuccess();
     },
     getVersion: function (callback) {
-      if (callback && callback.onSuccess) callback.onSuccess("1.0.0");
+      if (callback && callback.onSuccess) callback.onSuccess(DSIGNER_VERSION_JSON);
     },
     getSignerIdentification: function (callback) {
-      if (callback && callback.onSuccess) {
-        callback.onSuccess(session.signed ? session.signed.signedBy : "");
-      }
+      if (callback && callback.onSuccess) callback.onSuccess(signerIdentification());
     },
     detectSupportedPlatforms: function (platforms, callback) {
       if (callback && callback.onSuccess) callback.onSuccess(["java"]);
     },
     deploy: function (options, callback) {
       if (callback && callback.onSuccess) callback.onSuccess();
+    },
+    deployCancel: function (callback) {
+      if (callback && callback.onSuccess) callback.onSuccess();
+    },
+    loadConfiguration: function (configsZipBase64, callback) {
+      unsupported("loadConfiguration", callback);
+    },
+    getSignatureTimeStampTokenBase64: function (callback) {
+      unsupported("getSignatureTimeStampTokenBase64", callback);
+    },
+    getSignatureTimeStampCert: function (callback) {
+      unsupported("getSignatureTimeStampCert", callback);
+    },
+    getSignatureTimeStampTime: function (callback) {
+      unsupported("getSignatureTimeStampTime", callback);
+    },
+    getTSAIdentification: function (callback) {
+      unsupported("getTSAIdentification", callback);
+    },
+    getSignatureTimeStampRequestBase64: function (reqPolicy, digestAlgUri, callback) {
+      unsupported("getSignatureTimeStampRequestBase64", callback);
+    },
+    getSignatureTimeStampRequest2Base64: function (reqPolicy, digestAlgUri, nonce, certReq, extensions, callback) {
+      unsupported("getSignatureTimeStampRequest2Base64", callback);
     },
     checkPDFACompliance: function (pdf, password, level, callback) {
       if (callback && callback.onSuccess) callback.onSuccess();
@@ -362,14 +453,62 @@
     }
   };
 
+  function signerIdentification() {
+    var signedBy = session.signed && session.signed.signedBy;
+    if (!signedBy) return SIGNER_PLACEHOLDER;
+    return signedBy.indexOf("CN=") === -1 ? "CN=" + signedBy : signedBy;
+  }
+
+  /**
+   * One document per signature. schranka.slovensko.sk chains an add*Object
+   * call per attachment into one signature, and keeping only the last one
+   * signed a message that covered a single file. A second document before the
+   * signature is refused and the first one dropped, so the portal's next
+   * attempt starts clean.
+   *
+   * Remaining gap: a portal that adds a document and then abandons the flow
+   * without any getter or error leaves it stored, and its next attempt is
+   * refused once. No portal known today does that.
+   */
   function storeObject(object, callback) {
     if (session.signed) reset();
+    if (session.object) {
+      reset();
+      if (callback && callback.onError) {
+        callback.onError(generalError("Chevron7 zatiaľ nepodpisuje viacerých dokumentov naraz. "
+          + "Podpíšte dokumenty jednotlivo, alebo použite aplikáciu D.Signer."));
+      }
+      return;
+    }
     session.object = object;
     if (callback && callback.onSuccess) callback.onSuccess();
   }
 
   function DSigXadesBpAdapter() {}
   DSigXadesBpAdapter.prototype = Object.create(DSigAdapter.prototype);
+
+  // Constants of the live dSigXadesBp.min.js the portals pass back as
+  // addXmlObject arguments; without them schranka sends `undefined`.
+  DSigXadesBpAdapter.prototype.XML_MEDIA_DESTINATION_TYPE_DESC_TXT = "TXT";
+  DSigXadesBpAdapter.prototype.XML_MEDIA_DESTINATION_TYPE_DESC_HTML = "HTML";
+  DSigXadesBpAdapter.prototype.XML_MEDIA_DESTINATION_TYPE_DESC_XHTML = "XHTML";
+  DSigXadesBpAdapter.prototype.XML_XDC_NAMESPACE_URI_V1_0 = "http://data.gov.sk/def/container/xmldatacontainer+xml/1.0";
+  DSigXadesBpAdapter.prototype.XML_XDC_NAMESPACE_URI_V1_1 = XDC_XMLNS;
+
+  // Revocation checking and mobile signing are the app's own concern: the
+  // portal's configuration is acknowledged and the flow continues.
+  DSigXadesBpAdapter.prototype.setRevocationChecking = function (ocspCheck, crlCheck, hashAlgorithm, callback) {
+    if (callback && callback.onSuccess) callback.onSuccess();
+  };
+  DSigXadesBpAdapter.prototype.disableMobileSigning = function (callback) {
+    if (callback && callback.onSuccess) callback.onSuccess();
+  };
+  DSigXadesBpAdapter.prototype.getSignatureAndTimeStampWithASiCEnvelopeBase64 = function (callback) {
+    unsupported("getSignatureAndTimeStampWithASiCEnvelopeBase64", callback);
+  };
+  DSigXadesBpAdapter.prototype.createXAdESZepBpT = function (tsResponseB64, tsCertB64, callback) {
+    unsupported("createXAdESZepBpT", callback);
+  };
 
   DSigXadesBpAdapter.prototype.addXmlObject = function (
     objectId, objectDescription, objectFormatIdentifier, xdcXMLData, xdcIdentifier,
@@ -397,18 +536,19 @@
     }, callback);
   };
 
+  /**
+   * schranka and nove call this with a ready-made XML Data Container in base64
+   * (third argument the form identifier, fourth the container). Wrapping it as
+   * form XML put a second container around the first, so it is refused with a
+   * message until the app signs an existing container on the web path.
+   */
   DSigXadesBpAdapter.prototype.addXmlObject2 = function (
-    objectId, objectDescription, namespaceUri, sourceXml, sourceXsd, sourceXsl, callback
+    objectId, objectDescription, objectFormatIdentifier, xdcXDCB64, xdcUsedXSD, xdcUsedXSLT, callback
   ) {
-    storeObject({
-      type: "XadesBp2Xml",
-      objectId: objectId,
-      objectDescription: objectDescription,
-      namespaceUri: namespaceUri,
-      sourceXml: sourceXml,
-      sourceXsd: sourceXsd,
-      sourceXsl: sourceXsl
-    }, callback);
+    if (callback && callback.onError) {
+      callback.onError(generalError("Formulár vo formáte XML Data Container Chevron7 zatiaľ nepodpisuje. "
+        + "Podpíšte ho aplikáciou D.Signer."));
+    }
   };
 
   DSigXadesBpAdapter.prototype.addPdfObject = function (
@@ -534,26 +674,23 @@
     }, callback);
   };
 
-  // Old D.Signer calls upstream only stubs out; a missing method would throw
-  // a TypeError on the page instead.
+  // XAdES_ZEP 1.1 and 2.0 data envelopes are not signed by Chevron7. They fail
+  // the portal's flow visibly: reporting success let it go on to a getter that
+  // would sign a different artifact than the one the portal asked for.
   DSigXadesAdapter.prototype.sign11 = function (
     signatureId, digestAlgUri, signaturePolicyIdentifier, dataEnvelopeId,
     dataEnvelopeURI, dataEnvelopeDescr, callback
   ) {
-    if (typeof console !== "undefined" && console.warn) {
-      console.warn("sign11 is not supported, treating as sign.");
-    }
-    if (callback && callback.onSuccess) callback.onSuccess();
+    reset();
+    unsupported("sign11", callback);
   };
 
   DSigXadesAdapter.prototype.sign20 = function (
     signatureId, digestAlgUri, signaturePolicyIdentifier, dataEnvelopeId,
     dataEnvelopeURI, dataEnvelopeDescr, callback
   ) {
-    if (typeof console !== "undefined" && console.warn) {
-      console.warn("sign20 is not supported, treating as sign.");
-    }
-    if (callback && callback.onSuccess) callback.onSuccess();
+    reset();
+    unsupported("sign20", callback);
   };
 
   DSigXadesAdapter.prototype.addPdfObject = DSigXadesBpAdapter.prototype.addPdfObject;
@@ -563,8 +700,28 @@
     performSignature({ level: "XAdES_BASELINE_B" }, callback);
   };
 
+  // schranka and nove sign every XAdES request through this getter. Like
+  // upstream autogram-extension it returns the ASiC-E container, the same
+  // artifact as getSignedXmlWithEnvelope.
+  DSigXadesAdapter.prototype.getSignedXmlWithEnvelopeBase64 = function (callback) {
+    performSignature({ level: "XAdES_BASELINE_B" }, callback);
+  };
+
   DSigXadesAdapter.prototype.getSignedXmlWithEnvelopeAndTimeStamp = function (callback) {
     performSignature({ level: "XAdES_BASELINE_T" }, callback);
+  };
+
+  DSigXadesAdapter.prototype.getSignedXmlWithEnvelopeGZipBase64 = function (callback) {
+    unsupported("getSignedXmlWithEnvelopeGZipBase64", callback);
+  };
+  DSigXadesAdapter.prototype.getSignedXmlWithEnvelopeAndTimeStampBase64 = function (callback) {
+    unsupported("getSignedXmlWithEnvelopeAndTimeStampBase64", callback);
+  };
+  DSigXadesAdapter.prototype.getSignedXmlWithEnvelopeAndTimeStampGZipBase64 = function (callback) {
+    unsupported("getSignedXmlWithEnvelopeAndTimeStampGZipBase64", callback);
+  };
+  DSigXadesAdapter.prototype.createXAdESZepT = function (tsResponseB64, tsCertB64, callback) {
+    unsupported("createXAdESZepT", callback);
   };
 
   DSigXadesAdapter.prototype.getSigningCertificate = function (callback) {
@@ -580,22 +737,32 @@
   // MARK: the object the portals reach for
 
   var ditec = {
-    isAutogram: true,
-    isChevron7: true,
     config: { downloadPage: { url: "", title: "" } },
-    utils: {
-      ERROR_CANCELLED: 1,
-      ERROR_GENERAL: -200,
-      ERROR_NOT_INSTALLED: -201,
-      ERROR_LAUNCH_FAILED: -202,
-      ERROR_LAUNCH_FORBIDDEN: -203,
-      isDitecError: function () { return true; },
-      extendClass: function () {}
-    },
-    versions: {},
-    dSigXadesJs: new DSigXadesAdapter(),
-    dSigXadesBpJs: new DSigXadesBpAdapter()
+    versions: {}
   };
+
+  // The D.Bridge libraries start with `var ditec = ditec || {}` in strict mode,
+  // so their writes into window.ditec throw and they never load. A non-strict
+  // build would replace the adapters, so these properties are read-only; only
+  // `config` and `versions` stay writable for the portal's config.js.
+  function lock(name, value) {
+    Object.defineProperty(ditec, name, { value: value, writable: false, enumerable: true, configurable: false });
+  }
+
+  lock("isAutogram", true);
+  lock("isChevron7", true);
+  lock("utils", Object.freeze({
+    ERROR_CANCELLED: ERROR_CANCELLED,
+    ERROR_GENERAL: ERROR_GENERAL,
+    ERROR_NOT_INSTALLED: -201,
+    ERROR_LAUNCH_FAILED: -202,
+    ERROR_LAUNCH_FORBIDDEN: -203,
+    isDitecError: function (error) { return error != null && error.name === "DitecError"; },
+    createDitecError: createDitecError,
+    extendClass: function () {}
+  }));
+  lock("dSigXadesJs", new DSigXadesAdapter());
+  lock("dSigXadesBpJs", new DSigXadesBpAdapter());
 
   try {
     Object.defineProperty(window, "ditec", {
