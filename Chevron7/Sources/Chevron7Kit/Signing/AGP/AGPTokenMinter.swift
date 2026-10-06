@@ -5,9 +5,11 @@ import CryptoKit
 import Foundation
 
 /// Mints the portal API tokens. The portal holds no passwords for integrators:
-/// the user pastes a public key into their portal profile and every request
-/// carries a short-lived JWT signed with the matching private key (ES256,
-/// `sub` = portal user id, `exp` within 15 minutes, unique `jti`).
+/// the organization owner pastes a public key into the portal's settings and
+/// every request carries a short-lived JWT signed with the matching private key
+/// (ES256, `sub` = the organization (tenant) id the settings page names, `exp`
+/// within 15 minutes, unique `jti`). Since the portal moved keys from users to
+/// tenants (2026-09-30) a user id there no longer authenticates.
 /// The private key lives only in the Keychain; the minter stamps one token
 /// per call, so nothing stored ever expires.
 public struct AGPTokenMinter: Sendable {

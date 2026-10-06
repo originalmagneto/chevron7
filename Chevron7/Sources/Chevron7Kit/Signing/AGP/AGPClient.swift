@@ -29,7 +29,7 @@ public struct AGPClient: Sendable {
         self.minter = minter
         self.transport = transport
     }
-    /// Client from settings pieces: portal URL, user id and the Keychain key.
+    /// Client from settings pieces: portal URL, organization (tenant) id and the Keychain key.
     /// Missing pieces are a settings error (`.missingToken`), not a transport one.
     public static func configured(userID: String, baseURL: URL,
                                   keyStore: any AGPKeyStoring,
@@ -324,7 +324,7 @@ public enum AGPError: Error, Equatable, LocalizedError {
         case .invalidResponse:
             return "Portál Autogram vrátil neočakávanú odpoveď."
         case .missingToken:
-            return "Chýba kľúč alebo ID používateľa portálu Autogram. Nastavte ich v Nastaveniach."
+            return "Chýba kľúč alebo ID organizácie na portáli Autogram. Nastavte ich v Nastaveniach."
         case .timeout:
             return "Podpis z mobilu neprišiel včas."
         case .cancelled:
@@ -332,7 +332,7 @@ public enum AGPError: Error, Equatable, LocalizedError {
         case .transport(let detail):
             return "Portál Autogram je nedostupný (\(detail))."
         case .unauthorized:
-            return "Portál podpis odmietol. Skontrolujte kľúč a ID používateľa v Nastaveniach."
+            return "Portál podpis odmietol. Skontrolujte kľúč a ID organizácie v Nastaveniach a či má organizácia na portáli zapnutý API prístup."
         }
     }
 }
