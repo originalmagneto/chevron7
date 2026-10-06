@@ -163,20 +163,35 @@ final class WebBridgeAgentServiceTests: XCTestCase {
 
     // MARK: - Status
 
-    /// The MacBook Air case: "Povoliť na pozadí" off for the developer, every
-    /// registration refused with SMAppServiceErrorDomain code 1.
-    func testRefusalWithEPERMPointsToBackgroundItems() {
+    /// The MacBook Air case: every registration refused with SMAppServiceErrorDomain
+    /// code 1 while the old installer's agent was still recorded.
+    func testRefusalWithEPERMSaysWhetherTheOldAgentIsStillThere() {
         let refused = NSError(domain: "SMAppServiceErrorDomain", code: 1,
                               userInfo: [NSLocalizedDescriptionKey: "Operation not permitted"])
-        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: refused), .deniedInBackgroundItems)
-        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: NSError(domain: NSPOSIXErrorDomain, code: 1)),
-                       .deniedInBackgroundItems)
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: refused, legacyAgentInstalled: true),
+                       .refusedByMacOS(legacyAgentInstalled: true))
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: NSError(domain: NSPOSIXErrorDomain, code: 1),
+                                                    legacyAgentInstalled: false),
+                       .refusedByMacOS(legacyAgentInstalled: false))
     }
 
     func testOtherRefusalsKeepTheirMessage() {
         let other = NSError(domain: "SMAppServiceErrorDomain", code: 22,
                             userInfo: [NSLocalizedDescriptionKey: "Invalid argument"])
-        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: other), .failed("Invalid argument"))
+        XCTAssertEqual(WebBridgeAgentService.status(afterRegistrationError: other, legacyAgentInstalled: true),
+                       .failed("Invalid argument"))
+    }
+
+    /// What helped on the MacBook Air: the old agent unloaded and its plist gone for good.
+    func testRetiringTheOldAgentUnloadsItAndTrashesItsPlist() throws {
+        let url = try writePlist(label: "app.slovensko.chevron7.webbridge",
+                                 program: "/Applications/Chevron7.app/Contents/Helpers/chevron7-webbridge-agent")
+        let status = WebBridgeAgentService.retireLegacyAgent(at: url, userID: 501,
+                                                             launchctl: { self.launchctlCalls.append($0) },
+                                                             moveToTrash: { self.trashed.append($0) })
+        XCTAssertEqual(status, .legacyAgentRemoved)
+        XCTAssertEqual(launchctlCalls, [["bootout", "gui/501/app.slovensko.chevron7.webbridge"]])
+        XCTAssertEqual(trashed, [url])
     }
 
     func testOldAgentStillRunningIsNotShownAsMissing() {

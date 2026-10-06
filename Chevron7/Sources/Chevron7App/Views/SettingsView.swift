@@ -1553,8 +1553,17 @@ struct WebSigningStorageCard: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
-            case .deniedInBackgroundItems:
-                Label("macOS prepojenie so Safari nepovolil, lebo Chevron7 (the Software s.r.o.) je vypnutý v Systémové nastavenia → Všeobecné → Položky pri prihlásení a rozšírenia → Povoliť na pozadí. Zapnite ho tam a potom kliknite na Zaregistrovať.",
+            case .refusedByMacOS(legacyAgentInstalled: true):
+                Label("macOS nové prepojenie so Safari nepustí, kým eviduje staré z predchádzajúcej inštalácie. Kliknite na Odstrániť staré prepojenie, reštartujte Mac a o pár minút kliknite na Zaregistrovať. Dovtedy podpisovanie zo Safari nepôjde.",
+                      systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Odstrániť staré prepojenie") { agentStatus = WebBridgeAgentService.retireLegacyAgent() }
+                    Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
+                }
+            case .refusedByMacOS(legacyAgentInstalled: false):
+                Label("macOS registráciu prepojenia so Safari zatiaľ odmieta. Ak ste práve odstránili staré prepojenie, reštartujte Mac a o pár minút kliknite na Zaregistrovať. Skontrolujte tiež, či je Chevron7 (the Software s.r.o.) zapnutý v Systémové nastavenia → Všeobecné → Položky pri prihlásení a rozšírenia → Povoliť na pozadí.",
                       systemImage: "xmark.octagon.fill")
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1562,6 +1571,12 @@ struct WebSigningStorageCard: View {
                     Button("Otvoriť Položky pri prihlásení…") { WebBridgeAgentService.openLoginItemsSettings() }
                     Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
                 }
+            case .legacyAgentRemoved:
+                Label("Staré prepojenie je v Koši. Reštartujte Mac, otvorte Chevron7 a o pár minút kliknite na Zaregistrovať.",
+                      systemImage: "arrow.clockwise.circle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
             case .failed(let message):
                 Label("Prepojenie so Safari sa nepodarilo zaregistrovať: \(message)",
                       systemImage: "xmark.octagon.fill")
