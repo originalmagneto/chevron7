@@ -42,8 +42,12 @@ enum WebBridgeAgentService {
         case translocated
         /// The bundled agent is not registered, but the old installer's job still runs.
         case legacyAgentOnly
-        /// macOS refused the registration because "Povoliť na pozadí" has Chevron7 off.
-        case deniedInBackgroundItems
+        /// macOS refused the registration (EPERM). `legacyAgentInstalled` says whether
+        /// the old installer's plist is still there, which keeps it refusing.
+        case refusedByMacOS(legacyAgentInstalled: Bool)
+        /// The old installer's agent was just removed; macOS lets the bundled one in
+        /// only after a restart.
+        case legacyAgentRemoved
         case failed(String)
     }
 
@@ -199,16 +203,38 @@ enum WebBridgeAgentService {
         }
     }
 
-    /// A refused registration. `SMAppServiceErrorDomain` code 1 (EPERM) is what macOS
-    /// answers while "Povoliť na pozadí" has the developer switched off: on the owner's
-    /// MacBook Air (2026-10-06) `sfltool dumpbtm` listed the old agent of "the Software
-    /// s.r.o." as `[disabled, allowed, notified]`, and every registration of the
-    /// bundled agent of the same team failed that way.
-    static func status(afterRegistrationError error: Error) -> Status {
+    /// A refused registration. On the owner's MacBook Air (2026-10-06) every
+    /// registration failed with `SMAppServiceErrorDomain` code 1 (EPERM) while Background
+    /// Task Management still recorded the old installer's agent under the same label
+    /// (`sfltool dumpbtm`: legacy agent, `[disabled, allowed, notified]`), although
+    /// "Povoliť na pozadí" had the developer on. Moving the plist aside for the attempt
+    /// did not help; what did was removing it for good, restarting the Mac and
+    /// registering a few minutes later, once the record was gone.
+    static func status(afterRegistrationError error: Error, legacyAgentInstalled: Bool) -> Status {
         let nsError = error as NSError
         let isEPERM = (nsError.domain == "SMAppServiceErrorDomain" || nsError.domain == NSPOSIXErrorDomain)
             && nsError.code == Int(EPERM)
-        return isEPERM ? .deniedInBackgroundItems : .failed(error.localizedDescription)
+        return isEPERM ? .refusedByMacOS(legacyAgentInstalled: legacyAgentInstalled) : .failed(error.localizedDescription)
+    }
+
+    /// Unloads the old installer's agent and moves its plist to the Trash, for the
+    /// Settings button. Safari has no bridge until the bundled agent is registered
+    /// after a restart, which Settings say before and after.
+    @discardableResult
+    static func retireLegacyAgent(
+        at url: URL = legacyPlistURL(),
+        userID: uid_t = getuid(),
+        launchctl: ([String]) -> Void = runLaunchctl,
+        moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    ) -> Status {
+        launchctl(["bootout", "gui/\(userID)/\(label)"])
+        do {
+            try moveToTrash(url)
+        } catch {
+            log.error("Old web bridge agent plist not removed: \(error.localizedDescription, privacy: .public)")
+            return .failed(error.localizedDescription)
+        }
+        return .legacyAgentRemoved
     }
 
     /// Registers again on demand, for the Settings button.
@@ -232,7 +258,7 @@ enum WebBridgeAgentService {
         }
         let current = currentStatus()
         if let failure, current != .enabled {
-            return status(afterRegistrationError: failure)
+            return status(afterRegistrationError: failure, legacyAgentInstalled: legacyAgentInstalled())
         }
         return current
     }
