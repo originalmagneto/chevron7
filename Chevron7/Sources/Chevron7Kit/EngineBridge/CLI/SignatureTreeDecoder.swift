@@ -24,10 +24,12 @@ enum SignatureTreeDecoder {
             state = .invalid
         }
         let timestamps = array(object["timestamps"])
-        let intactTimestamp = timestamps.contains { timestamp in
-            guard case .object(let fields) = timestamp else { return false }
-            return bool(fields["cryptographicIntegrity"]) == true || bool(fields["valid"]) == true
-        }
+        let firstIntact: [String: JSONValue]? = timestamps.lazy.compactMap { timestamp -> [String: JSONValue]? in
+            guard case .object(let fields) = timestamp,
+                  bool(fields["cryptographicIntegrity"]) == true || bool(fields["valid"]) == true else { return nil }
+            return fields
+        }.first
+        let intactTimestamp = firstIntact != nil
         return DocumentSignatureInfo(
             id: id,
             signerDisplayName: string(object["signerDisplayName"]) ?? "Neznámy podpisovateľ",
@@ -38,7 +40,10 @@ enum SignatureTreeDecoder {
             state: state,
             detail: string(object["validationReason"]) ?? string(object["subIndication"]),
             coveredDocuments: array(object["documents"]).compactMap(string),
-            certificateQualification: string(object["signerCertificateQualification"]))
+            certificateQualification: string(object["signerCertificateQualification"]),
+            timestampAuthority: firstIntact.flatMap { string($0["producer"]) },
+            timestampTime: firstIntact.flatMap { string($0["productionTime"]) }
+                .flatMap { ISO8601DateFormatter().date(from: $0) })
     }
 
     private static func dataObject(from value: JSONValue) -> SignedDataObject? {
