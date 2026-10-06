@@ -221,6 +221,78 @@ final class WebSignRequestWireFormatTests: XCTestCase {
         XCTAssertTrue(request(nil).allowsAddedTimestamp)
     }
 
+    /// addXmlObject2: the portal's finished container, signed as it is.
+    func testDecodesAReadyMadeContainerAndAsksForAnASiCContainer() throws {
+        let request = try decode("""
+        {
+          "requestID": "Signature-1",
+          "filename": "form-object.xdcf",
+          "content": "PFhNTERhdGFDb250YWluZXIvPg==",
+          "payloadMimeType": "application/vnd.gov.sk.xmldatacontainer+xml;base64",
+          "signatureLevel": "XAdES_BASELINE_B",
+          "container": "ASiC_E",
+          "eform": {
+            "containerXmlns": "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1",
+            "schema": "<xs:schema/>",
+            "transformation": "<xsl:stylesheet/>",
+            "identifier": "http://data.gov.sk/doc/eform/App.GeneralAgenda/1.9",
+            "schemaIdentifier": null,
+            "transformationIdentifier": null,
+            "transformationLanguage": null,
+            "transformationMediaDestinationTypeDescription": null,
+            "transformationTargetEnvironment": null,
+            "embedUsedSchemas": true,
+            "autoLoadEform": false,
+            "fsFormID": null,
+            "packaging": "ENVELOPING"
+          }
+        }
+        """)
+
+        XCTAssertTrue(request.isXMLDataContainer)
+        XCTAssertTrue(request.wantsASiCContainer)
+        XCTAssertTrue(request.isBase64)
+        XCTAssertEqual(request.eform?.embedUsedSchemas, true)
+        XCTAssertNil(request.attachments)
+    }
+
+    /// Several documents of one signature: the PDF carries the request, the
+    /// others travel as attachments in the portal's order.
+    func testDecodesSeveralDocumentsOfOneSignature() throws {
+        let request = try decode("""
+        {
+          "requestID": "Signature-1",
+          "filename": "priloha.pdf",
+          "content": "JVBERi0xLjQ=",
+          "payloadMimeType": "application/pdf;base64",
+          "signatureLevel": "XAdES_BASELINE_B",
+          "container": "ASiC_E",
+          "attachments": [
+            {"filename": "poznamka.txt", "content": "SGVsbG8=", "payloadMimeType": "text/plain;base64"},
+            {"filename": "form.xdcf", "content": "PFhNTERhdGFDb250YWluZXIvPg==",
+             "payloadMimeType": "application/vnd.gov.sk.xmldatacontainer+xml;base64"}
+          ]
+        }
+        """)
+
+        XCTAssertEqual(request.attachments?.map(\.filename), ["poznamka.txt", "form.xdcf"])
+        XCTAssertEqual(request.attachments?.first?.content, "SGVsbG8=")
+        XCTAssertEqual(request.attachments?.last?.payloadMimeType,
+                       "application/vnd.gov.sk.xmldatacontainer+xml;base64")
+        XCTAssertFalse(request.isXMLDataContainer)
+        XCTAssertTrue(request.wantsASiCContainer)
+    }
+
+    func testAPdfIsNoXMLDataContainer() throws {
+        let request = try decode("""
+        {"requestID": "r", "filename": "dokument.pdf", "content": "JVBERi0xLjQ=",
+         "payloadMimeType": "application/pdf;base64", "signatureLevel": "PAdES_BASELINE_B"}
+        """)
+        XCTAssertFalse(request.isXMLDataContainer)
+        XCTAssertFalse(request.wantsASiCContainer)
+        XCTAssertNil(request.attachments)
+    }
+
     func testResponseEncodesTheShapeTheExtensionReads() throws {
         let response = WebSignResponse(requestID: "r", content: "AAA",
                                        signedBy: "CN=Test", issuedBy: "CN=CA")

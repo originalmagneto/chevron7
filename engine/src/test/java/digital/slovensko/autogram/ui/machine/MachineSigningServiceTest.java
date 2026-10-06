@@ -858,6 +858,107 @@ class MachineSigningServiceTest {
         }
     }
 
+    /// A portal's finished container (D.Signer addXmlObject2) comes as an .xdcf with the
+    /// portal's schema and transformation and embedUsedSchemas, as upstream autogram-extension
+    /// sends it. It is validated and signed as it is: one data object, never wrapped again.
+    /// The container embeds its schemas, so nothing is looked up online.
+    @Test
+    void aReadyMadeXmlDataContainerFromAPortalIsSignedAsItIs() throws Exception {
+        // A portal's stylesheet names its output; addXmlObject2 passes no destination type.
+        var transformation = probeTransformation().replace("<xsl:template", "<xsl:output method=\"html\"/><xsl:template");
+        var eform = new EFormRequest(
+                "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1",
+                base64(probeSchema()),
+                base64(transformation),
+                PROBE_NS,
+                null, null, "sk", "HTML", "probe",
+                true, false, null, null);
+        var buildSettings = new MachineSettings(true);
+        buildSettings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        buildSettings.setEform(eform);
+        var built = MachineSigningService.DefaultSigningSession.signingJob(
+                probeForm().getBytes(java.nio.charset.StandardCharsets.UTF_8), "/tmp/probe-form.xml",
+                new MachineFileResponder(new MemoryRetainedFile(), () -> { }), buildSettings);
+        byte[] xdc;
+        try (var stream = built.getDocument().openStream()) {
+            xdc = stream.readAllBytes();
+        }
+
+        var retained = new MemoryRetainedFile();
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        settings.setEform(new EFormRequest(
+                "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1",
+                base64(probeSchema()),
+                base64(transformation),
+                PROBE_NS,
+                null, null, null, null, null,
+                true, false, null, "ENVELOPING"));
+        var job = MachineSigningService.DefaultSigningSession.signingJob(xdc, "/tmp/form-object.xdcf",
+                new MachineFileResponder(retained, () -> { }), settings);
+        try (var stream = job.getDocument().openStream()) {
+            assertArrayEquals(xdc, stream.readAllBytes(), "the portal's container must be signed unchanged");
+        }
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        job.signWithKeyAndRespond(new SigningKey(token, token.getKeys().get(0)));
+
+        var names = new ArrayList<String>();
+        String manifest = null;
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(retained.readAll()))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                names.add(entry.getName());
+                var content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                if (entry.getName().equals("META-INF/manifest.xml")) manifest = content;
+            }
+        }
+        assertEquals(1, names.stream().filter(name -> !name.equals("mimetype") && !name.startsWith("META-INF/")).count(),
+                names.toString());
+        assertTrue(names.contains("form-object.xdcf"), names.toString());
+        assertTrue(manifest.contains("manifest:full-path=\"form-object.xdcf\" manifest:media-type=\"application/vnd.gov.sk.xmldatacontainer+xml"),
+                manifest);
+    }
+
+    /// Several documents of one portal signature: plain text and an image next to the PDF.
+    @Test
+    void textAndImageAttachmentsKeepTheirMediaTypes() throws Exception {
+        var pdf = Files.readAllBytes(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample.pdf").getFile()));
+        var png = java.util.Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+        var retained = new MemoryRetainedFile();
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+
+        var job = MachineSigningService.DefaultSigningSession.signingJob(pdf, "/tmp/priloha.pdf",
+                new MachineFileResponder(retained, () -> { }), settings, null, List.of(
+                        new MachineSigningService.AttachmentContent("poznamka.txt",
+                                "Hello".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        new MachineSigningService.AttachmentContent("obrazok.png", png)));
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        job.signWithKeyAndRespond(new SigningKey(token, token.getKeys().get(0)));
+
+        String manifest = null;
+        String signature = null;
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(retained.readAll()))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                var content = new String(zip.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                if (entry.getName().equals("META-INF/manifest.xml")) manifest = content;
+                if (entry.getName().startsWith("META-INF/signatures")) signature = content;
+            }
+        }
+        assertTrue(manifest.contains("manifest:full-path=\"poznamka.txt\" manifest:media-type=\"text/plain"), manifest);
+        assertTrue(manifest.contains("manifest:full-path=\"obrazok.png\" manifest:media-type=\"image/png\""), manifest);
+        for (var name : List.of("priloha.pdf", "poznamka.txt", "obrazok.png")) {
+            assertTrue(signature.contains("URI=\"" + name + "\""), name + " in " + signature);
+        }
+    }
+
     /// Financna sprava forms carry no target namespace and a TXT (text-output) stylesheet,
     /// like the DPH form. The XDC build must handle that shape with referenced schemas.
     @Test

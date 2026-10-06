@@ -64,13 +64,22 @@ final class WebSigningQuickLook: NSObject, QLPreviewPanelDataSource {
     private var previewURL: URL?
 
     func show(document: PDFDocument, filename: String) {
+        show(filename: filename, fallbackName: "dokument.pdf") { document.write(to: $0) }
+    }
+
+    /// A further document of the signature, which has no page preview of its own.
+    func show(data: Data, filename: String) {
+        show(filename: filename, fallbackName: "priloha") { (try? data.write(to: $0, options: [.atomic])) != nil }
+    }
+
+    private func show(filename: String, fallbackName: String, write: (URL) -> Bool) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Chevron7WebPreview", isDirectory: true)
         try? FileManager.default.removeItem(at: folder)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let name = (filename as NSString).lastPathComponent
-            let url = folder.appendingPathComponent(name.isEmpty ? "dokument.pdf" : name)
-            guard document.write(to: url) else { return }
+            let url = folder.appendingPathComponent(name.isEmpty ? fallbackName : name)
+            guard write(url) else { return }
             previewURL = url
         } catch {
             return
