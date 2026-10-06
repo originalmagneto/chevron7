@@ -1547,6 +1547,21 @@ struct WebSigningStorageCard: View {
                 Label("Prepojenie so Safari nie je zaregistrované.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                 Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
+            case .legacyAgentOnly:
+                Label("Podpisovanie zo Safari teraz ide cez staršie prepojenie z predchádzajúcej inštalácie, ktoré macOS po reštarte sám nespustí. Kliknite na Zaregistrovať.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
+            case .deniedInBackgroundItems:
+                Label("macOS prepojenie so Safari nepovolil, lebo Chevron7 (the Software s.r.o.) je vypnutý v Systémové nastavenia → Všeobecné → Položky pri prihlásení a rozšírenia → Povoliť na pozadí. Zapnite ho tam a potom kliknite na Zaregistrovať.",
+                      systemImage: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Otvoriť Položky pri prihlásení…") { WebBridgeAgentService.openLoginItemsSettings() }
+                    Button("Zaregistrovať") { agentStatus = WebBridgeAgentService.registerNow() }
+                }
             case .failed(let message):
                 Label("Prepojenie so Safari sa nepodarilo zaregistrovať: \(message)",
                       systemImage: "xmark.octagon.fill")
