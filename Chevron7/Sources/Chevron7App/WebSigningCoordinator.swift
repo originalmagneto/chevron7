@@ -458,7 +458,7 @@ final class WebSigningCoordinator {
                 requestID: pending.request.requestID,
                 content: payload.base64EncodedString(),
                 signedBy: signed.signatureLabel,
-                issuedBy: identities.first(where: { $0.id == identityID })?.issuerSummary ?? "")), token: token)
+                issuedBy: signed.issuerName(fallback: identities.first(where: { $0.id == identityID })))), token: token)
         } catch {
             guard session.isCurrent(token) else { return }
             // Kept open so a mistyped PIN can be corrected without the page
