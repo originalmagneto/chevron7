@@ -1583,6 +1583,16 @@ struct MobileSigningCard: View {
     @State private var agpPublicPEM = ""
     @State private var agpError: String?
     @State private var agpBusy = false
+
+    /// The portal-side setup, as the Autogram Portal's organization settings show it
+    /// since its tenants (2026-09-30).
+    static let agpSetupSteps = [
+        "Prihláste sa na portál Autogram z poľa Portál a otvorte Nastavenia. Predvolený je testovací portál, kde Slovensko.Digital dnes sprístupňuje API; ostrý portál je agp.slovensko.digital.",
+        "Ak pod poľom „Verejný kľúč API tokenu“ stojí, že API prístup nie je zapnutý, požiadajte Slovensko.Digital o jeho zapnutie pre vašu organizáciu. Kľúč vkladá vlastník organizácie.",
+        "Tu kliknite na „Vygenerovať kľúč“, skopírujte verejný kľúč, vložte ho na portáli do poľa „Verejný kľúč API tokenu“ a kliknite na Uložiť.",
+        "Do poľa ID organizácie prepíšte číslo z vety pod tým poľom na portáli: „V tokene použite sub = …“.",
+        "Kliknite na „Overiť“. Pri podpise potom vyberte Podpísať mobilom a eIdentitu.",
+    ]
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Podpisovanie mobilom", systemImage: "iphone.gen3.radiowaves.left.and.right")
@@ -1613,16 +1623,26 @@ struct MobileSigningCard: View {
 
             Label("eIdentita (štátna aplikácia)", systemImage: "person.badge.key")
                 .font(.callout.weight(.semibold))
-            Text("Podpis cez eIdentitu ide cez portál Autogram: dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Na portáli otvorte Nastavenia: ak pri poli „Verejný kľúč API tokenu“ stojí, že API prístup nie je zapnutý, požiadajte správcu portálu o jeho zapnutie pre vašu organizáciu. Potom tam vložte verejný kľúč odtiaľto a sem prepíšte číslo z vety „V tokene použite sub = …“.")
+            Text("Podpis cez eIdentitu ide cez portál Autogram: dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete aplikáciou eIDENTITA a podpísaný dokument sa stiahne späť.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Ako ho nastaviť:")
+                    .font(.caption.weight(.semibold))
+                ForEach(Array(Self.agpSetupSteps.enumerated()), id: \.offset) { index, step in
+                    Text("\(index + 1). \(step)")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+            }
+            .foregroundStyle(.secondary)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
                     Text("Portál")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .frame(width: 140, alignment: .leading)
-                    TextField("https://agp.slovensko.digital", text: $settingsStore.settings.agpBaseURL)
+                    TextField(AGPClient.defaultBaseURL.absoluteString, text: $settingsStore.settings.agpBaseURL)
                         .textFieldStyle(.roundedBorder)
                         .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
                 }

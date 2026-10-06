@@ -17,12 +17,16 @@ public struct AGPClient: Sendable {
     /// Production portal. Override (e.g. staging) in settings and tests.
     public static let productionBaseURL = URL(string: "https://agp.slovensko.digital")!
     public static let stagingBaseURL = URL(string: "https://agp.dev.slovensko.digital")!
+    /// What Settings start with: the staging portal, where Slovensko.Digital gives
+    /// organizations API access today (the owner's decision of 2026-10-06). Switch
+    /// to `productionBaseURL` once production organizations get it.
+    public static let defaultBaseURL = stagingBaseURL
 
     public let baseURL: URL
     public let minter: AGPTokenMinter
     private let transport: any AVMHTTPTransport
 
-    public init(baseURL: URL = AGPClient.productionBaseURL,
+    public init(baseURL: URL = AGPClient.defaultBaseURL,
                 minter: AGPTokenMinter,
                 transport: any AVMHTTPTransport = URLSessionAVMTransport()) {
         self.baseURL = baseURL

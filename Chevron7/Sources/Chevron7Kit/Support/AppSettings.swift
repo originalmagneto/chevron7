@@ -157,7 +157,7 @@ public struct AppSettings: Codable, Sendable {
         let trimmed = agpBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), url.scheme?.lowercased() == "https",
               url.host != nil else {
-            return AGPClient.productionBaseURL
+            return AGPClient.defaultBaseURL
         }
         return url
     }
@@ -202,7 +202,7 @@ public struct AppSettings: Codable, Sendable {
                 detectorTrainingOffersEnabled: Bool = true,
                 mobileSigningEnabled: Bool = true,
                 avmBaseURL: String = AVMClient.publicBaseURL.absoluteString,
-                agpBaseURL: String = AGPClient.productionBaseURL.absoluteString,
+                agpBaseURL: String = AGPClient.defaultBaseURL.absoluteString,
                 agpUserID: String = "",
                 webSigningSavesLocally: Bool = true,
                 webSigningOutputPath: String = "",
@@ -290,7 +290,7 @@ public struct AppSettings: Codable, Sendable {
         self.detectorTrainingOffersEnabled = try container.decodeIfPresent(Bool.self, forKey: .detectorTrainingOffersEnabled) ?? true
         self.mobileSigningEnabled = try container.decodeIfPresent(Bool.self, forKey: .mobileSigningEnabled) ?? true
         self.avmBaseURL = try container.decodeIfPresent(String.self, forKey: .avmBaseURL) ?? AVMClient.publicBaseURL.absoluteString
-        self.agpBaseURL = try container.decodeIfPresent(String.self, forKey: .agpBaseURL) ?? AGPClient.productionBaseURL.absoluteString
+        self.agpBaseURL = try container.decodeIfPresent(String.self, forKey: .agpBaseURL) ?? AGPClient.defaultBaseURL.absoluteString
         self.agpUserID = try container.decodeIfPresent(String.self, forKey: .agpUserID) ?? ""
         self.webSigningSavesLocally = try container.decodeIfPresent(Bool.self, forKey: .webSigningSavesLocally) ?? true
         self.webSigningOutputPath = try container.decodeIfPresent(String.self, forKey: .webSigningOutputPath) ?? ""
