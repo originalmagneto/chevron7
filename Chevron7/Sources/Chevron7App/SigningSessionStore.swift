@@ -52,6 +52,9 @@ final class SigningSessionStore {
     private(set) var isSigningViaMobile = false
     /// Whether the last signature from `sign` carries a qualified timestamp, for the result screen.
     private(set) var lastSignatureTimestamped = false
+    /// How the phone signed the last document, nil when the card did; the done screen
+    /// names the phone service's timestamp instead of the Settings authority then.
+    private(set) var lastMobileSigningMethod: MobileSigningMethod?
     /// The engine's verdict on the last signature's timestamp, when it judged one.
     private(set) var lastTimestampQualification: TimestampQualification?
     /// The last verdict per timestamp authority URL in this app run, shown under the pickers.
@@ -671,6 +674,7 @@ final class SigningSessionStore {
         isSigningViaMobile = viaMobile
         let timestamped = addsQualifiedTimestamp(viaMobile: viaMobile)
         lastSignatureTimestamped = timestamped
+        lastMobileSigningMethod = viaMobile ? mobileMethod : nil
         lastTimestampQualification = nil
         let authorityURL = selectedTSAURL
         statusText = includeVisibleSignature ? "Pripravujem vizuálny podpis…" : "Podpisujem…"

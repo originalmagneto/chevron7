@@ -53,6 +53,28 @@ final class SignatureTreeTests: XCTestCase {
         XCTAssertTrue(tree.signatures[0].hasTimestamp)
     }
 
+    func testReadsTheAuthorityAndTimeOfTheFirstIntactTimestamp() throws {
+        // A phone signature carries the timestamp its own service added; the done
+        // screen names that authority instead of the one chosen in Settings.
+        let tree = SignatureTreeDecoder.tree(from: try payload("""
+        {"signatures":[{"id":"S-1","valid":true,"indication":"TOTAL_PASSED","qualifiedTimestampValid":true,
+          "timestamps":[{"id":"T-0","valid":false,"producer":"Broken TSA","productionTime":"2026-10-06T17:40:00Z"},
+                        {"id":"T-1","valid":true,"producer":"Mobile TSA Unit","productionTime":"2026-10-06T17:44:58Z"}]}]}
+        """))
+
+        XCTAssertEqual(tree.signatures[0].timestampAuthority, "Mobile TSA Unit")
+        XCTAssertEqual(tree.signatures[0].timestampTime, ISO8601DateFormatter().date(from: "2026-10-06T17:44:58Z"))
+    }
+
+    func testNoIntactTimestampLeavesAuthorityEmpty() throws {
+        let tree = SignatureTreeDecoder.tree(from: try payload("""
+        {"signatures":[{"id":"S-1","valid":true,"timestamps":[{"id":"T-1","valid":false,"producer":"Broken TSA"}]}]}
+        """))
+
+        XCTAssertNil(tree.signatures[0].timestampAuthority)
+        XCTAssertNil(tree.signatures[0].timestampTime)
+    }
+
     func testSameSignatureIdOnTwoLevelsStaysSeparate() throws {
         let tree = SignatureTreeDecoder.tree(from: try payload("""
         {"signatures":[{"id":"S-1","valid":true,"indication":"TOTAL_PASSED","timestamps":[]}],

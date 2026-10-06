@@ -369,6 +369,13 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
     public var coveredDocuments: [String]
     /// DSS SignatureQualification name from full validation, e.g. "QESIG".
     public var certificateQualification: String?
+    /// Who issued the first intact timestamp, as the engine names it. After full
+    /// validation that is the timestamp unit's own certificate name; the structural
+    /// pass reports the issuer DN of that certificate instead, so only a validated
+    /// value names the authority.
+    public var timestampAuthority: String?
+    /// When the first intact timestamp was produced.
+    public var timestampTime: Date?
 
     public enum State: String, Sendable, Equatable {
         case valid
@@ -380,7 +387,8 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
     public init(id: String, signerDisplayName: String, format: String? = nil,
                 signingTime: Date? = nil, hasQualifiedTimestamp: Bool = false,
                 hasTimestamp: Bool = false, state: State = .unknown, detail: String? = nil,
-                coveredDocuments: [String] = [], certificateQualification: String? = nil) {
+                coveredDocuments: [String] = [], certificateQualification: String? = nil,
+                timestampAuthority: String? = nil, timestampTime: Date? = nil) {
         self.id = id
         self.signerDisplayName = signerDisplayName
         self.format = format
@@ -391,6 +399,8 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
         self.detail = detail
         self.coveredDocuments = coveredDocuments
         self.certificateQualification = certificateQualification
+        self.timestampAuthority = timestampAuthority
+        self.timestampTime = timestampTime
     }
 }
 

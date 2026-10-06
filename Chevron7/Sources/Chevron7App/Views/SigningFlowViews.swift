@@ -1135,8 +1135,15 @@ struct SigningDoneView: View {
             if store.lastSignatureTimestamped {
                 GroupBox("Časová pečiatka") {
                     VStack(alignment: .leading, spacing: 5) {
-                        detailRow("Autorita", store.settings.activeTSA.name)
-                        detailRow("Adresa", store.settings.activeTSA.url)
+                        let signature = store.resultSignatures.first
+                        ForEach(SigningTimestampPresentation.authorityRows(
+                            mobileMethod: store.lastMobileSigningMethod,
+                            settingsAuthorityName: store.settings.activeTSA.name,
+                            settingsAuthorityURL: store.settings.activeTSA.url,
+                            validatedAuthority: store.resultSignatureState.phase == .validated
+                                ? signature?.timestampAuthority : nil), id: \.label) { row in
+                            detailRow(row.label, row.value)
+                        }
                         if let verdict = store.lastTimestampQualification {
                             Label(verdict.slovakDescription,
                                   systemImage: verdict == .qualified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
@@ -1147,6 +1154,9 @@ struct SigningDoneView: View {
                         if let signature = store.resultSignatures.first,
                            let signingTime = signature.signingTime {
                             detailRow("Čas podpisu", signingTime.formatted(date: .abbreviated, time: .standard))
+                        }
+                        if let timestampTime = store.resultSignatures.first?.timestampTime {
+                            detailRow("Čas pečiatky", timestampTime.formatted(date: .abbreviated, time: .standard))
                         }
                         if let detail = store.resultSignatures.first?.detail {
                             detailRow("Validácia", detail)
