@@ -11,6 +11,8 @@ struct SigningSettingsPane: View {
     @State private var tsaTestStatus: String?
     @State private var tsaTestFailed = false
     @State private var isTestingTSA = false
+    /// Identifies the TSA test whose result may still be shown; a change of server invalidates it.
+    @State private var tsaTestToken = UUID()
     @State private var tsaToDelete: String?
 
     var body: some View {
@@ -102,6 +104,12 @@ struct SigningSettingsPane: View {
                 }
             }
         }
+        .onChange(of: settingsStore.settings.selectedTSAURL) {
+            tsaTestToken = UUID()
+            tsaTestStatus = nil
+            tsaTestFailed = false
+            isTestingTSA = false
+        }
         .confirmationDialog("Naozaj chcete odstrániť tento TSA server?",
                             isPresented: Binding(get: { tsaToDelete != nil },
                                                  set: { if !$0 { tsaToDelete = nil } }),
@@ -132,26 +140,32 @@ struct SigningSettingsPane: View {
     private func testTSAConnection() {
         isTestingTSA = true
         tsaTestStatus = nil
+        let token = UUID()
+        tsaTestToken = token
         let urlString = settingsStore.settings.selectedTSAURL
-        Task {
-            defer { isTestingTSA = false }
+        Task { @MainActor in
+            // A result counts only while the tested server is still the selected one.
+            @MainActor func finish(failed: Bool, message: String) {
+                guard tsaTestToken == token, settingsStore.settings.selectedTSAURL == urlString else { return }
+                tsaTestFailed = failed
+                tsaTestStatus = message
+                isTestingTSA = false
+            }
             guard let url = URL(string: urlString), url.scheme != nil else {
-                tsaTestFailed = true
-                tsaTestStatus = "Neplatná adresa TSA."
+                finish(failed: true, message: "Neplatná adresa TSA.")
                 return
             }
             do {
                 let reply = try await RFC3161TimestampClient()
                     .requestToken(for: Data("chevron7-tsa-connectivity-test".utf8), tsaURL: url)
-                tsaTestFailed = false
                 if let time = reply.genTime {
-                    tsaTestStatus = "Pečiatka prijatá (\(AttestationClauseGenerator.isoFormatter.string(from: time)))"
+                    finish(failed: false,
+                           message: "Pečiatka prijatá (\(AttestationClauseGenerator.isoFormatter.string(from: time)))")
                 } else {
-                    tsaTestStatus = "Token prijatý (\(reply.token.count) B)."
+                    finish(failed: false, message: "Token prijatý (\(reply.token.count) B).")
                 }
             } catch {
-                tsaTestFailed = true
-                tsaTestStatus = error.localizedDescription
+                finish(failed: true, message: error.localizedDescription)
             }
         }
     }
