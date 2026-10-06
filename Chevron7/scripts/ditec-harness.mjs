@@ -191,14 +191,135 @@ await scenario('BpPdf request', async (ditec, page) => {
 });
 
 // The portals pass a ready-made base64 XML Data Container here (third argument
-// the form identifier), never raw form XML. Until the app signs an existing
-// container on the web path it is refused with a message, not wrapped twice.
+// the form identifier). It is signed as it is, as upstream autogram-extension
+// sends it: never wrapped into a second container.
 await scenario('Bp2Xml request', async (ditec, page) => {
+    const xdc = b64('<XMLDataContainer/>');
     const added = cbPair();
-    ditec.dSigXadesBpJs.addXmlObject2('form2', 'desc', NS, b64('<XMLDataContainer/>'), XSD, XSLT, added.callback);
-    const r = await added.promise;
-    check('Bp2Xml addXmlObject2 refused', r.status === 'error' && r.value.includes('XML Data Container'), JSON.stringify(r));
-    check('Bp2Xml sends nothing', page.requests.length === 0, String(page.requests.length));
+    ditec.dSigXadesBpJs.addXmlObject2('Vseobecna_agenda.xdcf', 'desc', NS, xdc, XSD, XSLT, added.callback);
+    check('Bp2Xml addXmlObject2 ok', (await added.promise).status === 'success');
+    const signed = cbPair();
+    ditec.dSigXadesBpJs.sign('sig-5', ditec.dSigXadesBpJs.SHA256, null, { onSuccess: () => {} });
+    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
+    check('Bp2Xml signs', (await signed.promise).status === 'success');
+    const req = page.requests[0] || {};
+    check('Bp2Xml filename keeps one xdcf', req.filename === 'Vseobecna_agenda.xdcf', req.filename);
+    check('Bp2Xml content passthrough', req.content === xdc, req.content);
+    check('Bp2Xml mime', req.payloadMimeType === 'application/vnd.gov.sk.xmldatacontainer+xml;base64', req.payloadMimeType);
+    check('Bp2Xml container', req.container === 'ASiC_E', req.container);
+    check('Bp2Xml no attachments', req.attachments == null, JSON.stringify(req.attachments));
+    check('Bp2Xml identifier', req.eform && req.eform.identifier === NS, req.eform && req.eform.identifier);
+    check('Bp2Xml schema and transformation raw', req.eform && req.eform.schema === XSD && req.eform.transformation === XSLT,
+        JSON.stringify(req.eform));
+    check('Bp2Xml embeds (upstream: no includeRefs)', req.eform && req.eform.embedUsedSchemas === true, String(req.eform && req.eform.embedUsedSchemas));
+    check('Bp2Xml container namespace', req.eform && req.eform.containerXmlns === 'http://data.gov.sk/def/container/xmldatacontainer+xml/1.1',
+        req.eform && req.eform.containerXmlns);
+});
+
+await scenario('Bp2Xml base64 schema', async (ditec, page) => {
+    const added = cbPair();
+    ditec.dSigXadesBpJs.addXmlObject2('form', 'desc', NS, b64('<XMLDataContainer/>'), b64(XSD), b64(XSLT), added.callback);
+    await added.promise;
+    const signed = cbPair();
+    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
+    await signed.promise;
+    const req = page.requests[0] || {};
+    check('Bp2Xml filename gets xdcf', req.filename === 'form.xdcf', req.filename);
+    check('Bp2Xml base64 schema decoded', req.eform && req.eform.schema === XSD && req.eform.transformation === XSLT, JSON.stringify(req.eform));
+});
+
+// schranka chains one add*Object per document into one signature: D.Signer
+// returns one ASiC-E whose signature covers every data object.
+await scenario('Bp several documents', async (ditec, page) => {
+    const pdf = b64('%PDF-1.4 fake');
+    const xdc = b64('<XMLDataContainer/>');
+    for (const add of [
+        (cb) => ditec.dSigXadesBpJs.addTxtObject('poznamka', 'desc', 'Hello world', 'fmt', cb),
+        (cb) => ditec.dSigXadesBpJs.addPdfObject('priloha.pdf', 'desc', pdf, '', 'fmt', 0, false, cb),
+        (cb) => ditec.dSigXadesBpJs.addXmlObject2('form', 'desc', NS, xdc, XSD, XSLT, cb),
+    ]) {
+        const added = cbPair();
+        add(added.callback);
+        check('Bp several: each document is accepted', (await added.promise).status === 'success');
+    }
+    const signed = cbPair();
+    ditec.dSigXadesBpJs.sign('sig-6', ditec.dSigXadesBpJs.SHA256, null, { onSuccess: () => {} });
+    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
+    check('Bp several: one signature', (await signed.promise).status === 'success' && page.requests.length === 1, String(page.requests.length));
+    const req = page.requests[0] || {};
+    check('Bp several: the PDF carries the signature', req.filename === 'priloha.pdf' && req.content === pdf
+        && req.payloadMimeType === 'application/pdf;base64', req.filename);
+    check('Bp several: an ASiC-E XAdES request', req.container === 'ASiC_E' && req.signatureLevel === 'XAdES_BASELINE_B',
+        `${req.container} ${req.signatureLevel}`);
+    check('Bp several: no eForm on the request', req.eform == null, JSON.stringify(req.eform));
+    const attachments = req.attachments || [];
+    check('Bp several: the others in portal order', attachments.length === 2
+        && attachments[0].filename === 'poznamka.txt' && attachments[0].payloadMimeType === 'text/plain;base64'
+        && Buffer.from(attachments[0].content, 'base64').toString('utf8') === 'Hello world'
+        && attachments[1].filename === 'form.xdcf' && attachments[1].content === xdc
+        && attachments[1].payloadMimeType === 'application/vnd.gov.sk.xmldatacontainer+xml;base64',
+        JSON.stringify(attachments.map((a) => [a.filename, a.payloadMimeType])));
+});
+
+for (const [label, adds, text] of [
+    ['without a PDF', (d, cb1, cb2) => {
+        d.dSigXadesBpJs.addTxtObject('a', 'desc', 'A', 'fmt', cb1);
+        d.dSigXadesBpJs.addPngObject('b', 'desc', b64('png'), 'fmt', cb2);
+    }, 'PDF'],
+    ['with a form built from XML', (d, cb1, cb2) => {
+        d.dSigXadesBpJs.addPdfObject('a.pdf', 'desc', b64('%PDF-1.4'), '', 'fmt', 0, false, cb1);
+        d.dSigXadesBpJs.addXmlObject('form', 'desc', 'fmt', XML, 'form-id', '1.0', b64(XSD), 'xsd', b64(XSLT), 'xsl',
+            'TXT', 'sk', '', false, 'http://data.gov.sk/def/container/xmldatacontainer+xml/1.1', cb2);
+    }, 'formulár'],
+]) {
+    await scenario(`Bp several ${label}`, async (ditec, page) => {
+        const first = cbPair();
+        const second = cbPair();
+        adds(ditec, first.callback, second.callback);
+        await first.promise;
+        await second.promise;
+        const signed = cbPair();
+        ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
+        const r = await signed.promise;
+        check(`Bp several ${label}: refused with a reason`, r.status === 'error' && r.value.includes(text), JSON.stringify(r));
+        check(`Bp several ${label}: nothing sent`, page.requests.length === 0, String(page.requests.length));
+    });
+}
+
+// A XAdES envelope with several documents is a different artifact (one XML
+// signature over several references), not an ASiC-E: refused, not substituted.
+await scenario('Xades several documents', async (ditec, page) => {
+    const first = cbPair();
+    const second = cbPair();
+    ditec.dSigXadesJs.addPdfObject('a.pdf', 'desc', b64('%PDF-1.4'), '', 'fmt', 0, false, first.callback);
+    ditec.dSigXadesJs.addPdfObject('b.pdf', 'desc', b64('%PDF-1.4'), '', 'fmt', 0, false, second.callback);
+    await first.promise;
+    await second.promise;
+    const signed = cbPair();
+    ditec.dSigXadesJs.getSignedXmlWithEnvelopeBase64(signed.callback);
+    const r = await signed.promise;
+    check('Xades several: refused', r.status === 'error' && r.value.includes('XAdES'), JSON.stringify(r));
+    check('Xades several: nothing sent', page.requests.length === 0, String(page.requests.length));
+});
+
+// A portal that added a document and walked away must not have it signed with
+// the next one: initialize starts every portal's signing flow afresh.
+await scenario('initialize drops an abandoned document', async (ditec, page) => {
+    const stale = cbPair();
+    ditec.dSigXadesBpJs.addPdfObject('stary.pdf', 'desc', b64('%PDF-1.4 old'), '', 'fmt', 0, false, stale.callback);
+    await stale.promise;
+    const init = cbPair();
+    ditec.dSigXadesBpJs.initialize(init.callback);
+    check('initialize succeeds', (await init.promise).status === 'success');
+    const added = cbPair();
+    ditec.dSigXadesBpJs.addPdfObject('novy.pdf', 'desc', b64('%PDF-1.4 new'), '', 'fmt', 0, false, added.callback);
+    await added.promise;
+    const signed = cbPair();
+    ditec.dSigXadesBpJs.getSignatureWithASiCEnvelopeBase64(signed.callback);
+    await signed.promise;
+    const req = page.requests[0] || {};
+    check('initialize: only the new document is signed', req.filename === 'novy.pdf' && req.attachments == null,
+        `${req.filename} ${JSON.stringify(req.attachments)}`);
 });
 
 // --- new branches ---

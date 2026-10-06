@@ -29,6 +29,18 @@ final class WebSigningCoordinator {
         /// The whole PDF, for the page preview and Quick Look.
         let pdfDocument: PDFDocument?
         let xmlExcerpt: String?
+        /// The other documents of the same signature, in the portal's order.
+        let attachments: [Attachment]
+    }
+
+    /// A further data object of the signature, listed in the panel so nothing is
+    /// signed unseen.
+    struct Attachment: Identifiable {
+        let id: Int
+        let filename: String
+        let kindDescription: String
+        let sizeDescription: String
+        let data: Data
     }
 
     enum Failure: LocalizedError {
@@ -172,11 +184,25 @@ final class WebSigningCoordinator {
         return formatter
     }()
 
-    /// TXT/PNG over the phone relay is refused until a probe verifies the
-    /// relay accepts text/plain and image/png (card signing covers them).
     var mobileSigningAvailable: Bool {
         guard settingsStore.settings.mobileSigningEnabled else { return false }
-        return pending.map({ Self.plainFileExtension(for: $0.request) == nil }) ?? true
+        return pending.map({ Self.mobileRefusal(for: $0.request) == nil }) ?? true
+    }
+
+    /// Why the phone cannot sign this request, nil when it can. The relay has only
+    /// been shown PDFs and form XML: TXT/PNG, a finished container and several
+    /// documents stay with the card until avm-probe verifies the relay takes them.
+    nonisolated static func mobileRefusal(for request: WebSignRequest) -> String? {
+        if plainFileExtension(for: request) != nil {
+            return "Podpis textu a obrázkov mobilom zatiaľ nie je k dispozícii. Použite podpis kartou."
+        }
+        if request.isXMLDataContainer {
+            return "Hotový formulár (XML Data Container) sa mobilom zatiaľ nepodpisuje. Použite podpis kartou."
+        }
+        if request.attachments?.isEmpty == false {
+            return "Viac dokumentov naraz sa mobilom zatiaľ nepodpisuje. Použite podpis kartou."
+        }
+        return nil
     }
 
     private var provider: any QualifiedSigningProviding { settingsStore.signingProvider }
@@ -188,8 +214,13 @@ final class WebSigningCoordinator {
         guard pending == nil, !isWorking, !session.isOpen else { throw Failure.busy }
 
         let bytes = try Self.decode(request)
-        guard bytes.count <= WebSigningBridge.maximumPayloadBytes else {
-            throw Failure.tooLarge(bytes.count)
+        let attachmentEntries = try Self.attachmentEntries(for: request)
+        // Several documents are plain files next to a PDF; ditec.js never sends an
+        // eForm with them, and the provider would ignore the attachments if it did.
+        guard attachmentEntries.isEmpty || request.eform == nil else { throw Failure.malformedPayload }
+        let totalBytes = attachmentEntries.reduce(bytes.count) { $0 + $1.data.count }
+        guard totalBytes <= WebSigningBridge.maximumPayloadBytes else {
+            throw Failure.tooLarge(totalBytes)
         }
 
         var pdfThumb: NSImage?
@@ -217,7 +248,15 @@ final class WebSigningCoordinator {
                           kindDescription: Self.describeKind(request),
                           pdfThumbnail: pdfThumb,
                           pdfDocument: pdfDocument,
-                          xmlExcerpt: xmlPreview)
+                          xmlExcerpt: xmlPreview,
+                          attachments: zip(attachmentEntries, request.attachments ?? []).enumerated().map { index, pair in
+                              Attachment(id: index,
+                                         filename: pair.0.path,
+                                         kindDescription: Self.describeKind(filename: pair.0.path,
+                                                                            mimeType: pair.1.payloadMimeType),
+                                         sizeDescription: Self.describeSize(pair.0.data.count),
+                                         data: pair.0.data)
+                          })
         pin = ""
         errorText = nil
         addsQualifiedTimestamp = false
@@ -334,9 +373,8 @@ final class WebSigningCoordinator {
     /// state-portal form works on this path too.
     func confirmViaMobile() async {
         guard let pending else { return }
-        guard Self.plainFileExtension(for: pending.request) == nil else {
-            // ponytail: mobile TXT/PNG refused until avm-probe verifies the relay accepts text/plain and image/png.
-            errorText = "Podpis textu a obrázkov mobilom zatiaľ nie je k dispozícii. Použite podpis kartou."
+        if let refusal = Self.mobileRefusal(for: pending.request) {
+            errorText = refusal
             return
         }
         let token = session.currentToken
@@ -411,6 +449,7 @@ final class WebSigningCoordinator {
 
         do {
             let bytes = try Self.decode(pending.request)
+            let attachments = try Self.attachmentEntries(for: pending.request)
             let level = effectiveLevel(for: pending.request)
             let wantsTimestamp = level.hasSuffix("_T")
             let wantsContainer = pending.request.wantsASiCContainer
@@ -421,6 +460,7 @@ final class WebSigningCoordinator {
             // The PDF goes to the engine as it is: XAdES on a PDF makes the engine
             // build the ASiC-E around it. A container packaged here first ended up
             // nested inside the signed one, which the portal could neither open nor join.
+            // Further documents become data objects of that same container.
             let signingRequest = SigningRequest(
                 pdfData: bytes,
                 identityID: identityID,
@@ -428,9 +468,11 @@ final class WebSigningCoordinator {
                 tsaURL: wantsTimestamp ? settingsStore.settings.activeTSA.url : nil,
                 outputFormat: wantsContainer ? .attachedASIC : .embeddedPAdES,
                 pin: pin.isEmpty ? nil : pin,
+                extraFiles: attachments,
                 eform: pending.request.eform,
                 signatureLevelOverride: level,
-                filename: pending.request.filename)
+                filename: pending.request.filename,
+                signsExtraFilesAsDataObjects: !attachments.isEmpty)
 
             // An eID opens the eID client's BOK window for the signature itself.
             if !needsPIN { prompt.beginMiddlewareInput() }
@@ -493,12 +535,50 @@ final class WebSigningCoordinator {
     }
 
     nonisolated static func describeKind(_ request: WebSignRequest) -> String {
+        if request.isXMLDataContainer { return "Hotový formulár (XML Data Container)" }
         if request.eform != nil { return "Elektronický formulár (XML Data Container)" }
-        if let plain = plainFileExtension(for: request) {
-            return plain == "txt" ? "Textový dokument (TXT)" : "Obrázok (PNG)"
+        return describeKind(filename: request.filename, mimeType: request.payloadMimeType)
+    }
+
+    nonisolated static func describeKind(filename: String, mimeType: String) -> String {
+        let mime = mimeType.replacingOccurrences(of: " ", with: "").lowercased()
+        let ext = (filename as NSString).pathExtension.lowercased()
+        if ext == "xdcf" || mime.hasPrefix("application/vnd.gov.sk.xmldatacontainer+xml") {
+            return "Hotový formulár (XML Data Container)"
         }
-        if request.payloadMimeType.contains("pdf") { return "Dokument PDF" }
-        return request.payloadMimeType
+        if ext == "txt" || mime.hasPrefix("text/plain") { return "Textový dokument (TXT)" }
+        if ext == "png" || mime.hasPrefix("image/png") { return "Obrázok (PNG)" }
+        if mime.contains("pdf") { return "Dokument PDF" }
+        return mimeType
+    }
+
+    /// The further documents as data objects for the engine, in the portal's order.
+    ///
+    /// The provider writes them into one folder beside the PDF, on a volume that
+    /// ignores case, and skips one named like the PDF, so every name is reduced to
+    /// a plain file name and made unique against the PDF and the others; a clash
+    /// would otherwise drop a document from the signature without a word. Names
+    /// compare as the engine's request validator does (NFC, lowercase), and the
+    /// container's own entry names count as taken.
+    nonisolated static func attachmentEntries(for request: WebSignRequest) throws -> [ASiCEPackager.Entry] {
+        guard let attachments = request.attachments, !attachments.isEmpty else { return [] }
+        func key(_ name: String) -> String { name.precomposedStringWithCanonicalMapping.lowercased() }
+        var taken: Set<String> = ["mimetype", "meta-inf", key((request.filename as NSString).lastPathComponent)]
+        return try attachments.map { attachment in
+            guard let data = Data(base64Encoded: attachment.content) else { throw Failure.malformedPayload }
+            var name = ASiCEPackager.sanitizedFileName((attachment.filename as NSString).lastPathComponent)
+            if name.isEmpty { name = "priloha" }
+            let stem = (name as NSString).deletingPathExtension
+            let ext = (name as NSString).pathExtension
+            var candidate = name
+            var counter = 2
+            while taken.contains(key(candidate)) {
+                candidate = ext.isEmpty ? "\(stem)-\(counter)" : "\(stem)-\(counter).\(ext)"
+                counter += 1
+            }
+            taken.insert(key(candidate))
+            return ASiCEPackager.Entry(path: candidate, data: data)
+        }
     }
 
     /// Extension the browser payload really is when it is plain text or an

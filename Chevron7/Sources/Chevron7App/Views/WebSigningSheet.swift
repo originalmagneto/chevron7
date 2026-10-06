@@ -137,6 +137,10 @@ struct WebSigningSheet: View {
                 }
             }
 
+            if !pending.attachments.isEmpty {
+                attachmentList(pending.attachments)
+            }
+
             if let excerpt = pending.xmlExcerpt {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(pending.request.eform != nil || pending.request.payloadMimeType.contains("xml")
@@ -157,6 +161,41 @@ struct WebSigningSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// The other documents the one signature covers, each openable in Quick Look
+    /// before anything is signed.
+    private func attachmentList(_ attachments: [WebSigningCoordinator.Attachment]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(attachments.count == 1
+                 ? "Podpis pokryje aj ďalší dokument:"
+                 : "Podpis pokryje aj ďalšie dokumenty (\(attachments.count)):")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(attachments) { attachment in
+                HStack(spacing: 8) {
+                    Image(systemName: "doc")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(attachment.filename)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("\(attachment.kindDescription) · \(attachment.sizeDescription)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        WebSigningQuickLook.shared.show(data: attachment.data, filename: attachment.filename)
+                    } label: {
+                        Label("Náhľad", systemImage: "eye")
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel("Náhľad dokumentu \(attachment.filename)")
+                }
+            }
+        }
     }
 
     /// State portals ask for Baseline B, so without this the phone offers only

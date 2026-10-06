@@ -115,6 +115,14 @@
     return base + ".xml";
   }
 
+  /// A ready-made XML Data Container keeps a single .xdcf: the engine reads the
+  /// payload type from the extension and signs an .xdcf source as it is.
+  function xdcSourceName(objectId) {
+    var base = String(objectId || "formular");
+    base = base.replace(/\.(xdcf|xml)$/i, "");
+    return base + ".xdcf";
+  }
+
   /// Same rule for plain documents: the app and the engine read the payload
   /// type from the filename extension, so a TXT/PNG source must keep one.
   function plainSourceName(objectId, fallback, extension) {
@@ -140,7 +148,7 @@
   // MARK: signing session
 
   var session = {
-    object: null,
+    objects: [],
     signatureId: null,
     digestAlgUri: null,
     signaturePolicyIdentifier: null,
@@ -148,35 +156,131 @@
   };
 
   function reset() {
-    session.object = null;
+    session.objects = [];
     session.signed = null;
   }
 
-  /**
-   * Turns the stored ditec object into the request the app understands.
-   *
-   * Schema and transformation are handed over decoded: the app base64 encodes
-   * them again on the way to the engine, which is where that encoding belongs.
-   */
-  function buildRequest(overrides) {
-    var object = session.object;
-    if (!object) throw new Error("Nie je pripravený žiadny dokument na podpis.");
-    var options = overrides || {};
-    var level = options.level || "XAdES_BASELINE_B";
+  var PDF_MIME = "application/pdf;base64";
+  var XDC_MIME = "application/vnd.gov.sk.xmldatacontainer+xml;base64";
 
+  /**
+   * A stored object that is signed as the file it is: PDF, plain text, image or
+   * a ready-made XML Data Container. Null for a form the engine still has to
+   * build into a container from its XML.
+   */
+  function fileObject(object) {
     if (object.type === "XadesPdf" || object.type === "XadesBpPdf") {
-      // getSignatureWithASiCEnvelopeBase64 expects XAdES in an ASiC-E container
-      // around the PDF, exactly as upstream autogram-extension sends it. Without
-      // the container the phone relay rejects the request and a card signature
-      // comes back as a PAdES PDF the portal cannot use.
-      var pdfRequest = {
-        requestID: session.signatureId || ("ditec-" + Date.now()),
+      return {
         filename: (function (id) {
           var name = String(id || "dokument");
           return /\.pdf$/i.test(name) ? name : name + ".pdf";
         })(object.objectId),
         content: object.sourcePdfBase64,
-        payloadMimeType: "application/pdf;base64",
+        payloadMimeType: PDF_MIME
+      };
+    }
+    // Plain text and images travel without eform attributes, exactly as
+    // upstream autogram-extension sends them: the payload mime tells the
+    // engine what they are, the ASiC-E container carries the signature.
+    if (object.type === "XadesBpTxt") {
+      return {
+        filename: plainSourceName(object.objectId, "dokument", ".txt"),
+        content: toBase64(object.sourceTxt),
+        payloadMimeType: "text/plain;base64"
+      };
+    }
+    if (object.type === "XadesBpPng" || object.type === "XadesPng") {
+      return {
+        filename: plainSourceName(object.objectId, "obrazok", ".png"),
+        content: object.sourcePngBase64,
+        payloadMimeType: "image/png;base64"
+      };
+    }
+    // schranka and nove hand a finished container in base64; it is signed as
+    // it is, never wrapped again (upstream: XadesBp2XmlStrategy).
+    if (object.type === "XadesBp2Xml") {
+      return {
+        filename: xdcSourceName(object.objectId),
+        content: object.xdcXDCB64,
+        payloadMimeType: XDC_MIME
+      };
+    }
+    return null;
+  }
+
+  function newRequestID() {
+    return session.signatureId || ("ditec-" + Date.now());
+  }
+
+  /**
+   * Turns the stored ditec objects into the request the app understands.
+   *
+   * Schema and transformation are handed over decoded: the app base64 encodes
+   * them again on the way to the engine, which is where that encoding belongs.
+   */
+  function buildRequest(overrides) {
+    var objects = session.objects;
+    if (objects.length === 0) throw new Error("Nie je pripravený žiadny dokument na podpis.");
+    var options = overrides || {};
+    return objects.length === 1
+      ? buildSingleRequest(objects[0], options)
+      : buildMultiRequest(objects, options);
+  }
+
+  /**
+   * Several documents added before one signature, as schranka chains them: one
+   * ASiC-E whose XAdES signature covers each of them as a data object, which is
+   * what D.Signer returns from getSignatureWithASiCEnvelopeBase64. The engine
+   * signs further data objects only next to a PDF, so a PDF carries the request
+   * and the others follow in the portal's order.
+   */
+  function buildMultiRequest(objects, options) {
+    if (options.container !== "ASiC_E") {
+      throw new Error("Viac dokumentov v jednej obálke XAdES Chevron7 zatiaľ nepodpisuje. "
+        + "Podpíšte dokumenty jednotlivo, alebo použite aplikáciu D.Signer.");
+    }
+    var files = objects.map(function (object) {
+      var file = fileObject(object);
+      if (!file) {
+        throw new Error("Elektronický formulár spolu s ďalšími dokumentmi Chevron7 zatiaľ nepodpisuje. "
+          + "Podpíšte ho samostatne, alebo použite aplikáciu D.Signer.");
+      }
+      return file;
+    });
+    var mainIndex = -1;
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].payloadMimeType === PDF_MIME) { mainIndex = i; break; }
+    }
+    if (mainIndex === -1) {
+      throw new Error("Viac dokumentov naraz Chevron7 podpisuje, len keď je medzi nimi PDF. "
+        + "Podpíšte dokumenty jednotlivo, alebo použite aplikáciu D.Signer.");
+    }
+    var main = files[mainIndex];
+    return {
+      requestID: newRequestID(),
+      filename: main.filename,
+      content: main.content,
+      payloadMimeType: main.payloadMimeType,
+      signatureLevel: options.level || "XAdES_BASELINE_B",
+      container: "ASiC_E",
+      attachments: files.filter(function (file, index) { return index !== mainIndex; })
+    };
+  }
+
+  function buildSingleRequest(object, options) {
+    var level = options.level || "XAdES_BASELINE_B";
+    var file = fileObject(object);
+
+    if (file && file.payloadMimeType === PDF_MIME) {
+      // getSignatureWithASiCEnvelopeBase64 expects XAdES in an ASiC-E container
+      // around the PDF, exactly as upstream autogram-extension sends it. Without
+      // the container the phone relay rejects the request and a card signature
+      // comes back as a PAdES PDF the portal cannot use.
+      var pdfRequest = {
+        requestID: newRequestID(),
+        filename: file.filename,
+        content: file.content,
+        payloadMimeType: file.payloadMimeType,
         signatureLevel: options.level || "PAdES_BASELINE_B"
       };
       if (options.container) {
@@ -185,33 +289,48 @@
       return pdfRequest;
     }
 
-    // Plain text and images travel without eform attributes, exactly as
-    // upstream autogram-extension sends them: the payload mime tells the
-    // engine what they are, the ASiC-E container carries the signature.
-    if (object.type === "XadesBpTxt") {
+    if (object.type === "XadesBp2Xml") {
+      // Upstream sends the portal's schema and transformation with the
+      // container and embedUsedSchemas = !includeRefs, which addXmlObject2
+      // never passes; the engine validates the container against them.
       return {
-        requestID: session.signatureId || ("ditec-" + Date.now()),
-        filename: plainSourceName(object.objectId, "dokument", ".txt"),
-        content: toBase64(object.sourceTxt),
-        payloadMimeType: "text/plain;base64",
+        requestID: newRequestID(),
+        filename: file.filename,
+        content: file.content,
+        payloadMimeType: file.payloadMimeType,
         signatureLevel: level,
-        container: options.container || "ASiC_E"
+        container: options.container || "ASiC_E",
+        eform: {
+          containerXmlns: XDC_XMLNS,
+          schema: emptyToNull(object.xdcUsedXSD == null ? null : fromBase64(object.xdcUsedXSD)),
+          transformation: emptyToNull(object.xdcUsedXSLT == null ? null : fromBase64(object.xdcUsedXSLT)),
+          identifier: emptyToNull(object.objectFormatIdentifier),
+          schemaIdentifier: null,
+          transformationIdentifier: null,
+          transformationLanguage: null,
+          transformationMediaDestinationTypeDescription: null,
+          transformationTargetEnvironment: null,
+          embedUsedSchemas: true,
+          autoLoadEform: false,
+          fsFormID: null,
+          packaging: "ENVELOPING"
+        }
       };
     }
 
-    if (object.type === "XadesBpPng" || object.type === "XadesPng") {
+    if (file) {
       return {
-        requestID: session.signatureId || ("ditec-" + Date.now()),
-        filename: plainSourceName(object.objectId, "obrazok", ".png"),
-        content: object.sourcePngBase64,
-        payloadMimeType: "image/png;base64",
+        requestID: newRequestID(),
+        filename: file.filename,
+        content: file.content,
+        payloadMimeType: file.payloadMimeType,
         signatureLevel: level,
         container: options.container || "ASiC_E"
       };
     }
 
     var isXdc = object.type === "XadesBpXml" || object.type === "XadesXml"
-      || object.type === "XadesBp2Xml" || object.type === "Xades2Xml";
+      || object.type === "Xades2Xml";
     if (!isXdc) {
       throw new Error("Typ objektu " + object.type + " zatiaľ nie je podporovaný.");
     }
@@ -222,11 +341,6 @@
       schema = fromBase64(object.xdcUsedXSD);
       transformation = fromBase64(object.xdcUsedXSLT);
       identifier = formIdentifierWithVersion(object.xdcIdentifier, object.xdcVersion);
-    } else if (object.type === "XadesBp2Xml") {
-      xml = object.sourceXml;
-      schema = object.sourceXsd;
-      transformation = object.sourceXsl;
-      identifier = object.namespaceUri;
     } else {
       xml = object.sourceXml;
       schema = object.sourceXsd;
@@ -235,7 +349,7 @@
     }
 
     return {
-      requestID: session.signatureId || ("ditec-" + Date.now()),
+      requestID: newRequestID(),
       filename: xmlSourceName(object.objectId),
       content: toBase64(xml),
       payloadMimeType: "application/xml;base64",
@@ -379,6 +493,7 @@
     ERROR_SIGNING_CANCELLED: 1,
 
     initialize: function (callback) {
+      reset();
       call("status", null).then(function (reply) {
         if (reply && reply.ok) {
           if (callback && callback.onSuccess) callback.onSuccess();
@@ -460,27 +575,16 @@
   }
 
   /**
-   * One document per signature. schranka.slovensko.sk chains an add*Object
-   * call per attachment into one signature, and keeping only the last one
-   * signed a message that covered a single file. A second document before the
-   * signature is refused and the first one dropped, so the portal's next
-   * attempt starts clean.
-   *
-   * Remaining gap: a portal that adds a document and then abandons the flow
-   * without any getter or error leaves it stored, and its next attempt is
-   * refused once. No portal known today does that.
+   * Collects the documents of one signature. schranka.slovensko.sk chains an
+   * add*Object call per document and then signs them together; the getter
+   * decides whether they can be (buildMultiRequest). A finished signature
+   * starts the next document afresh, and so does initialize, which every
+   * portal calls before it adds the first document, so a flow the portal
+   * abandoned is never signed together with the next one.
    */
   function storeObject(object, callback) {
     if (session.signed) reset();
-    if (session.object) {
-      reset();
-      if (callback && callback.onError) {
-        callback.onError(generalError("Chevron7 zatiaľ nepodpisuje viacerých dokumentov naraz. "
-          + "Podpíšte dokumenty jednotlivo, alebo použite aplikáciu D.Signer."));
-      }
-      return;
-    }
-    session.object = object;
+    session.objects.push(object);
     if (callback && callback.onSuccess) callback.onSuccess();
   }
 
@@ -538,17 +642,22 @@
 
   /**
    * schranka and nove call this with a ready-made XML Data Container in base64
-   * (third argument the form identifier, fourth the container). Wrapping it as
-   * form XML put a second container around the first, so it is refused with a
-   * message until the app signs an existing container on the web path.
+   * (third argument the form identifier, fourth the container, as upstream
+   * autogram-extension reads the real dSigXadesBpJs signature). It is signed as
+   * it is, never wrapped into a second container.
    */
   DSigXadesBpAdapter.prototype.addXmlObject2 = function (
     objectId, objectDescription, objectFormatIdentifier, xdcXDCB64, xdcUsedXSD, xdcUsedXSLT, callback
   ) {
-    if (callback && callback.onError) {
-      callback.onError(generalError("Formulár vo formáte XML Data Container Chevron7 zatiaľ nepodpisuje. "
-        + "Podpíšte ho aplikáciou D.Signer."));
-    }
+    storeObject({
+      type: "XadesBp2Xml",
+      objectId: objectId,
+      objectDescription: objectDescription,
+      objectFormatIdentifier: objectFormatIdentifier,
+      xdcXDCB64: xdcXDCB64,
+      xdcUsedXSD: xdcUsedXSD,
+      xdcUsedXSLT: xdcUsedXSLT
+    }, callback);
   };
 
   DSigXadesBpAdapter.prototype.addPdfObject = function (
@@ -595,9 +704,9 @@
 
   DSigXadesBpAdapter.prototype.getConvertedPDFA = function (callback) {
     // Upstream answers with the original object; conversion itself is a no-op.
-    var object = session.object;
+    var object = session.objects[session.objects.length - 1];
     var original = object && (object.sourcePdfBase64 || object.sourcePngBase64
-      || object.xdcXMLData || object.sourceXml || object.sourceTxt);
+      || object.xdcXMLData || object.xdcXDCB64 || object.sourceXml || object.sourceTxt);
     if (original != null) {
       if (callback && callback.onSuccess) callback.onSuccess(original);
     } else if (callback && callback.onError) {

@@ -186,6 +186,19 @@ function xdcDocument(objectId = 'form-object') {
     };
 }
 
+/** eDesk PDF attachment, already PDF/A, so the portal skips the conversion. */
+function pdfDocument(objectId = 'priloha.pdf') {
+    return {
+        IsXml: false,
+        IsContainerContent: true,
+        ObjectId: objectId,
+        Description: 'PDF',
+        Uri: 'http://data.gov.sk/def/document/pdf',
+        Data: b64('%PDF-1.7 priloha'),
+        PdfReqLevel: 0,
+    };
+}
+
 /** eDesk plain XML form, signed through the 15-argument addXmlObject. */
 function plainXmlDocument(objectId = 'plain-xml-object') {
     return {
@@ -236,8 +249,30 @@ async function portalScenarios(name, file) {
         const out = sign(page, asicRequest([xdcDocument()]));
         await settle();
         check(`${name}: XDC form passes the getVersion plugin gate`, !oldSignerShown(page), JSON.stringify(page.shell.errors) + page.thrown.map(String));
-        check(`${name}: XDC form is refused visibly, not signed`, page.requests.length === 0 && out.result === 'not-called'
-            && failedVisibly(page, 'XML Data Container'), JSON.stringify({ errors: page.shell.errors, thrown: page.thrown.map(String) }));
+        const req = page.requests[0] || {};
+        const eform = req.eform || {};
+        check(`${name}: XDC form signs`, out.result === SIGNED && page.requests.length === 1,
+            JSON.stringify({ result: out.result, errors: page.shell.errors, thrown: page.thrown.map(String) }));
+        check(`${name}: XDC form is sent as it is`, req.content === xdcDocument().Data
+            && req.payloadMimeType === `${XDC_MIME};base64` && req.filename === 'form-object.xdcf',
+            JSON.stringify({ filename: req.filename, mime: req.payloadMimeType }));
+        check(`${name}: XDC form identifier is the portal's Uri`, eform.identifier === xdcDocument().Uri, eform.identifier);
+        check(`${name}: XDC form carries the portal's schema and transformation`, eform.schema === '<xs:schema/>'
+            && eform.transformation === '<xsl:stylesheet/>', JSON.stringify(eform));
+    }
+
+    {
+        const page = newPage(file);
+        const out = sign(page, asicRequest([xdcDocument(), pdfDocument()]));
+        await settle();
+        const req = page.requests[0] || {};
+        const attachments = req.attachments || [];
+        check(`${name}: an XDC form with a PDF signs as one container`, out.result === SIGNED && page.requests.length === 1,
+            JSON.stringify({ result: out.result, errors: page.shell.errors, thrown: page.thrown.map(String) }));
+        check(`${name}: the PDF carries the request, the form follows`, req.filename === 'priloha.pdf' && req.container === 'ASiC_E'
+            && attachments.length === 1 && attachments[0].filename === 'form-object.xdcf'
+            && attachments[0].payloadMimeType === `${XDC_MIME};base64`,
+            JSON.stringify({ filename: req.filename, attachments: attachments.map((a) => a.filename) }));
     }
 
     {
@@ -277,8 +312,8 @@ async function portalScenarios(name, file) {
         const page = newPage(file);
         const out = sign(page, asicRequest([plainXmlDocument('doc-1'), plainXmlDocument('doc-2')]));
         await settle();
-        check(`${name}: several documents are refused, none is signed`, out.result === 'not-called' && page.requests.length === 0
-            && failedVisibly(page, 'viacerých dokumentov'), JSON.stringify({ requests: page.requests.length, errors: page.shell.errors, thrown: page.thrown.map(String) }));
+        check(`${name}: several plain XML forms are refused, none is signed`, out.result === 'not-called' && page.requests.length === 0
+            && failedVisibly(page, 'formulár'), JSON.stringify({ requests: page.requests.length, errors: page.shell.errors, thrown: page.thrown.map(String) }));
         const retry = sign(page, asicRequest([plainXmlDocument('doc-1')]));
         await settle();
         check(`${name}: one document signs after the refusal`, retry.result === SIGNED && page.requests.length === 1, String(retry.result));
