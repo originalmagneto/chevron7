@@ -1118,7 +1118,11 @@ struct SigningDoneView: View {
                 GroupBox("Použitý certifikát") {
                     VStack(alignment: .leading, spacing: 5) {
                         detailRow("Názov", identity.label)
-                        detailRow("Vydal", identity.issuerSummary)
+                        let issuer = store.result?.issuerName(fallback: identity)
+                            ?? (identity.describesCertificate ? identity.issuerSummary : "")
+                        if !issuer.isEmpty {
+                            detailRow("Vydal", issuer)
+                        }
                         detailRow("Kvalifikácia", identity.isQualified ? "Kvalifikovaný" : "Nekvalifikovaný")
                         if let validUntil = identity.validUntil {
                             detailRow("Platný do", validUntil.formatted(date: .abbreviated, time: .omitted))

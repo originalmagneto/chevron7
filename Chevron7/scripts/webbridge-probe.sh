@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Marián Čuprík
 # SPDX-License-Identifier: EUPL-1.2
 # Builds webbridge-probe, signs it as "webbridge-probe" and runs it with the
-# given arguments (none for a status check, `--sign <file>` for a signature).
+# given arguments (none for a status check, `--sign <file> [--attach <file>]...`
+# for a signature; a `.xdcf` is sent as a finished XML Data Container).
 #
 # The agent and the app admit the probe only by that identifier, which the
 # linker signature ("webbridge-probe-<hash>") does not carry, so a plain

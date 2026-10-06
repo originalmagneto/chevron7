@@ -42,6 +42,12 @@ public struct SigningIdentityInfo: Identifiable, Hashable, Sendable {
 }
 
 extension SigningIdentityInfo {
+    /// False for the engine's synthetic card identity, which stands for a card whose
+    /// certificates were not read yet: its label and issuer are prompts, not certificate data.
+    public var describesCertificate: Bool {
+        !id.hasPrefix(EngineBridgeSigningProvider.syntheticIdentityIDPrefix)
+    }
+
     /// Which kind of card holds the certificate, for the reader status.
     public var cardKindLabel: String? {
         if usesProtectedAuthenticationPath { return "Občiansky preukaz (eID)" }
@@ -213,11 +219,16 @@ public struct SignedConversionResult: Sendable {
     public var timestampGenTime: Date?
     public var timestampToken: Data?
     public var timestampQualification: TimestampQualification?
+    /// The issuer of the certificate that made the signature, when the provider knows it
+    /// (the engine after reading the card's certificates, the phone from its signers).
+    /// Nil when the engine picked the token's only key without reading it (an eID).
+    public var signerIssuer: String?
 
     public init(pdfData: Data, asicData: Data?, signedAt: Date,
                 signatureLabel: String, isLegallyBinding: Bool,
                 timestampGenTime: Date? = nil, timestampToken: Data? = nil,
-                timestampQualification: TimestampQualification? = nil) {
+                timestampQualification: TimestampQualification? = nil,
+                signerIssuer: String? = nil) {
         self.pdfData = pdfData
         self.asicData = asicData
         self.signedAt = signedAt
@@ -226,6 +237,19 @@ public struct SignedConversionResult: Sendable {
         self.timestampGenTime = timestampGenTime
         self.timestampToken = timestampToken
         self.timestampQualification = timestampQualification
+        self.signerIssuer = signerIssuer
+    }
+
+    /// The issuer to name for this signature: the signed result's own, else the identity's
+    /// when it describes a certificate read from the card, else empty. A synthetic card
+    /// identity carries a prompt in `issuerSummary`, which is never an issuer.
+    public func issuerName(fallback identity: SigningIdentityInfo?) -> String {
+        if let signerIssuer = signerIssuer?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !signerIssuer.isEmpty {
+            return signerIssuer
+        }
+        guard let identity, identity.describesCertificate else { return "" }
+        return identity.issuerSummary
     }
 }
 

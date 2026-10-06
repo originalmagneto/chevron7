@@ -596,6 +596,14 @@ private final class FakeTimestampSourceProvider: TimestampSourceProviding, @unch
 private final class RecordingSigningEngine: SigningEngine, @unchecked Sendable {
     private let lock = NSLock()
     private var _capturedRequest: EngineSigningRequest?
+    private let signingDrivers: [SigningDriver]
+    private let cardCertificates: [SigningCertificate]
+
+    init(drivers: [SigningDriver] = [SigningDriver(id: "eid", displayName: "Fake eID", tokenPresent: true)],
+         certificates: [SigningCertificate] = []) {
+        signingDrivers = drivers
+        cardCertificates = certificates
+    }
 
     var capturedRequest: EngineSigningRequest? {
         lock.lock()
@@ -608,15 +616,15 @@ private final class RecordingSigningEngine: SigningEngine, @unchecked Sendable {
     }
 
     func drivers() async throws -> [SigningDriver] {
-        [SigningDriver(id: "eid", displayName: "Fake eID", tokenPresent: true)]
+        signingDrivers
     }
 
     func certificates(driverID: String, pin: Secret?) async throws -> [SigningCertificate] {
-        []
+        cardCertificates
     }
 
     func certificateDiscovery(driverID: String, pin: Secret?) async throws -> CertificateDiscovery {
-        CertificateDiscovery(token: SigningToken(tokenKey: "fake", providerName: "Fake"), certificates: [])
+        CertificateDiscovery(token: SigningToken(tokenKey: "fake", providerName: "Fake"), certificates: cardCertificates)
     }
 
     func inspect(files: [PDFItemDescriptor]) async throws -> [PDFInspection] {
@@ -1046,5 +1054,49 @@ final class EngineBridgeLiveSignTests: XCTestCase {
         XCTAssertFalse(joined.contains("PROTOCOL_INVALID_REQUEST"), "V2 request musí prejsť validáciou: \(joined)")
         XCTAssertFalse(joined.contains("MachineSessionProcessFailure"), "V2 session nesmie zlyhať na protokole: \(joined)")
         await engine.cancel()
+    }
+}
+
+/// A portal reads `issuedBy` from the signed result: the issuer of the certificate the
+/// engine actually signed with, never the prompt a synthetic card identity carries.
+final class EngineBridgeSignerIssuerTests: XCTestCase {
+    private let mandate = SigningCertificate(serialNumber: "1042",
+                                             displayName: "Marián Čuprík OPRÁVNENIE 1042",
+                                             issuer: "I.CA EU Qualified CA-SK/RSA 10/2022",
+                                             validFrom: .distantPast,
+                                             validUntil: .distantFuture,
+                                             certificateKey: "v1:key-1042",
+                                             holderKey: "holder-1042",
+                                             certificateQualification: "QESIG")
+
+    /// A card selected from the reader poll (synthetic identity) reads its certificates
+    /// while signing, so the result names the signing certificate's issuer.
+    func testCardReadWhileSigningCarriesTheCertificateIssuer() async throws {
+        let engine = RecordingSigningEngine(
+            drivers: [SigningDriver(id: "ica", displayName: "I.CA", tokenPresent: true)],
+            certificates: [mandate])
+        let provider = EngineBridgeSigningProvider(engine: engine)
+
+        let signed = try await provider.sign(SigningRequest(
+            pdfData: TestPDFBuilder.singlePageWhitePDF(), identityID: "engine:ica",
+            includeTimestamp: false, pin: "1234", filename: "zmluva.pdf"))
+
+        XCTAssertEqual(engine.capturedRequest?.certificateSerial, "1042")
+        XCTAssertEqual(signed.signatureLabel, "Marián Čuprík OPRÁVNENIE 1042")
+        XCTAssertEqual(signed.signerIssuer, "I.CA EU Qualified CA-SK/RSA 10/2022")
+    }
+
+    /// An eID signs with the token's only key without reading its certificate, so the
+    /// result knows no issuer and says so instead of inventing one.
+    func testEIDSigningWithoutDiscoveryLeavesTheIssuerUnknown() async throws {
+        let engine = RecordingSigningEngine()
+        let provider = EngineBridgeSigningProvider(engine: engine)
+
+        let signed = try await provider.sign(SigningRequest(
+            pdfData: TestPDFBuilder.singlePageWhitePDF(), identityID: "engine:eid",
+            includeTimestamp: false, filename: "zmluva.pdf"))
+
+        XCTAssertEqual(engine.capturedRequest?.certificateSerial, EngineBridgeSigningProvider.signingKeyOnToken)
+        XCTAssertNil(signed.signerIssuer)
     }
 }

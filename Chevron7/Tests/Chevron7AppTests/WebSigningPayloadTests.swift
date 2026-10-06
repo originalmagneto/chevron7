@@ -58,4 +58,74 @@ final class WebSigningPayloadTests: XCTestCase {
         XCTAssertEqual(WebSigningCoordinator.describeKind(
             request(filename: "dokument.pdf", mime: "application/pdf;base64")), "Dokument PDF")
     }
+    // MARK: ready-made containers and several documents
+
+    private let xdcMime = "application/vnd.gov.sk.xmldatacontainer+xml;base64"
+
+    private func severalDocuments(_ attachments: [WebSignAttachment], main: String = "priloha.pdf") -> WebSignRequest {
+        WebSignRequest(requestID: "r", filename: main, content: Data("%PDF-1.4".utf8).base64EncodedString(),
+                       payloadMimeType: "application/pdf;base64", signatureLevel: "XAdES_BASELINE_B",
+                       container: "ASiC_E", attachments: attachments)
+    }
+
+    private func attachment(_ name: String, _ text: String = "x", mime: String = "text/plain;base64") -> WebSignAttachment {
+        WebSignAttachment(filename: name, content: Data(text.utf8).base64EncodedString(), payloadMimeType: mime)
+    }
+
+    func testReadyMadeContainerIsDescribedAndArchivedAsAContainer() {
+        let xdc = WebSignRequest(requestID: "r", filename: "form.xdcf", content: "",
+                                 payloadMimeType: xdcMime, signatureLevel: "XAdES_BASELINE_B",
+                                 container: "ASiC_E", eform: EFormSigningAttributes(embedUsedSchemas: true))
+        XCTAssertEqual(WebSigningCoordinator.describeKind(xdc), "Hotový formulár (XML Data Container)")
+        XCTAssertEqual(WebSigningCoordinator.archiveExtension(for: xdc), "asice")
+        XCTAssertNil(WebSigningCoordinator.plainFileExtension(for: xdc))
+    }
+
+    func testAttachmentsKeepTheirNamesAndBytesInOrder() throws {
+        let entries = try WebSigningCoordinator.attachmentEntries(
+            for: severalDocuments([attachment("poznamka.txt", "Hello"), attachment("form.xdcf", "<x/>", mime: xdcMime)]))
+        XCTAssertEqual(entries.map(\.path), ["poznamka.txt", "form.xdcf"])
+        XCTAssertEqual(entries.first?.data, Data("Hello".utf8))
+    }
+
+    /// The engine writes every data object into one folder on a case-insensitive
+    /// volume, and the provider skips an attachment named like the PDF, so a
+    /// clash would silently drop a document from the signature.
+    func testAttachmentNamesNeverClashWithThePdfOrEachOther() throws {
+        let entries = try WebSigningCoordinator.attachmentEntries(
+            for: severalDocuments([attachment("Priloha.pdf"), attachment("a.txt"), attachment("A.TXT"),
+                                   attachment("a-2.txt")]))
+        let names = entries.map(\.path)
+        XCTAssertEqual(names, ["Priloha-2.pdf", "a.txt", "A-2.TXT", "a-2-2.txt"])
+        XCTAssertEqual(Set(names.map { $0.lowercased() } + ["priloha.pdf"]).count, names.count + 1)
+    }
+
+    func testAttachmentNamesLoseAnyPathAndOddCharacters() throws {
+        let entries = try WebSigningCoordinator.attachmentEntries(
+            for: severalDocuments([attachment("../../etc/passwd.txt"), attachment("?*:")]))
+        XCTAssertEqual(entries.map(\.path), ["passwd.txt", "priloha"])
+    }
+
+    /// The engine refuses the container's own entry names and compares names in NFC.
+    func testReservedAndDecomposedNamesAreRenamedNotRefused() throws {
+        let entries = try WebSigningCoordinator.attachmentEntries(
+            for: severalDocuments([attachment("mimetype"), attachment("META-INF"),
+                                   attachment("Pr\u{00ED}loha.txt"), attachment("Pri\u{0301}loha.txt")]))
+        XCTAssertEqual(entries.map(\.path), ["mimetype-2", "META-INF-2", "Pr\u{00ED}loha.txt", "Pri\u{0301}loha-2.txt"])
+    }
+
+    func testUnreadableAttachmentIsRefused() {
+        let broken = WebSignAttachment(filename: "a.txt", content: "%%%", payloadMimeType: "text/plain;base64")
+        XCTAssertThrowsError(try WebSigningCoordinator.attachmentEntries(for: severalDocuments([broken])))
+    }
+
+    func testPhoneRefusesWhatTheRelayWasNeverShown() {
+        XCTAssertNil(WebSigningCoordinator.mobileRefusal(
+            for: request(filename: "dokument.pdf", mime: "application/pdf;base64")))
+        XCTAssertNotNil(WebSigningCoordinator.mobileRefusal(
+            for: request(filename: "poznamka.txt", mime: "text/plain;base64")))
+        XCTAssertNotNil(WebSigningCoordinator.mobileRefusal(
+            for: request(filename: "form.xdcf", mime: xdcMime, eform: true)))
+        XCTAssertNotNil(WebSigningCoordinator.mobileRefusal(for: severalDocuments([attachment("a.txt")])))
+    }
 }

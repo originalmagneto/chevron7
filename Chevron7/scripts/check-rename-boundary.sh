@@ -58,7 +58,7 @@ else
 fi
 must_keep "${package_root}/build_app.sh" '<string>org.autogram.asice</string>' 'build_app.sh'
 must_keep "$(source_file SigningFlowViews.swift)" 'UTType(importedAs: "org.autogram.asice"' 'SigningFlowViews.swift'
-must_keep "$(source_file ditec.js)" 'isAutogram: true' 'ditec.js'
+must_keep "$(source_file ditec.js)" 'lock("isAutogram", true)' 'ditec.js'
 must_keep "$(source_file FormPack.swift)" 'autogram-p2e-legacy-swift-1.0' 'FormPack.swift'
 must_keep "$(source_file UserPreferences.swift)" 'digital.slovensko.autogram.timestamp-provider' 'UserPreferences.swift'
 # Autogram macOS, this app before the rename, is another app now: the Finder Quick

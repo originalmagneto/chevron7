@@ -40,11 +40,13 @@ public enum AVMResultMapper {
         case .embeddedPAdES:
             return SignedConversionResult(pdfData: payload, asicData: nil, signedAt: signedAt,
                                           signatureLabel: signatureLabel(signers: signers),
-                                          isLegallyBinding: isQualified(signers: signers))
+                                          isLegallyBinding: isQualified(signers: signers),
+                                          signerIssuer: signers.first?.issuedBy)
         case .attachedASIC:
             return SignedConversionResult(pdfData: uploadedPDF, asicData: payload, signedAt: signedAt,
                                           signatureLabel: signatureLabel(signers: signers),
-                                          isLegallyBinding: isQualified(signers: signers))
+                                          isLegallyBinding: isQualified(signers: signers),
+                                          signerIssuer: signers.first?.issuedBy)
         }
     }
 }
