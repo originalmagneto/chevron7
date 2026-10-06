@@ -37,6 +37,13 @@ struct WebSigningSheet: View {
                 }
             }
         }
+        .sheet(isPresented: Bindable(coordinator.mobileSigning).isEidentitaPresented) {
+            if let session = coordinator.mobileSigning.eidentitaSession {
+                EidentitaSigningSheet(session: session) {
+                    coordinator.mobileSigning.cancelEidentita()
+                }
+            }
+        }
     }
 
     private var controls: some View {
@@ -231,19 +238,32 @@ struct WebSigningSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Podpísať mobilom")
                     .font(.callout.weight(.medium))
-                Text("Občiansky preukaz cez NFC, bez čítačky.")
+                Text(coordinator.eidentitaAvailable
+                     ? "Občiansky preukaz cez NFC, bez čítačky: Autogram v mobile alebo eIDENTITA."
+                     : "Občiansky preukaz cez NFC, bez čítačky.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Použiť mobil") {
-                guard !coordinator.isWorking else { return }
-                Task { await coordinator.confirmViaMobile() }
+            if coordinator.eidentitaAvailable {
+                Menu("Použiť mobil") {
+                    Button("Autogram v mobile") { confirmViaMobile(.autogramMobile) }
+                    Button("eIDENTITA (štátna aplikácia)") { confirmViaMobile(.eidentita) }
+                }
+                .fixedSize()
+                .disabled(coordinator.isWorking)
+            } else {
+                Button("Použiť mobil") { confirmViaMobile(.autogramMobile) }
+                    .disabled(coordinator.isWorking)
             }
-            .disabled(coordinator.isWorking)
         }
         .padding(12)
         .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func confirmViaMobile(_ method: MobileSigningMethod) {
+        guard !coordinator.isWorking else { return }
+        Task { await coordinator.confirmViaMobile(method: method) }
     }
 
     private var identityPicker: some View {

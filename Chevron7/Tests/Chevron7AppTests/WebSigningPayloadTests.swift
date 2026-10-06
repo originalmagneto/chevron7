@@ -128,4 +128,18 @@ final class WebSigningPayloadTests: XCTestCase {
             for: request(filename: "form.xdcf", mime: xdcMime, eform: true)))
         XCTAssertNotNil(WebSigningCoordinator.mobileRefusal(for: severalDocuments([attachment("a.txt")])))
     }
+
+    func testEidentitaSignsPdfsButNoElectronicForms() {
+        // The MV SR integration guide lists XML forms as planned only.
+        XCTAssertNil(WebSigningCoordinator.eidentitaRefusal(
+            for: request(filename: "dokument.pdf", mime: "application/pdf;base64")))
+        XCTAssertNotNil(WebSigningCoordinator.eidentitaRefusal(
+            for: request(filename: "formular.xml", mime: "application/xml;base64", eform: true)))
+        XCTAssertNotNil(WebSigningCoordinator.eidentitaRefusal(
+            for: request(filename: "form.xdcf", mime: xdcMime, eform: true)))
+        // Whatever the phone refuses on any route stays refused.
+        XCTAssertNotNil(WebSigningCoordinator.eidentitaRefusal(
+            for: request(filename: "poznamka.txt", mime: "text/plain;base64")))
+        XCTAssertNotNil(WebSigningCoordinator.eidentitaRefusal(for: severalDocuments([attachment("a.txt")])))
+    }
 }
