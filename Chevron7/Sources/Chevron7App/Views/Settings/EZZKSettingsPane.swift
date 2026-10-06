@@ -49,8 +49,9 @@ struct EZZKSettingsPane: View {
         }
         .onAppear { loginField = controller.storedLogin }
         .onChange(of: controller.mode) { _, _ in
-            loginField = controller.storedLogin
-            passwordField = ""
+            // The login and password fields are reset by the mode picker itself, not here:
+            // EZZKConnection.connect switches the mode to production and back, and that
+            // round trip must not wipe what the person typed.
             lookupResult = nil
             lookupError = nil
             testNumbers = []
@@ -189,6 +190,8 @@ struct EZZKSettingsPane: View {
                 set: { newMode in
                     settingsStore.settings.ezzkMode = newMode
                     controller.setMode(newMode)
+                    loginField = controller.storedLogin
+                    passwordField = ""
                 })) {
                 ForEach(AppSettings.EZZKMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -334,6 +337,10 @@ struct EZZKSettingsPane: View {
             case .connected:
                 passwordField = ""
             case .failed(let message):
+                // connect restored the previous mode; keep what the person typed so one
+                // corrected character is enough.
+                loginField = login
+                passwordField = password
                 connectError = message
             }
         }
