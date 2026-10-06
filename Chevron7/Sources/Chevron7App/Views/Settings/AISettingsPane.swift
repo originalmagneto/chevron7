@@ -108,9 +108,7 @@ struct AISettingsPane: View {
             } header: {
                 Label("Učenie", systemImage: "graduationcap")
             } footer: {
-                Text(modelAvailable
-                     ? "Dataset aj model zostávajú na tomto Macu a nikdy sa neodosielajú."
-                     : "On-device model nie je dostupný. Zapnite Apple Intelligence v Systémových nastaveniach.")
+                Text(learningFooter)
             }
 
             Section {
@@ -151,6 +149,14 @@ struct AISettingsPane: View {
             Button("Vymazať", role: .destructive) { deleteDataset() }
             Button("Zrušiť", role: .cancel) {}
         }
+    }
+
+    /// The privacy sentence always shows; the Apple Intelligence notice is added to it.
+    private var learningFooter: String {
+        let dataset = "Dataset obsahuje náhľady strán dokumentov, na ktorých ste potvrdili alebo odmietli prvky. Zostáva iba na tomto Macu a nikdy sa neodosiela."
+        return modelAvailable
+            ? dataset
+            : dataset + " On-device model nie je dostupný. Zapnite Apple Intelligence v Systémových nastaveniach."
     }
 
     private func title(for mode: AppSettings.AIMode) -> String {
@@ -203,7 +209,9 @@ struct AISettingsPane: View {
                 if showsBadge { AdvancedBadge() }
             }
         } footer: {
-            Text("Kľúč sa ukladá výhradne do Keychainu tohto Macu.")
+            Text(settingsStore.settings.aiMode == .customAPIKey
+                 ? "Obrázky strán dokumentov sa pri detekcii posielajú na tento server (cloud). Kľúč sa ukladá výhradne do Keychainu tohto Macu."
+                 : "Kľúč sa ukladá výhradne do Keychainu tohto Macu.")
         }
     }
 
