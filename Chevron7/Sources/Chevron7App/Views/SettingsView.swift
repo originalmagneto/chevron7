@@ -1613,7 +1613,7 @@ struct MobileSigningCard: View {
 
             Label("eIdentita (štátna aplikácia)", systemImage: "person.badge.key")
                 .font(.callout.weight(.semibold))
-            Text("Podpis cez eIdentitu ide cez portál Autogram: dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Portál nepozná heslá pre integrácie: správcu portálu požiadajte o zapnutie API pre váš účet a o vaše číselné ID používateľa; verejný kľúč odtiaľto potom vložíte do profilu na portáli.")
+            Text("Podpis cez eIdentitu ide cez portál Autogram: dokument sa nahrá do vášho balíka, QR kód z portálu naskenujete mobilom a podpísaný dokument sa stiahne späť. Na portáli otvorte Nastavenia: ak pri poli „Verejný kľúč API tokenu“ stojí, že API prístup nie je zapnutý, požiadajte správcu portálu o jeho zapnutie pre vašu organizáciu. Potom tam vložte verejný kľúč odtiaľto a sem prepíšte číslo z vety „V tokene použite sub = …“.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
@@ -1627,11 +1627,11 @@ struct MobileSigningCard: View {
                         .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
                 }
                 GridRow {
-                    Text("ID používateľa")
+                    Text("ID organizácie")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .frame(width: 140, alignment: .leading)
-                    TextField("číslo z profilu na portáli", text: $settingsStore.settings.agpUserID)
+                    TextField("číslo „sub“ z Nastavení na portáli", text: $settingsStore.settings.agpUserID)
                         .textFieldStyle(.roundedBorder)
                         .disabled(!settingsStore.settings.mobileSigningEnabled || agpBusy)
                 }
@@ -1688,7 +1688,7 @@ struct MobileSigningCard: View {
                 }
             }
             if !agpPublicPEM.isEmpty {
-                Text("Verejný kľúč do profilu na portáli:")
+                Text("Verejný kľúč do poľa „Verejný kľúč API tokenu“ v Nastaveniach portálu:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(agpPublicPEM)
