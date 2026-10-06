@@ -107,7 +107,7 @@ final class Chevron7WebExtensionHandler: NSObject, NSExtensionRequestHandling {
             }
             proxy.sign(request: data) { response, error in
                 if let error {
-                    finish(["ok": false, "error": error])
+                    finish(WebSigningBridge.failureReply(error: error))
                     return
                 }
                 guard let response, let text = String(data: response, encoding: .utf8) else {
@@ -140,7 +140,7 @@ final class Chevron7WebExtensionHandler: NSObject, NSExtensionRequestHandling {
                     return
                 }
                 if let error {
-                    finish(["ok": false, "done": true, "error": error])
+                    finish(WebSigningBridge.failureReply(error: error, done: true))
                     return
                 }
                 guard let response, let text = String(data: response, encoding: .utf8) else {
