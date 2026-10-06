@@ -213,7 +213,7 @@ that case the outcome is known.
 | `Sources/Chevron7Kit/Attestation/Forms/ZakoRecordDeliveryBuilder.swift` | Validates the record and wraps it as `<number>.record.xml.xdcf`. |
 | `Sources/Chevron7App/EZZK/EZZKAccountController.swift` | Account state for Settings and ZaKo, one transport and one client per environment. |
 | `Sources/Chevron7App/EZZK/EZZKStatusChecker.swift` | Sends and checks register rows: periodic pass, manual "Odoslať"/"Overiť v EZZK", per-row serialization, per-row mode. |
-| `Sources/Chevron7App/Views/SettingsView.swift` | The EZZK tab. |
+| `Sources/Chevron7App/Views/Settings/EZZKSettingsPane.swift` | The EZZK pane of Settings (Basic connect, Advanced environment, lookup, numbers, migration); `EZZKConnection.swift` holds the connect flow. |
 | `Sources/Chevron7App/Views/EvidenceDashboardView.swift` | The Register's per-row EZZK actions and status labels. |
 | `Sources/ezzk-probe/main.swift` | The command line probe. |
 
