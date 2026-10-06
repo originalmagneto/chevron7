@@ -138,20 +138,21 @@ extension WebBridgeListener: WebSigningBridgeProtocol {
                 let response = try await decoded.handler(decoded.request)
                 jobs.finish(jobID, response: try JSONEncoder().encode(response), error: nil)
             } catch {
-                jobs.finish(jobID, response: nil, error: error.localizedDescription)
+                jobs.finish(jobID, response: nil, error: error.localizedDescription,
+                            cancelled: WebSigningCoordinator.isCancellation(error))
             }
         }
         reply(jobID, nil)
     }
 
-    func signResult(jobID: String, reply: @escaping (Bool, Data?, String?) -> Void) {
+    func signResult(jobID: String, reply: @escaping (Bool, Data?, String?, Bool) -> Void) {
         switch jobs.take(jobID) {
         case .pending:
-            reply(false, nil, nil)
-        case .finished(let response, let error):
-            reply(true, response, error)
+            reply(false, nil, nil, false)
+        case .finished(let response, let error, let cancelled):
+            reply(true, response, error, cancelled)
         case .unknown:
-            reply(true, nil, "Požiadavka na podpis sa v aplikácii Chevron7 nenašla. Skúste podpísať znova.")
+            reply(true, nil, "Požiadavka na podpis sa v aplikácii Chevron7 nenašla. Skúste podpísať znova.", false)
         }
     }
 

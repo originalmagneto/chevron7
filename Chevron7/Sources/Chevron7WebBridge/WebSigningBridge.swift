@@ -116,8 +116,10 @@ public enum WebSigningBridge {
     func beginSign(request: Data, reply: @escaping (_ jobID: String?, _ error: String?) -> Void)
 
     /// Reports a job started by ``beginSign(request:reply:)``: `done` is false while
-    /// the person is still signing. A finished result is delivered once.
-    func signResult(jobID: String, reply: @escaping (_ done: Bool, _ response: Data?, _ error: String?) -> Void)
+    /// the person is still signing, and `cancelled` is true when the person closed
+    /// the prompt instead of signing. A finished result is delivered once.
+    func signResult(jobID: String,
+                    reply: @escaping (_ done: Bool, _ response: Data?, _ error: String?, _ cancelled: Bool) -> Void)
 }
 
 /// A signing request as it arrives from a state portal, before the app turns it

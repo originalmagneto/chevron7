@@ -21,16 +21,26 @@ final class WebSignJobStoreTests: XCTestCase {
         let id = store.begin()
         store.finish(id, response: Data("ok".utf8), error: nil)
 
-        XCTAssertEqual(store.take(id), .finished(response: Data("ok".utf8), error: nil))
+        XCTAssertEqual(store.take(id), .finished(response: Data("ok".utf8), error: nil, cancelled: false))
         XCTAssertEqual(store.take(id), .unknown)
     }
 
     func testFailedJobCarriesTheError() {
         let store = WebSignJobStore()
         let id = store.begin()
-        store.finish(id, response: nil, error: "Podpisovanie ste zrušili.")
+        store.finish(id, response: nil, error: "Certifikáty z karty sa nepodarilo načítať.")
 
-        XCTAssertEqual(store.take(id), .finished(response: nil, error: "Podpisovanie ste zrušili."))
+        XCTAssertEqual(store.take(id), .finished(response: nil, error: "Certifikáty z karty sa nepodarilo načítať.",
+                                                 cancelled: false))
+    }
+
+    func testCancelledJobIsMarkedAsCancelled() {
+        // The portals close their waiting modal only for a cancellation they recognise.
+        let store = WebSignJobStore()
+        let id = store.begin()
+        store.finish(id, response: nil, error: "Podpisovanie ste zrušili.", cancelled: true)
+
+        XCTAssertEqual(store.take(id), .finished(response: nil, error: "Podpisovanie ste zrušili.", cancelled: true))
     }
 
     func testUnknownJobIsReported() {

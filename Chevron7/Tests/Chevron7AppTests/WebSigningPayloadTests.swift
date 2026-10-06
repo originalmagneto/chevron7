@@ -58,4 +58,11 @@ final class WebSigningPayloadTests: XCTestCase {
         XCTAssertEqual(WebSigningCoordinator.describeKind(
             request(filename: "dokument.pdf", mime: "application/pdf;base64")), "Dokument PDF")
     }
+
+    func testOnlyAClosedPromptCountsAsCancellation() {
+        // The page hears a cancellation as ERROR_CANCELLED and closes its waiting modal.
+        XCTAssertTrue(WebSigningCoordinator.isCancellation(WebSigningCoordinator.Failure.cancelled))
+        XCTAssertFalse(WebSigningCoordinator.isCancellation(WebSigningCoordinator.Failure.busy))
+        XCTAssertFalse(WebSigningCoordinator.isCancellation(CancellationError()))
+    }
 }

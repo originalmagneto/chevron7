@@ -134,13 +134,13 @@ final class Chevron7WebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 finish(["ok": false, "error": "Chýba identifikátor podpisovania."])
                 return
             }
-            proxy.signResult(jobID: jobID) { done, response, error in
+            proxy.signResult(jobID: jobID) { done, response, error, cancelled in
                 guard done else {
                     finish(["ok": true, "done": false])
                     return
                 }
                 if let error {
-                    finish(["ok": false, "done": true, "error": error])
+                    finish(["ok": false, "done": true, "error": error, "cancelled": cancelled])
                     return
                 }
                 guard let response, let text = String(data: response, encoding: .utf8) else {
