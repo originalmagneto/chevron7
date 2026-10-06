@@ -2814,7 +2814,7 @@ Expected: `Build complete!`; every test passes. Any reference to a deleted type 
 
 - [ ] **Step 4: Check for glass on content and em dashes**
 
-Run: `grep -rn -e 'glassCard' -e 'glassEffect' -e '—' Chevron7/Sources/Chevron7App/Views/Settings/`
+Run: `grep -rn -e 'glassCard' -e 'glassEffect' -e $'\xe2\x80\x94' Chevron7/Sources/Chevron7App/Views/Settings/`
 Expected: no output.
 
 - [ ] **Step 5: Commit**
@@ -2845,7 +2845,7 @@ Also in the `AI provider selection in Settings uses provider rows (SettingsView.
 
 - [ ] **Step 2: Verify the two files are identical and free of em dashes**
 
-Run: `cmp CLAUDE.md AGENTS.md && ! grep -n '—' CLAUDE.md`
+Run: `cmp CLAUDE.md AGENTS.md && ! grep -n $'\xe2\x80\x94' CLAUDE.md`
 Expected: no output, exit status 0.
 
 - [ ] **Step 3: Rename boundary**
