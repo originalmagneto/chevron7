@@ -128,3 +128,44 @@ final class ScriptedTransport: EZZKHTTPTransport, @unchecked Sendable {
         return formatter
     }()
 }
+
+/// `EZZKHTTPTransport` double that holds every request until the test releases it, so a
+/// test can act while a sign-in is still `.verifying`. Never a real network request.
+final class GatedTransport: EZZKHTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private let reply: String
+    private var released = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var count = 0
+
+    init(reply: String) {
+        self.reply = reply
+    }
+
+    var requestCount: Int {
+        lock.withLock { count }
+    }
+
+    func release() {
+        let resumed: [CheckedContinuation<Void, Never>] = lock.withLock {
+            released = true
+            defer { waiting = [] }
+            return waiting
+        }
+        resumed.forEach { $0.resume() }
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow: Bool = lock.withLock {
+                count += 1
+                if released { return true }
+                waiting.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+        return (Data(reply.utf8),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: [:])!)
+    }
+}

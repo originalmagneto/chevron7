@@ -12,6 +12,8 @@ struct EZZKSettingsPane: View {
     @State private var connectError: String?
     @State private var isConnecting = false
     @State private var showConnectConfirmation = false
+    /// The Advanced picker asked for the live register; applied only on "Pripojiť".
+    @State private var pendingProductionFromPicker = false
     @State private var lookupNumber = ""
     @State private var lookupResult: EZZKRecordLookup?
     @State private var lookupError: String?
@@ -59,8 +61,15 @@ struct EZZKSettingsPane: View {
         }
         .confirmationDialog("Pripojiť k ostrej evidencii EZZK?", isPresented: $showConnectConfirmation,
                             titleVisibility: .visible) {
-            Button("Pripojiť") { connect() }
-            Button("Zrušiť", role: .cancel) {}
+            Button("Pripojiť") {
+                if pendingProductionFromPicker {
+                    pendingProductionFromPicker = false
+                    applyMode(.production)
+                } else {
+                    connect()
+                }
+            }
+            Button("Zrušiť", role: .cancel) { pendingProductionFromPicker = false }
         } message: {
             Text("Od tejto chvíle sa evidenčné čísla aj záznamy o konverzii zapisujú do centrálnej evidencie s právnymi účinkami.")
         }
@@ -86,9 +95,11 @@ struct EZZKSettingsPane: View {
             } else {
                 TextField("Prihlasovacie meno", text: $loginField, prompt: Text("z registračného e-mailu EZZK"))
                     .textContentType(.username)
+                    .disabled(isConnecting)
                 SecureField("Heslo", text: $passwordField,
                             prompt: Text(controller.hasStoredCredentials ? "uložené v Keychaine" : "heslo do EZZK"))
                     .textContentType(.password)
+                    .disabled(isConnecting)
             }
             TextField("Názov osoby", text: $settingsStore.settings.ezzkPersonName, prompt: Text("presne ako v doložke"))
             TextField("IČO", text: $settingsStore.settings.ezzkICO, prompt: Text("IČO osoby"))
@@ -139,6 +150,7 @@ struct EZZKSettingsPane: View {
             } else {
                 Button {
                     connectError = nil
+                    pendingProductionFromPicker = false
                     showConnectConfirmation = true
                 } label: {
                     if isConnecting {
@@ -148,7 +160,8 @@ struct EZZKSettingsPane: View {
                     }
                 }
                 .buttonStyle(.glassProminent)
-                .disabled(isConnecting || loginField.isEmpty || passwordField.isEmpty)
+                .disabled(isConnecting || controller.state == .verifying
+                          || loginField.isEmpty || passwordField.isEmpty)
             }
         }
     }
@@ -188,10 +201,14 @@ struct EZZKSettingsPane: View {
             Picker("Prostredie", selection: Binding(
                 get: { controller.mode },
                 set: { newMode in
-                    settingsStore.settings.ezzkMode = newMode
-                    controller.setMode(newMode)
-                    loginField = controller.storedLogin
-                    passwordField = ""
+                    connectError = nil
+                    if EZZKConnection.pickerNeedsConfirmation(from: controller.mode, to: newMode) {
+                        // The getter keeps showing the current mode until "Pripojiť".
+                        pendingProductionFromPicker = true
+                        showConnectConfirmation = true
+                    } else {
+                        applyMode(newMode)
+                    }
                 })) {
                 ForEach(AppSettings.EZZKMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
@@ -325,6 +342,15 @@ struct EZZKSettingsPane: View {
 
     // MARK: - Actions
 
+    /// With stored production credentials the pane is connected at once; without them it
+    /// shows the not-connected form, whose "Pripojiť k EZZK" signs in.
+    private func applyMode(_ newMode: AppSettings.EZZKMode) {
+        settingsStore.settings.ezzkMode = newMode
+        controller.setMode(newMode)
+        loginField = controller.storedLogin
+        passwordField = ""
+    }
+
     private func connect() {
         let login = loginField
         let password = passwordField
@@ -347,6 +373,7 @@ struct EZZKSettingsPane: View {
     }
 
     private func signInInCurrentMode() {
+        connectError = nil
         let login = loginField
         let password = passwordField
         Task {
