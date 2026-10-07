@@ -12,9 +12,12 @@ const NATIVE_APP = "app.slovensko.chevron7.WebExtension";
 
 // A status request starts Chevron7 when it is not running. macOS then registers
 // the app again, and the extension manager ends this extension's native handler in
-// the middle of the request (SFErrorDomain error 3). The status request changes
-// nothing, so it is sent again once the app is up. Signing requests are never
-// repeated: one that reached the app must not raise a second prompt.
+// the middle of the request (SFErrorDomain error 3). After an update the starting
+// app also ends the agent left from the old copy, and the request that agent was
+// serving comes back as "not available" (ok: false). The status request changes
+// nothing, so it is sent again in all of these cases once the app is up. Signing
+// requests are never repeated: one that reached the app must not raise a second
+// prompt.
 const STATUS_ATTEMPTS = 4;
 const STATUS_RETRY_DELAY_MS = 1500;
 
@@ -24,22 +27,25 @@ function delay(ms) {
 
 async function callNative(message) {
   const attempts = message?.kind === "status" ? STATUS_ATTEMPTS : 1;
-  let lastError;
+  let lastFailure;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const reply = await browser.runtime.sendNativeMessage(NATIVE_APP, message);
       if (!reply) {
-        return { ok: false, error: "Chevron7 neodpovedal." };
+        lastFailure = { ok: false, error: "Chevron7 neodpovedal." };
+      } else if (reply.ok === false && attempts > 1) {
+        lastFailure = reply;
+      } else {
+        return reply;
       }
-      return reply;
     } catch (error) {
-      lastError = error;
-      if (attempt < attempts) {
-        await delay(STATUS_RETRY_DELAY_MS);
-      }
+      lastFailure = { ok: false, error: `Natívna správa zlyhala: ${error?.message ?? error}` };
+    }
+    if (attempt < attempts) {
+      await delay(STATUS_RETRY_DELAY_MS);
     }
   }
-  return { ok: false, error: `Natívna správa zlyhala: ${lastError?.message ?? lastError}` };
+  return lastFailure;
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
