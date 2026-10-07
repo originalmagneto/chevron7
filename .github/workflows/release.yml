@@ -162,17 +162,18 @@ jobs:
           fi
           Chevron7/scripts/generate-appcast.sh "$VERSION" "$RUNNER_TEMP/dist"
 
-      # The same DMG under a fixed name, so that
+      # One DMG under a fixed name, so that
       # https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg
-      # always downloads the newest release (the website links to it).
-      - name: Add the latest-download copy
+      # always downloads the newest release (the website links to it) and the
+      # appcast points at the same file of this release. GitHub shows each
+      # asset's SHA-256 itself, so no checksum file is published.
+      - name: Name the DMG for publishing
         if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd "$RUNNER_TEMP/dist"
-          cp "Chevron7-v$VERSION.dmg" Chevron7.dmg
-          shasum -a 256 "Chevron7-v$VERSION.dmg" Chevron7.dmg > SHA256SUMS.txt
+          mv "Chevron7-v$VERSION.dmg" Chevron7.dmg
 
       - name: Publish the release
         if: steps.version.outputs.version != ''
@@ -187,9 +188,7 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Chevron7 v$VERSION" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            "$RUNNER_TEMP/dist/Chevron7-v$VERSION.dmg" \
             "$RUNNER_TEMP/dist/Chevron7.dmg" \
-            "$RUNNER_TEMP/dist/SHA256SUMS.txt" \
             "${appcast[@]}"
 
       - name: Remove the signing material
