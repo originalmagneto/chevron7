@@ -4,7 +4,10 @@
 import Foundation
 
 public enum MacOS27Layout {
+    /// The main window's floor: the window never gets smaller, and grows beyond it when
+    /// the visible columns (sidebar, content, inspector) need more (`MinimumSizeFloor`).
     public static let rootMinimumWidth: CGFloat = 760
+    public static let rootMinimumHeight: CGFloat = 640
     public static let canvasMinimumWidth: CGFloat = 460
     public static let inspectorMinimumWidth: CGFloat = 0
     public static let inspectorIdealWidth: CGFloat = 350
