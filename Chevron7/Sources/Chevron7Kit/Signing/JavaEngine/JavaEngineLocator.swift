@@ -19,10 +19,6 @@ public struct JavaEngineInstallation: Sendable, Equatable {
             .appendingPathComponent("AutogramCLI-arm64")
         self.helperURL = helperURL ?? fallbackHelper
     }
-
-    var launchArguments: [String] {
-        ["-jar", jarFileURL.path, "--cli", "--machine-readable", "--protocol-version", "2"]
-    }
 }
 
 public struct JavaEngineLocator: Sendable {
