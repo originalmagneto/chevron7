@@ -511,6 +511,11 @@ struct SigningPrepareView: View {
 
     private var previewColumn: some View {
         VStack(spacing: 10) {
+            if let banner = SignatureBannerModel.make(from: store.existingSignatureState) {
+                SignatureBanner(model: banner,
+                                onRevalidate: { Task { await store.revalidateExistingSignatures() } },
+                                revalidateDisabled: store.isSigning)
+            }
             ZStack(alignment: .topLeading) {
                 if let document = store.document {
                     if usesBridgeComposition {
@@ -563,26 +568,6 @@ struct SigningPrepareView: View {
                     .foregroundStyle(.green)
             }
         }
-    }
-
-    private var existingSignaturesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SignatureTreeView(
-                state: store.existingSignatureState,
-                emptyText: "Dokument zatiaľ neobsahuje elektronický podpis. Podpísanie pridá prvý KEP podpis.",
-                isBusy: store.isSigning,
-                onRevalidate: { Task { await store.revalidateExistingSignatures() } })
-            if !store.existingSignatures.isEmpty {
-                Text("Pridá sa ďalší podpis k existujúcim podpisom v dokumente.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var signatureSectionTitle: String {
-        let total = SignatureTreeSummary(tree: store.existingSignatureState.tree).total
-        return "Podpisy v dokumente" + (total == 0 ? "" : " · \(total)")
     }
 
     /// How the chosen format treats the signatures the document already has.
@@ -843,16 +828,6 @@ struct SigningPrepareView: View {
             }
             .inspectorCard(cornerRadius: 12, padding: 12)
 
-            // Section 4: Existujúce podpisy
-            VStack(alignment: .leading, spacing: 8) {
-                Label(signatureSectionTitle, systemImage: "signature")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                existingSignaturesSection
-            }
-            .inspectorCard(cornerRadius: 12, padding: 12)
-
             if let error = store.lastError {
                 Text(error)
                     .font(.footnote)
@@ -909,74 +884,6 @@ struct SigningPrepareView: View {
                   : store.preservesSourceBytes && store.includeVisibleSignature
                   ? "Mobilom sa do podpísaného PDF pečiatka vložiť nedá. Vypnite pečiatku alebo podpíšte kartou."
                   : "Podpis občianskym preukazom s NFC cez iPhone: Autogram v mobile alebo štátna aplikácia eIdentita")
-        }
-    }
-}
-
-struct SignatureInfoRow: View {
-    let info: DocumentSignatureInfo
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(info.signerDisplayName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(2)
-                HStack(spacing: 6) {
-                    if let format = info.format {
-                        Text(format).font(.caption2.monospaced())
-                    }
-                    if let qualification = SignatureTreePresentation.qualificationLabel(info.certificateQualification) {
-                        Text(qualification).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    }
-                    if info.hasQualifiedTimestamp {
-                        Text("QTS").font(.caption2.weight(.semibold)).foregroundStyle(.green)
-                    } else if info.hasTimestamp {
-                        Text("Časová pečiatka").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Text(stateLabel).font(.caption2).foregroundStyle(tint)
-                }
-                if let signingTime = info.signingTime {
-                    Text(signingTime.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if !info.coveredDocuments.isEmpty {
-                    Text("Pokrýva: " + info.coveredDocuments.joined(separator: ", "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                }
-                if let detail = info.detail, !detail.isEmpty {
-                    DisclosureGroup("Detail validácie") {
-                        Text(detail)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.caption2)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var icon: String { SignatureTreePresentation.icon(info.state) }
-
-    private var tint: Color { SignatureTreePresentation.tint(info.state) }
-
-    private var stateLabel: String {
-        switch info.state {
-        case .valid: "Platný"
-        case .invalid: "Neplatný"
-        // DSS INDETERMINATE: the check could not conclude, typically because fresh
-        // revocation data for a signature made moments ago is not published yet.
-        case .indeterminate: "Neurčitý"
-        case .unknown: "Neoverené"
         }
     }
 }
@@ -1053,6 +960,17 @@ struct SigningDoneView: View {
 
     private var previewColumn: some View {
         VStack(spacing: 10) {
+            if let banner = SignatureBannerModel.make(
+                from: store.resultSignatureState,
+                // Only a source inspected in this session tells which signature is new;
+                // a queue item signed earlier marks none.
+                newSignatureIDs: store.existingSignatureState.phase == .idle ? [] :
+                    SignatureBannerModel.newSignatureIDs(existing: store.existingSignatureState.tree,
+                                                         result: store.resultSignatureState.tree)) {
+                SignatureBanner(model: banner,
+                                onRevalidate: { Task { await store.revalidateResultSignatures() } },
+                                revalidateDisabled: store.isSigning)
+            }
             ZStack {
                 if let document = store.signedPreviewDocument {
                     PDFKitPreview(document: document)
@@ -1110,14 +1028,6 @@ struct SigningDoneView: View {
                 .padding(4)
             }
 
-            GroupBox("Overenie podpisov v súbore") {
-                SignatureTreeView(
-                    state: store.resultSignatureState,
-                    emptyText: "Podpísaný súbor je pripravený.",
-                    isBusy: store.isSigning,
-                    onRevalidate: { Task { await store.revalidateResultSignatures() } })
-                    .padding(4)
-            }
             if let identity = store.identities.first(where: { $0.id == store.selectedIdentityID }) {
                 GroupBox("Použitý certifikát") {
                     VStack(alignment: .leading, spacing: 5) {
