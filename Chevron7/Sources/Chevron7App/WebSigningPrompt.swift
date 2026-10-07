@@ -19,6 +19,16 @@ private final class WebSigningPanelDelegate: NSObject, NSWindowDelegate {
 
 }
 
+/// What the coordinator needs from the signing panel; tests pass one that shows nothing.
+@MainActor
+protocol WebSigningPromptPresenting: AnyObject {
+    func show(coordinator: WebSigningCoordinator)
+    func focus()
+    func beginMiddlewareInput()
+    func endMiddlewareInput()
+    func hide()
+}
+
 /// Shows the browser signing prompt in a floating panel instead of a sheet.
 ///
 /// A sheet lives on the app's own window, and since macOS Sonoma an app in the
@@ -32,7 +42,7 @@ private final class WebSigningPanelDelegate: NSObject, NSWindowDelegate {
 /// centered over Safari's front window (`WebSigningPanelPlacement`), so it
 /// covers the portal's own waiting modal instead of sitting beside it.
 @MainActor
-final class WebSigningPrompt {
+final class WebSigningPrompt: WebSigningPromptPresenting {
     private var panel: NSPanel?
     private var delegate: WebSigningPanelDelegate?
     private var middlewareInputDepth = 0

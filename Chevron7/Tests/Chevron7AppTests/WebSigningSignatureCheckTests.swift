@@ -74,4 +74,21 @@ final class WebSigningSignatureCheckTests: XCTestCase {
         XCTAssertEqual(files(in: root), [])
         XCTAssertEqual(provider.validateCalls, 0)
     }
+    /// A crash or a quit while the panel was open leaves the portal's copy behind; it may
+    /// hold personal data, so the next launch removes it and nothing else.
+    func testStaleCopiesAreRemovedAndOtherFoldersKept() throws {
+        let root = root()
+        let stale = root.appendingPathComponent("chevron7-web-signatures-\(UUID().uuidString)")
+        let other = root.appendingPathComponent("chevron7-something-else")
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try Self.signedPDF.write(to: stale.appendingPathComponent("zmluva.pdf"))
+        try Self.signedPDF.write(to: root.appendingPathComponent("chevron7-web-signatures-file.pdf"))
+
+        WebSigningSignatureCheck.removeStaleCopies(in: root)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("chevron7-web-signatures-file.pdf").path))
+    }
 }

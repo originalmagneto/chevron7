@@ -1,0 +1,1 @@
+- **Dokumenty zo stránok nezostávajú v dočasnom priečinku.** Na kontrolu podpisov si Chevron7 dočasne odkladá kópiu podpísaného dokumentu, ktorý poslala stránka, a po skončení podpisu ju zmaže. Ak sa aplikácia ukončila alebo spadla počas otvoreného okna podpisu, takáto kópia mohla zostať na Macu. Pri ďalšom spustení ju Chevron7 teraz odstráni.

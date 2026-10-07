@@ -107,6 +107,30 @@ final class InputSignatureVerificationTests: XCTestCase {
         XCTAssertEqual(result.state, .unavailable)
     }
 
+    /// Without the engine (Demo, no bundled helper) an ordinary PDF with object streams
+    /// showed an orange "could not check" banner. Its own bytes say it carries no
+    /// signature (every signature's /ByteRange sits outside object streams), so its tree
+    /// is empty and no banner shows.
+    func testDefaultTreeOfAnUnsignedObjectStreamPDFIsEmpty() async throws {
+        let pdf = "%PDF-1.7\n1 0 obj\n<< /Type /ObjStm /N 1 /First 0 >>\nstream\ncompressed\nendstream\nendobj\n%%EOF\n"
+        let inputURL = try temporaryInputFile(contents: Data(pdf.utf8))
+
+        let result = await DefaultInspectionProvider().inspectSignatureTree(in: inputURL)
+
+        XCTAssertEqual(result, .tree(SignatureTree()))
+    }
+
+    /// A signed PDF the structural pass cannot read still says so.
+    func testDefaultTreeOfASignedObjectStreamPDFStillFails() async throws {
+        let pdf = "%PDF-1.7\n1 0 obj\n<< /Type /ObjStm /N 1 /First 0 >>\nstream\ncompressed\nendstream\nendobj\n"
+            + "2 0 obj\n<< /Type /Sig /ByteRange [0 10 20 30] >>\nendobj\n%%EOF\n"
+        let inputURL = try temporaryInputFile(contents: Data(pdf.utf8))
+
+        let result = await DefaultInspectionProvider().inspectSignatureTree(in: inputURL)
+
+        guard case .failed = result else { return XCTFail("expected a failure, got \(result)") }
+    }
+
 
     func testMissingInputReturnsUnavailableWithoutCallingProvider() async {
         let provider = CountingInspectionProvider()

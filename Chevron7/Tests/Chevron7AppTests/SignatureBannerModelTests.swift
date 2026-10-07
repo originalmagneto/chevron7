@@ -216,4 +216,23 @@ final class SignatureBannerModelTests: XCTestCase {
             SignedDataObject(name: "dolozka.xml.xdcf", content: .plain)])))
         XCTAssertEqual(several.rows[0].detail, "pokrýva zmluva.pdf")
     }
+    /// Slovak counts the others as "1 ďalší", "2 až 4 ďalší" and from five "ďalších".
+    func testNamesSummaryUsesTheGenitiveFromFiveOthers() {
+        func names(_ count: Int) -> String {
+            SignatureBannerModel.namesSummary((1...count).map { sig("\($0)", "P\($0)") })
+        }
+        XCTAssertEqual(names(3), "P1, P2 a 1 ďalší")
+        XCTAssertEqual(names(6), "P1, P2 a 4 ďalší")
+        XCTAssertEqual(names(7), "P1, P2 a 5 ďalších")
+        XCTAssertEqual(names(12), "P1, P2 a 10 ďalších")
+    }
+
+    /// A container whose only finds are files the engine could not open has no signature
+    /// to count: "Overujem 0 podpisov" read as if there were none at all.
+    func testStructuralTreeWithoutSignaturesNamesTheFiles() throws {
+        let model = try XCTUnwrap(SignatureBannerModel.make(from: state([], .structural, documents: [
+            SignedDataObject(name: "velky.asice", content: .skipped(.tooLarge))])))
+        XCTAssertEqual(model.tone, .checking)
+        XCTAssertEqual(model.headline, "Overujem súbory v kontajneri voči dôveryhodným zoznamom…")
+    }
 }

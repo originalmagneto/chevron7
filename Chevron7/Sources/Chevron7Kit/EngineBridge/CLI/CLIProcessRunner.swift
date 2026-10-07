@@ -45,6 +45,11 @@ actor CLIProcessRunner {
     }
 
     private var activeRun: ActiveRun?
+    /// Runs asked for but not started yet, and those of them whose consumer gave up.
+    private var pendingRunIDs: Set<UUID> = []
+    private var cancelledRunIDs: Set<UUID> = []
+    /// Runs waiting for the helper of the run before them to end.
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     func run(
         request: MachineRequest,
@@ -57,10 +62,17 @@ actor CLIProcessRunner {
         request: SecureMachineRequest,
         configuration: ProcessConfiguration
     ) -> AsyncThrowingStream<MachineEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let id = UUID()
+        let id = UUID()
+        pendingRunIDs.insert(id)
+        return AsyncThrowingStream { continuation in
+            // A consumer that is cancelled ends exactly its own run. Stopping whatever runs
+            // when the cancellation arrives could hit the next request instead.
+            continuation.onTermination = { termination in
+                guard case .cancelled = termination else { return }
+                Task { await self.cancel(runID: id) }
+            }
             Task {
-                self.start(
+                await self.start(
                     id: id,
                     request: request,
                     configuration: configuration,
@@ -75,14 +87,36 @@ actor CLIProcessRunner {
         stop(runID: activeRun.id, failure: .cancelled)
     }
 
+    private func cancel(runID: UUID) {
+        if activeRun?.id == runID {
+            stop(runID: runID, failure: .cancelled)
+        } else if pendingRunIDs.contains(runID) {
+            cancelledRunIDs.insert(runID)
+            wakeIdleWaiters()
+        }
+    }
+
+    private func wakeIdleWaiters() {
+        let waiters = idleWaiters
+        idleWaiters = []
+        waiters.forEach { $0.resume() }
+    }
+
+    /// A run starts only once the helper before it has ended: a consumer that gave up
+    /// returns at once, while its helper still takes a moment to stop.
     private func start(
         id: UUID,
         request: SecureMachineRequest,
         configuration: ProcessConfiguration,
         continuation: AsyncThrowingStream<MachineEvent, Error>.Continuation
-    ) {
-        guard activeRun == nil else {
-            continuation.finish(throwing: CLIProcessFailure.launchFailed)
+    ) async {
+        while activeRun != nil, !cancelledRunIDs.contains(id) {
+            await withCheckedContinuation { idleWaiters.append($0) }
+        }
+        pendingRunIDs.remove(id)
+        if cancelledRunIDs.remove(id) != nil {
+            request.discardSecrets()
+            continuation.finish(throwing: CLIProcessFailure.cancelled)
             return
         }
 
@@ -292,6 +326,7 @@ actor CLIProcessRunner {
         } else {
             activeRun.continuation.finish()
         }
+        wakeIdleWaiters()
     }
 
     private static func sanitizedDiagnostic(from stderr: Data) -> String? {
