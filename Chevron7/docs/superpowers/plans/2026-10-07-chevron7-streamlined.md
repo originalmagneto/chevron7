@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT for further elaboration with the owner. Do not execute any task until the owner explicitly approves the plan. Nothing is implemented. Written 2026-10-07 on branch `chevron7-streamlined` (from `main` at `e1220374`) so the discussion can continue in a fresh session on another Mac. Open points to settle first: whether to drop the veraPDF stack (Task 3 Step 2), whether to relax the Zulu FX JDK requirement (Task 2 Step 2), and how far to go beyond the engine (other size or simplification ideas).
+**Status:** Approved 2026-10-07 with a narrower scope: remove only what is strictly redundant (the engine's JavaFX GUI and HTTP API parts). Not done, on the owner's caution: Task 3 Step 2 (veraPDF stays), dropping `commons-codec`, `jul-to-slf4j` and `java.compiler` (kept). The JDK requirement stays Zulu FX. Tasks 1, 2, 3 Step 1 (JavaFX and HttpClient 4 jars only), 4, 5 and 7 are done on this branch; Task 6 card-free runs passed (`Chevron7/docs/research/2026-10-07-bundle-size-audit/verification.md`); Task 6 Step 4 (real card) waits for the owner.
 
 **Goal:** Shrink the shipped app from 285 MB installed (183 MB DMG, v1.3.3) to about 125 MB installed (about 110 MB DMG) by removing the JavaFX desktop UI stack and other engine parts Chevron7 never runs, without changing any signing behaviour.
 
