@@ -16,6 +16,10 @@ struct WebSigningSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             header
 
+            if let banner = coordinator.signatureCheck.bannerModel {
+                SignatureBanner(model: banner)
+            }
+
             HStack(alignment: .top, spacing: 24) {
                 if let pending = coordinator.pending, let document = pending.pdfDocument {
                     WebSigningDocumentPreview(document: document, filename: pending.request.filename)

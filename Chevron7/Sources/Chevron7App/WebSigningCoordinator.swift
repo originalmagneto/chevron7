@@ -68,6 +68,8 @@ final class WebSigningCoordinator {
     }
 
     private(set) var pending: Pending?
+    /// Existing signatures of the document in the panel, for its banner.
+    let signatureCheck = WebSigningSignatureCheck()
     var pin: String = ""
     var selectedIdentityID: String?
     var identities: [SigningIdentityInfo] = []
@@ -294,6 +296,8 @@ final class WebSigningCoordinator {
         eidentitaConfigured = readEidentitaConfiguration()
         prompt.show(coordinator: self)
         startCardWatch()
+        // Synchronous, so `finish` always finds what it has to stop.
+        signatureCheck.start(fileName: request.filename, data: bytes, provider: provider)
 
         return try await withCheckedThrowingContinuation { continuation in
             if session.open(continuation) == nil {
@@ -578,6 +582,7 @@ final class WebSigningCoordinator {
         cardWatch = nil
         cardPresent = false
         pending = nil
+        signatureCheck.stop()
         pin = ""
         prompt.hide()
         session.close(token, with: result)
