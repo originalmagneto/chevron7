@@ -14,7 +14,7 @@ Delegated, with a binding ambition from the owner: the site must be beautiful, d
 
 Choice: Astro (static output) for SK and EN routes, zero JavaScript by default and interactive islands only where motion or interaction earns it; native View Transitions and CSS scroll-driven animations first, a motion or WebGL library only where CSS cannot do the job. Reason: two languages, content pages (features, download, changelog, credits) and static hosting behind a subdomain, without giving up rich motion.
 
-Hosting: undecided. Output is static, so any host that can serve `chevron7.slovensko.app` works.
+Hosting: Cloudflare, deployed from the private repository `originalmagneto/chevron7-website` on every push to its `main`.
 
 ## Users
 
@@ -46,15 +46,19 @@ The site succeeds when a Mac user who needs to sign understands in seconds that 
 
 ## Capabilities and Constraints
 
-Shipped (per README, release v0.13.0 of 2026-09-24):
+Shipped (release v1.4.3 of 2026-10-07):
 
 - Signing: KEP, PAdES, ASiC-E, qualified timestamp, visible signature, batch signing with one full DSS validation, safe cancel.
-- Mobile signing through the Autogram v mobile app and the relay run by Slovensko.Digital; the server decrypts the document only in memory at signing and deletes it within 24 hours.
-- Safari extension for state portals: the portal decides the format; confirmation required for every request, with a card or with a phone.
+- Mobile signing through the Autogram v mobile app and the relay run by Slovensko.Digital; the server decrypts the document only in memory at signing and deletes it within 24 hours. A second mobile method, eIDENTITA through the Autogram Portal, needs a one-time setup on the portal (organization with API access enabled, public key, organization id); the document then stays in the person's portal history.
+- Opening signed documents: a PDF or .asice opened from Finder (double click, Open With, drag to the Dock) shows its signature tree with informative validation against the EU trusted lists; Chevron7 appears in Open With for .asice even where another app owns the type.
+- Missing card driver hint: a card in the reader without its vendor driver is named and linked to the vendor's download page.
+- Safari extension for state portals: the portal decides the format; confirmation required for every request, with a card or with a phone (Autogram v mobile, or eIDENTITA for PDFs when set up). A finished portal form and several documents in one signature (one .asice) sign with a card. Signing from Safari keeps working after an automatic update.
 - Guaranteed conversion (ZaKo): 16 kinds of security elements, three-layer on-device detection (candidates, feature-print kNN plus on-device Foundation Model, human review), learning from confirmed and rejected findings, Create ML export, PDF/A-2b, clause, mandate certificate, EZZK evidence numbers.
 - EZZK: production and test environments work with the advocate's own EZZK account: the evidence number is allocated at authorization, the signed conversion record is sent to CEZZK and its processing state shows in the register. A guaranteed conversion needs a card with a mandate certificate.
 - Register: local records, status filter, search, CSV export.
-- Zero Swift package dependencies; signing engine bundled with its own Java runtime.
+- Settings: a System Settings style sidebar with seven panes, Basic and Advanced; one-step "Pripojiť k EZZK"; EZZK modes named Skúšobný režim (lokálne), Testovacia evidencia, Ostrá evidencia.
+- Updates itself (Sparkle); the download is about half the size of earlier releases.
+- One Swift package dependency (Sparkle, for updates); signing engine bundled with its own Java runtime.
 
 Requirements: macOS 27 or later, Apple Silicon (the bundled engine runtime is arm64).
 
@@ -63,8 +67,6 @@ Terminology: KEP (kvalifikovany elektronicky podpis), eIDAS, eID, BOK, ZaKo (zar
 Undecided or not yet true, and must not be claimed:
 
 - Support for other national eID cards (CZ, HU, PL, SI and others) is the stated direction, not shipped. Czechia is researched and planned (`Chevron7/docs/research/2026-10-02-czech-signing.md`, plan in `Chevron7/docs/superpowers/plans/2026-10-02-czech-signing.md`); claim it only once it ships. Czech guaranteed conversion (autorizovaná konverze) cannot be offered: it runs only inside Czech POINT.
-- GitHub repository is being renamed to `originalmagneto/chevron7`; release titles still read "Autogram macOS".
-- Hosting provider for the site.
 
 ## Brand Commitments
 
@@ -85,8 +87,7 @@ Undecided or not yet true, and must not be claimed:
 
 ## Evidence on Hand
 
-- Product documentation: `README.md`, `docs/releases/v0.4.0.md`, diagrams in `docs/diagrams/` (architecture, AI vision, mobile signing, PDF/A pipeline, ZaKo process).
-- GitHub releases v0.3.0, v0.3.1, v0.4.0.
+- Product documentation: `README.md`, the Slovak manual `docs/PRIRUCKA.md`, release notes in GitHub Releases and `docs/releases/`, diagrams in `docs/diagrams/` (architecture, AI vision, mobile signing, PDF/A pipeline, ZaKo process).
 - `design_assets/*.jpg` are early concept renders, not screenshots of the shipped app; do not present them as the product.
 - No real app screenshots prepared for the site yet. Agreed: they are captured from the running app in DEMO mode (signing, Safari signing panel, ZaKo review) and the site's live demonstrations are built from them. DEMO signatures are not legally binding and must be labeled as such wherever they appear.
 - No testimonials, user counts, press, partner logos, benchmarks or certifications exist. Do not invent any.
