@@ -271,7 +271,7 @@ final class SignatureTreeStoreTests: XCTestCase {
 /// Validation waits until the test releases it, so phases can be observed in order.
 /// Two validations may run on different threads at once, so all state sits behind a lock
 /// and the gate check and the continuation hand-off happen atomically.
-private final class TreeProvider: QualifiedSigningProviding, @unchecked Sendable {
+final class TreeProvider: QualifiedSigningProviding, @unchecked Sendable {
     private let lock = NSLock()
     private var _inspectResult: SignatureTreeResult
     private var _validateResult: SignatureTreeResult
