@@ -1,7 +1,7 @@
 # Signature banner: existing signatures at a glance
 
 Date: 2026-10-07
-Status: approved in conversation (owner, 2026-10-07), awaiting spec review
+Status: implemented on branch claude/signature-banner (2026-10-07)
 Branch: `claude/signature-banner`
 
 ## Problem
