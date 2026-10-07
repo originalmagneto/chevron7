@@ -193,7 +193,38 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
             <key>LSItemContentTypes</key>
             <array>
                 <string>com.adobe.pdf</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>ASiC-E Container</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
                 <string>org.autogram.asice</string>
+            </array>
+        </dict>
+        <!-- By extension as well: where another app (Podpisuj) exports its own
+             type for .asice, the system gives the file that type, and a claim of
+             org.autogram.asice alone left Chevron7 out of "Open With". -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>ASiC-E Container</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>asice</string>
+                <string>sce</string>
+            </array>
+            <key>CFBundleTypeMIMETypes</key>
+            <array>
+                <string>application/vnd.etsi.asic-e+zip</string>
             </array>
         </dict>
     </array>

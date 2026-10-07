@@ -16,6 +16,7 @@ final class Chevron7AppModel {
     let webSigning: WebSigningCoordinator
     let cardReader: CardReaderStatus
     let updater: AppUpdater
+    let externalOpen = ExternalDocumentOpen()
 
     init() {
         let settings = AppSettingsStore()
@@ -63,6 +64,8 @@ final class Chevron7AppModel {
         if AppLaunchMode.current != .webSigning {
             appUpdater.startIfNeeded()
         }
+        let externalOpen = externalOpen
+        AppDelegate.onOpenURLs = { externalOpen.receive($0) }
         AppDelegate.onBecomeRegular = {
             checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: true)
             appUpdater.startIfNeeded()
@@ -257,6 +260,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WebBridgeAgentService.ensureRegistered()
         WebBridgeListener.shared.start()
     }
+
+    /// Finder's "Open With", a double click or a drop on the Dock icon: the
+    /// documents open in the signing section of the main window.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated {
+            guard !ExternalDocumentOpen.acceptedURLs(urls).isEmpty else { return }
+            Self.becomeRegularApp()
+            Self.openMainWindowIfNeeded()
+            Self.onOpenURLs?(urls)
+        }
+    }
+
+    /// Set by the app model: where documents opened from Finder go.
+    @MainActor static var onOpenURLs: (([URL]) -> Void)?
 
     /// The launch open event asks for an untitled main window; a web-signing launch
     /// shows only the signing panel.

@@ -422,6 +422,9 @@ struct RootView: View {
             // The reader badge and the signing store follow one poll, only while this
             // window exists and the app is active; activation refreshes at once.
             .task { await model.cardReader.watch() }
+            // Documents Finder handed over, also those that arrived before this
+            // window existed (a launch by "Open With").
+            .task(id: model.externalOpen.requestCount) { await openExternalDocuments() }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 Task { await model.cardReader.refresh() }
             }
@@ -619,9 +622,20 @@ struct RootView: View {
         }
     }
 
+    private func openExternalDocuments() async {
+        let urls = model.externalOpen.takePending()
+        guard !urls.isEmpty else { return }
+        selection = .signing
+        if urls.count == 1 {
+            await signingStore.loadDocument(at: urls[0])
+        } else if !batchIsActive {
+            await prepareReviewedBatch(for: urls)
+        }
+    }
+
     private func openDocument() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf, UTType(importedAs: "org.autogram.asice", conformingTo: .data)]
+        panel.allowedContentTypes = ContainerFileTypes.documents
         panel.allowsMultipleSelection = false
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
@@ -635,7 +649,7 @@ struct RootView: View {
     private func openMoreFiles() {
         guard !batchIsActive else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf, UTType(importedAs: "org.autogram.asice", conformingTo: .data)]
+        panel.allowedContentTypes = ContainerFileTypes.documents
         panel.allowsMultipleSelection = true
         panel.begin { response in
             guard response == .OK else { return }
