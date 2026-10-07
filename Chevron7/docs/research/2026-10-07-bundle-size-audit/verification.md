@@ -24,6 +24,8 @@ Kept on purpose, although the audit called some of them removable: veraPDF stack
 | runtime | 215 MB | 63 MB |
 | dependency jars | 84 MB | 42 MB |
 | engine total | 300 MB | 106 MB |
+| installed app (release build, `du -sh`) | 284 MB (v1.4.0) | 137 MB |
+| DMG | 174 MB (v1.4.0) | 89 MB |
 
 ## Before/after run
 
