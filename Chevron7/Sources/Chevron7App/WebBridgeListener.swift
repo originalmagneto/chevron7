@@ -51,17 +51,38 @@ final class WebBridgeListener: NSObject, NSXPCListenerDelegate, @unchecked Senda
         connection.remoteObjectInterface = NSXPCInterface(with: WebBridgeRendezvousProtocol.self)
         // Whoever holds the name gets our endpoint, so it must be our agent.
         connection.setCodeSigningRequirement(WebBridgeCodeRequirement.requirement(for: [.agent]))
+        // The agent quits after an update to let launchd start the current one
+        // (`WebBridgeAgentStaleness`), and it forgets the endpoint with its
+        // process. Registering again on the same connection launches the new
+        // agent; without it Safari found no app until Chevron7 was restarted.
+        connection.interruptionHandler = { [weak self] in
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                self?.registerAgain()
+            }
+        }
         connection.resume()
         self.rendezvous = connection
+        register(on: connection, endpoint: listener.endpoint)
+    }
 
+    private func register(on connection: NSXPCConnection, endpoint: NSXPCListenerEndpoint) {
         guard let proxy = connection.remoteObjectProxyWithErrorHandler({ [log] error in
             log.error("Web bridge agent unreachable: \(error.localizedDescription, privacy: .public)")
         }) as? WebBridgeRendezvousProtocol else {
             log.error("Web bridge agent proxy unavailable")
             return
         }
-        proxy.registerApp(endpoint: listener.endpoint)
+        proxy.registerApp(endpoint: endpoint)
         log.info("Web bridge registered with \(WebSigningBridge.machServiceName, privacy: .public)")
+    }
+
+    private func registerAgain() {
+        DispatchQueue.main.async { [self] in
+            // stop() clears both; a stopped bridge stays stopped.
+            guard let connection = rendezvous, let listener else { return }
+            log.info("Web bridge agent restarted; registering again")
+            register(on: connection, endpoint: listener.endpoint)
+        }
     }
 
     func stop() {
