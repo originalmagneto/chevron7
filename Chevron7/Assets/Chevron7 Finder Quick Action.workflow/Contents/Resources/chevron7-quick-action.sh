@@ -157,63 +157,72 @@ fi
 tmp_dir="$(mktemp -d -t chevron7-quick-action)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-pin="$(ask_pin)"
-if [[ "$pin" == "CANCELLED" ]]; then
-  exit 0
-fi
-
-key_output="$tmp_dir/keys.tsv"
-key_error="$tmp_dir/keys.error"
-set +e
-printf '%s\n' "$pin" | "$CLI_SCRIPT" \
-    --driver "$driver_name_arg" \
-    --list-keys \
-    --pin-stdin > "$key_output" 2> "$key_error"
-key_status=$?
-set -e
-
-if [[ "$key_status" -ne 0 ]] && ! /usr/bin/grep -q $'^AUTOGRAM_KEY\t' "$key_output"; then
-  key_details="$(cli_error_details "$key_error")"
-  key_message="$(printf '%s\n\n%s' \
-    'Nepodarilo sa načítať podpisové certifikáty. Skontrolujte pripojené úložisko a PIN.' \
-    "$key_details")"
-  show_alert "Chevron7" "$key_message"
-  exit 1
-fi
-
-declare -a key_selectors=()
-declare -a key_labels=()
-while IFS=$'\t' read -r record_type selector label; do
-  [[ "$record_type" == "AUTOGRAM_KEY" ]] || continue
-  [[ -n "$selector" ]] || continue
-  key_selectors+=("$selector")
-  key_labels+=("$label [$selector]")
-done < "$key_output"
-
-if [[ ${#key_selectors[@]} -eq 0 ]]; then
-  show_alert "Chevron7" "V zvolenom úložisku sa nenašiel žiadny podpisový certifikát."
-  exit 1
-fi
-
-if [[ ${#key_selectors[@]} -eq 1 ]]; then
-  key_selector="${key_selectors[0]}"
+# The eID client asks for the BOK and the signing PIN in its own window (the
+# card reports a protected authentication path), so a PIN typed here would never
+# reach the card, and reading the certificates first opened that window once
+# more. As in the app, eID signs with the token's only signing key in one session.
+if [[ "$driver_name_arg" == "eid" ]]; then
+  pin="protected-authentication-path"
+  key_selector="*"
 else
-  selected_label="$(choose_key_label "${key_labels[@]}")"
-  if [[ "$selected_label" == "CANCELLED" || -z "$selected_label" ]]; then
+  pin="$(ask_pin)"
+  if [[ "$pin" == "CANCELLED" ]]; then
     exit 0
   fi
 
-  key_selector=""
-  for index in "${!key_labels[@]}"; do
-    if [[ "${key_labels[$index]}" == "$selected_label" ]]; then
-      key_selector="${key_selectors[$index]}"
-      break
-    fi
-  done
+  key_output="$tmp_dir/keys.tsv"
+  key_error="$tmp_dir/keys.error"
+  set +e
+  printf '%s\n' "$pin" | "$CLI_SCRIPT" \
+      --driver "$driver_name_arg" \
+      --list-keys \
+      --pin-stdin > "$key_output" 2> "$key_error"
+  key_status=$?
+  set -e
 
-  if [[ -z "$key_selector" ]]; then
-    show_alert "Chevron7" "Nepodarilo sa vybrať podpisový certifikát."
+  if [[ "$key_status" -ne 0 ]] && ! /usr/bin/grep -q $'^AUTOGRAM_KEY\t' "$key_output"; then
+    key_details="$(cli_error_details "$key_error")"
+    key_message="$(printf '%s\n\n%s' \
+      'Nepodarilo sa načítať podpisové certifikáty. Skontrolujte pripojené úložisko a PIN.' \
+      "$key_details")"
+    show_alert "Chevron7" "$key_message"
     exit 1
+  fi
+
+  declare -a key_selectors=()
+  declare -a key_labels=()
+  while IFS=$'\t' read -r record_type selector label; do
+    [[ "$record_type" == "AUTOGRAM_KEY" ]] || continue
+    [[ -n "$selector" ]] || continue
+    key_selectors+=("$selector")
+    key_labels+=("$label [$selector]")
+  done < "$key_output"
+
+  if [[ ${#key_selectors[@]} -eq 0 ]]; then
+    show_alert "Chevron7" "V zvolenom úložisku sa nenašiel žiadny podpisový certifikát."
+    exit 1
+  fi
+
+  if [[ ${#key_selectors[@]} -eq 1 ]]; then
+    key_selector="${key_selectors[0]}"
+  else
+    selected_label="$(choose_key_label "${key_labels[@]}")"
+    if [[ "$selected_label" == "CANCELLED" || -z "$selected_label" ]]; then
+      exit 0
+    fi
+
+    key_selector=""
+    for index in "${!key_labels[@]}"; do
+      if [[ "${key_labels[$index]}" == "$selected_label" ]]; then
+        key_selector="${key_selectors[$index]}"
+        break
+      fi
+    done
+
+    if [[ -z "$key_selector" ]]; then
+      show_alert "Chevron7" "Nepodarilo sa vybrať podpisový certifikát."
+      exit 1
+    fi
   fi
 fi
 
