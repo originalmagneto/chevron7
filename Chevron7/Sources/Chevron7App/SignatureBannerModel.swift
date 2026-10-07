@@ -53,10 +53,11 @@ struct SignatureBannerModel: Equatable {
         let note = SignatureTreePresentation.phaseText(state.phase)
         switch state.phase {
         case .structural:
-            return SignatureBannerModel(
-                tone: .checking,
-                headline: "Overujem \(SignatureTreePresentation.signatureCount(summary.total)) voči dôveryhodným zoznamom…",
-                rows: rows, note: note)
+            // Without a signature of its own, the tree is here only for files it could not open.
+            let subject = summary.total > 0 ? SignatureTreePresentation.signatureCount(summary.total)
+                : "súbory v kontajneri"
+            return SignatureBannerModel(tone: .checking, headline: "Overujem \(subject) voči dôveryhodným zoznamom…",
+                                        rows: rows, note: note)
         case .validationUnavailable:
             return SignatureBannerModel(tone: .warning, headline: join("Podpisy sa nepodarilo overiť", names),
                                         rows: rows, note: note)
@@ -169,12 +170,13 @@ struct SignatureBannerModel: Equatable {
         names.isEmpty ? phrase : phrase + " · " + names
     }
 
-    /// Up to two distinct signers, then "a N ďalší".
+    /// Up to two distinct signers, then "a N ďalší" (from five others "ďalších").
     static func namesSummary(_ signatures: [DocumentSignatureInfo]) -> String {
         var seen = Set<String>()
         let names = signatures.map(displayName).filter { seen.insert($0).inserted }
         guard names.count > 2 else { return names.joined(separator: ", ") }
-        return names.prefix(2).joined(separator: ", ") + " a \(names.count - 2) ďalší"
+        let others = names.count - 2
+        return names.prefix(2).joined(separator: ", ") + " a \(others) " + (others < 5 ? "ďalší" : "ďalších")
     }
 
     // MARK: Rows

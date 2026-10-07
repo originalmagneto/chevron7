@@ -75,3 +75,13 @@ States (tone, symbol, headline; the symbol always accompanies the colour):
 
 - The inline expansion is replaced by a scrolling popover under the banner, opened by a bordered "Podpisy (N)" button with the `signature` symbol; nothing is remembered between documents and the document never moves.
 - Each row: verdict symbol and word, qualification, "Podpísané <time> · <format>" (format as "XAdES Baseline T"), a timestamp line "Časová pečiatka: <authority>, kvalifikovaná|nekvalifikovaná · <date and time to the second>" (authority and qualification only from full validation, as the structural pass reports the issuer DN), and "pokrýva" only in a container with more than one file. The QTS badge is dropped in favour of the timestamp line.
+
+## Follow-ups after the final review (2026-10-07)
+
+- Names summary: "a N ďalší" for 1 to 4 others, "a N ďalších" from five.
+- A structural tree without signatures (only files the engine could not open) reads "Overujem súbory v kontajneri voči dôveryhodným zoznamom…" instead of "Overujem 0 podpisov".
+- Safari panel: confirming by card or phone drops a structural inspection still running (`WebSigningSignatureCheck.cancelInspection`), because INSPECT and SIGN share one engine helper; a validation already running stays (its own session) and ends with the request. The protocol v1 runner now stops exactly the cancelled consumer's helper and starts the next run only after it ended, so the signature is neither refused (`launchFailed`) nor stopped by a late cancellation.
+- Launch removes `chevron7-web-signatures-*` folders a crash or quit left in the temporary directory.
+- Without the engine (Demo), the default tree inspection returns an empty tree for a PDF whose bytes carry no `/ByteRange`, so object streams no longer raise "Podpisy sa nepodarilo skontrolovať" over an unsigned PDF.
+- The removed inspector sentence is covered by `existingSignatureFormatNote` for every source kind and output format.
+- Coordinator tests (`WebSigningCoordinatorSignatureCheckTests`): panel closed while the check runs, card and phone confirmation during inspection, signature completing while validation runs.

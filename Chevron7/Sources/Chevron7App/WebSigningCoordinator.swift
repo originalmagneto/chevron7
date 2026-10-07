@@ -69,7 +69,7 @@ final class WebSigningCoordinator {
 
     private(set) var pending: Pending?
     /// Existing signatures of the document in the panel, for its banner.
-    let signatureCheck = WebSigningSignatureCheck()
+    let signatureCheck: WebSigningSignatureCheck
     var pin: String = ""
     var selectedIdentityID: String?
     var identities: [SigningIdentityInfo] = []
@@ -137,13 +137,19 @@ final class WebSigningCoordinator {
     private let session = WebSignSessionGate<WebSignResponse>()
     private let settingsStore: AppSettingsStore
     private let signedDocumentStore: SignedDocumentStore
-    private let prompt = WebSigningPrompt()
+    private let prompt: any WebSigningPromptPresenting
     let mobileSigning: MobileSigningCoordinator
 
-    init(settingsStore: AppSettingsStore, signedDocumentStore: SignedDocumentStore) {
+    init(settingsStore: AppSettingsStore,
+         signedDocumentStore: SignedDocumentStore,
+         prompt: (any WebSigningPromptPresenting)? = nil,
+         signatureCheck: WebSigningSignatureCheck? = nil,
+         mobileSigning: MobileSigningCoordinator? = nil) {
         self.settingsStore = settingsStore
         self.signedDocumentStore = signedDocumentStore
-        self.mobileSigning = MobileSigningCoordinator(settingsStore: settingsStore)
+        self.prompt = prompt ?? WebSigningPrompt()
+        self.signatureCheck = signatureCheck ?? WebSigningSignatureCheck()
+        self.mobileSigning = mobileSigning ?? MobileSigningCoordinator(settingsStore: settingsStore)
     }
 
     /// Keeps a copy of what was signed and lists it among recent documents.
@@ -417,6 +423,7 @@ final class WebSigningCoordinator {
             errorText = refusal
             return
         }
+        signatureCheck.cancelInspection()
         let token = session.currentToken
         isWorking = true
         errorText = nil
@@ -508,6 +515,7 @@ final class WebSigningCoordinator {
             requestPINFocus()
             return
         }
+        signatureCheck.cancelInspection()
         let token = session.currentToken
         isWorking = true
         errorText = nil

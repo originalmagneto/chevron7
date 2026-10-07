@@ -32,6 +32,8 @@ final class Chevron7AppModel {
         let signedDocuments = SignedDocumentStore()
         signedDocumentStore = signedDocuments
         signingStore.signedDocumentStore = signedDocuments
+        // Before the bridge can hand over a request: portal copies a crash left behind.
+        WebSigningSignatureCheck.removeStaleCopies()
         webSigning = WebSigningCoordinator(settingsStore: settings, signedDocumentStore: signedDocuments)
         cardReader = CardReaderStatus(
             discover: { [settings] in await settings.signingProvider.availableIdentities() },

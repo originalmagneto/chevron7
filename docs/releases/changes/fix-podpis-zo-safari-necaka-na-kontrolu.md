@@ -1,0 +1,1 @@
+- **Podpis zo Safari nečaká na kontrolu podpisov.** Keď stránka pošle už podpísaný dokument, napríklad veľký kontajner .asice, a vy potvrdíte podpis kartou alebo mobilom skôr, než Chevron7 dokončí kontrolu jeho podpisov, kontrola sa ukončí a podpis začne hneď. Predtým mohol podpis čakať, kým sa kontrola veľkého kontajnera skončí.

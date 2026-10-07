@@ -433,6 +433,12 @@ extension QualifiedSigningProviding {
     public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         let result = await inspectInputSignatures(in: fileURL)
         if result.state == .unavailable {
+            // The structural pass gives up on object streams, yet a PDF whose own bytes
+            // carry no /ByteRange has no signature to check: nothing to warn about.
+            if let data = try? Data(contentsOf: fileURL), data.starts(with: Data("%PDF".utf8)),
+               ExistingSignatureGuard.classify(fileName: fileURL.lastPathComponent, data: data) == .unsignedPDF {
+                return .tree(SignatureTree())
+            }
             return .failed(result.detail)
         }
         return .tree(SignatureTree(signatures: result.signatures))

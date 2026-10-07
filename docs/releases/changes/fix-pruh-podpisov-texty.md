@@ -1,0 +1,1 @@
+- **Pruh s podpismi hovorí správnou slovenčinou.** Pri dokumente s mnohými podpismi pruh nad dokumentom teraz píše napríklad „a 5 ďalších“ namiesto „a 5 ďalší“. Kontajner, v ktorom sú len súbory, ktoré sa nedajú otvoriť, už počas overovania neukazuje „Overujem 0 podpisov“, ale „Overujem súbory v kontajneri“.
