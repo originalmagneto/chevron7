@@ -110,11 +110,17 @@ struct Chevron7App: App {
         WindowGroup {
             RootView(model: model)
                 .environment(model.ezzkAccountController)
-                .frame(minWidth: MacOS27Layout.rootMinimumWidth, minHeight: 640)
+                // Not .frame(minWidth:): it lowered the split view's own minimum and let
+                // the window shrink until the columns could not fit (see MinimumSizeFloor).
+                .minimumSizeFloor(width: MacOS27Layout.rootMinimumWidth, height: MacOS27Layout.rootMinimumHeight)
                 .frame(idealWidth: 1320, idealHeight: 860)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1320, height: 860)
+        // Finder's open events go to AppDelegate.application(_:open:), which opens a main
+        // window only when none is visible. Without this the group opened another
+        // window for every document opened from Finder, besides the delegate.
+        .handlesExternalEvents(matching: [])
         // A portal request started the app: only the signing panel, no main window.
         .defaultLaunchBehavior(AppLaunchMode.current == .webSigning ? .suppressed : .automatic)
         // Window restoration would reopen the last main window despite the suppression.
@@ -267,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             guard !ExternalDocumentOpen.acceptedURLs(urls).isEmpty else { return }
             Self.becomeRegularApp()
-            Self.openMainWindowIfNeeded()
+            Self.openMainWindowIfNeeded(bringToFront: true)
             Self.onOpenURLs?(urls)
         }
     }
@@ -291,11 +297,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The main window scene is suppressed after a web-signing launch, so reopening
     /// does not bring one back by itself. The File > New Window command (⌘N) does.
+    /// A minimized main window comes back instead of a second one, and a visible
+    /// Settings window is not a main window.
     @MainActor
-    static func openMainWindowIfNeeded() {
-        let hasMainWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain && !($0 is NSPanel) }
-        guard !hasMainWindow, let item = newWindowMenuItem(in: NSApp.mainMenu), let action = item.action else { return }
+    static func openMainWindowIfNeeded(bringToFront: Bool = false) {
+        let mainWindows = NSApp.windows.filter(isMainWindow)
+        if let window = mainWindows.first(where: \.isVisible) {
+            if bringToFront { window.makeKeyAndOrderFront(nil) }
+            return
+        }
+        if let window = mainWindows.first(where: \.isMiniaturized) {
+            window.deminiaturize(nil)
+            return
+        }
+        guard let item = newWindowMenuItem(in: NSApp.mainMenu), let action = item.action else { return }
         NSApp.sendAction(action, to: item.target, from: item)
+    }
+
+    /// A window of the main `WindowGroup`, also while minimized (when `canBecomeMain` is
+    /// false). SwiftUI gives every scene window an identifier and the `Window` scenes
+    /// (Settings, detector training) their scene id; AppKit's own windows (Sparkle) and the
+    /// web signing panel have none or are panels.
+    @MainActor
+    static func isMainWindow(_ window: NSWindow) -> Bool {
+        guard let identifier = window.identifier?.rawValue, !(window is NSPanel) else { return false }
+        return ![SettingsWindow.id, DetectorTrainingWindow.id].contains(identifier)
     }
 
     @MainActor
