@@ -256,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         FinderQuickActionService.installQuickAction()
         // The listener connects to the agent, so the agent is registered first.
+        WebBridgeAgentService.retireAbandonedAgents()
         WebBridgeAgentService.ensureRegistered()
         WebBridgeListener.shared.start()
     }

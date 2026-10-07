@@ -17,6 +17,16 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let registry = WebBridgeEndpointRegistry()
     private var registrationCount = 0
+    private var retiring = false
+    // Read when the agent starts, before any update can replace the bundle.
+    private let launchPath: String?
+    private let launchFile: WebBridgeAgentStaleness.FileIdentity?
+
+    override init() {
+        launchPath = WebBridgeAgentStaleness.runningExecutablePath()
+        launchFile = launchPath.flatMap(WebBridgeAgentStaleness.fileIdentity(atPath:))
+        super.init()
+    }
 
     /// Admits only Chevron7's own processes and fixes what each may do.
     ///
@@ -25,6 +35,7 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     /// The role comes from the caller's pid, which can be reused, so the chosen
     /// requirement is also enforced on every message: a wrong choice fails closed.
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        retireIfStale()
         let processIdentifier = connection.processIdentifier
         guard let role = WebBridgeCallerRole.classify(
             teamIdentifier: WebBridgeCodeRequirement.ownTeamIdentifier,
@@ -38,6 +49,24 @@ final class Rendezvous: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
         connection.exportedObject = RendezvousSession(role: role, rendezvous: self, connection: connection)
         connection.resume()
         return true
+    }
+
+    /// After an update or a reinstall this agent still runs the old bundle's
+    /// copy, which the Safari extension refuses. The connection is still served,
+    /// so a waiting reply is not lost; the agent then quits, the app registers
+    /// again with the agent launchd starts from the current bundle, and the
+    /// extension's repeated status request reaches that one.
+    private func retireIfStale() {
+        lock.lock()
+        let stale = !retiring && WebBridgeAgentStaleness.isStale(
+            launchPath: launchPath, launchFile: launchFile,
+            runningPath: WebBridgeAgentStaleness.runningExecutablePath(),
+            fileAtLaunchPath: launchPath.flatMap(WebBridgeAgentStaleness.fileIdentity(atPath:)))
+        if stale { retiring = true }
+        lock.unlock()
+        guard stale else { return }
+        FileHandle.standardError.write(Data("Chevron7 was updated or reinstalled; quitting so launchd starts the current agent\n".utf8))
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { exit(0) }
     }
 
     fileprivate func registerApp(endpoint: NSXPCListenerEndpoint, connection: NSXPCConnection?) {

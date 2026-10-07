@@ -68,7 +68,7 @@ int main(int argc, char *const argv[]) {
     javaArguments[index++] = "--add-opens=java.base/java.security=ALL-UNNAMED";
     javaArguments[index++] = "--add-opens=jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED";
     javaArguments[index++] = "--add-opens=jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED";
-    javaArguments[index++] = "--enable-native-access=ALL-UNNAMED,javafx.graphics";
+    javaArguments[index++] = "--enable-native-access=ALL-UNNAMED";
     javaArguments[index++] = "-Djava.awt.headless=true";
     javaArguments[index++] = "-cp";
     javaArguments[index++] = classPath;

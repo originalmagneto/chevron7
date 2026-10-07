@@ -5,6 +5,7 @@ import Foundation
 import Security
 import ServiceManagement
 import Chevron7Identity
+import Chevron7WebBridge
 import os
 
 /// Registers the launchd agent that owns the web bridge Mach service from inside
@@ -153,6 +154,19 @@ enum WebBridgeAgentService {
             process.waitUntilExit()
             if process.terminationStatus != 0 { return }
             Thread.sleep(forTimeInterval: 0.2)
+        }
+    }
+
+    /// Ends an agent still running from a copy of Chevron7 that an update or a
+    /// reinstall replaced. The Safari extension refuses such an agent (its code
+    /// signature check fails with -67065), and an agent from before
+    /// `WebBridgeAgentStaleness` never quits on its own, so signing from Safari
+    /// stayed broken until the Mac restarted. launchd starts the current agent
+    /// when the listener connects. Runs before `WebBridgeListener.start()`.
+    static func retireAbandonedAgents() {
+        for pid in WebBridgeAgentStaleness.abandonedAgentProcesses() {
+            log.info("Ending web bridge agent \(pid) left over from a replaced copy of Chevron7")
+            kill(pid, SIGTERM)
         }
     }
 

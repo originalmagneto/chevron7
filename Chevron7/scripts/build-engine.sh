@@ -68,9 +68,18 @@ jar_file="$(find "${engine_root}/target" -maxdepth 1 -name 'autogram-*.jar' ! -n
 [[ -n "${jar_file}" ]] || fail "Engine JAR was not built"
 [[ -n "$(find "${dependency_dir}" -maxdepth 1 -name '*.jar' -print -quit)" ]] || fail "No runtime dependency JARs were copied"
 find "${dependency_dir}" -maxdepth 1 -iname '*test*.jar' -delete
+# Chevron7 runs the engine only in machine protocol mode and PdfaNormalize, never its
+# JavaFX GUI or the GUI's --url launch, so the JavaFX jars and HttpClient 4 (used only by
+# that launch, core/LaunchParameters) are dropped. Evidence:
+# docs/research/2026-10-07-bundle-size-audit.
+find "${dependency_dir}" -maxdepth 1 \( \
+    -name 'javafx-*.jar' -o -name 'httpclient-4.*.jar' -o -name 'httpcore-4.*.jar' \
+    \) -delete
 
 echo "▸ jlink arm64 runtime"
-runtime_modules="java.compiler,java.base,java.xml,java.desktop,java.naming,java.datatransfer,java.net.http,jdk.net,java.logging,java.sql,java.scripting,javafx.base,javafx.controls,javafx.fxml,javafx.graphics,javafx.web,jdk.unsupported,jdk.httpserver,jdk.crypto.cryptoki"
+# No JavaFX (GUI only), java.net.http (only the GUI updater), java.scripting (no user) or
+# jdk.httpserver (only the GUI's HTTP API, which the launcher never allows).
+runtime_modules="java.compiler,java.base,java.xml,java.desktop,java.naming,java.datatransfer,jdk.net,java.logging,java.sql,jdk.unsupported,jdk.crypto.cryptoki"
 "${java_home}/bin/jlink" \
     --module-path "${java_home}/jmods" \
     --add-modules "${runtime_modules}" \
@@ -79,6 +88,8 @@ runtime_modules="java.compiler,java.base,java.xml,java.desktop,java.naming,java.
     --no-header-files \
     --no-man-pages \
     --strip-debug
+[[ ! -e "${runtime_dir}/lib/libjfxwebkit.dylib" ]] || fail "The jlink runtime still contains JavaFX"
+[[ -z "$(find "${dependency_dir}" -maxdepth 1 -name 'javafx-*.jar' -print -quit)" ]] || fail "JavaFX jars are still among the dependency jars"
 
 cp "${jar_file}" "${output_root}/app/autogram.jar"
 ditto "${dependency_dir}" "${output_root}/app/dependency-jars"
