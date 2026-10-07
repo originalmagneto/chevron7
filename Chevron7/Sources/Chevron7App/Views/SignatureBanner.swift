@@ -13,6 +13,9 @@ struct SignatureBanner: View {
     var onRevalidate: (() -> Void)?
     var revalidateDisabled = false
     @State private var isShowingDetails = false
+    /// The bubble opens with the list focused, not "Overiť znova": with keyboard navigation
+    /// on, the first button otherwise showed a focus ring at once. Tab still reaches it.
+    @FocusState private var listFocused: Bool
     @Environment(\.openURL) private var openURL
 
     init(model: SignatureBannerModel, onRevalidate: (() -> Void)? = nil, revalidateDisabled: Bool = false) {
@@ -76,10 +79,15 @@ struct SignatureBanner: View {
                 .padding(12)
             }
             .frame(height: min(420, CGFloat(model.rows.count) * 66 + 16))
+            .focusable()
+            .focused($listFocused)
+            .focusEffectDisabled()
             Divider()
             footer.padding(12)
         }
         .frame(width: 500)
+        .defaultFocus($listFocused, true)
+        .onAppear { listFocused = true }
     }
 
     private var footer: some View {
