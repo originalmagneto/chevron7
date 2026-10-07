@@ -5,13 +5,14 @@ import SwiftUI
 import Chevron7Kit
 
 /// A document's signatures at a glance, above the document: tone, headline with the
-/// signers, and the rows inline once expanded. The same banner in signing, the Safari
-/// panel and ZaKo; the expanded state is remembered for all of them.
+/// signers, and the rows in a bubble under the banner, so the document never moves
+/// however many signatures it carries. The same banner in signing, the Safari panel
+/// and ZaKo.
 struct SignatureBanner: View {
     let model: SignatureBannerModel
     var onRevalidate: (() -> Void)?
     var revalidateDisabled = false
-    @AppStorage("signatures.bannerExpanded") private var isExpanded = false
+    @State private var isShowingDetails = false
     @Environment(\.openURL) private var openURL
 
     init(model: SignatureBannerModel, onRevalidate: (() -> Void)? = nil, revalidateDisabled: Bool = false) {
@@ -20,44 +21,65 @@ struct SignatureBanner: View {
         self.revalidateDisabled = revalidateDisabled
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                // The symbol and the headline read as one element; the disclosure stays a button.
-                HStack(spacing: 8) {
-                    if model.tone == .checking {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: symbol).foregroundStyle(tint)
-                    }
-                    Text(model.headline)
-                        .font(.callout)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .accessibilityElement(children: .combine)
-                if !model.rows.isEmpty || model.note != nil {
-                    Button(isExpanded ? "Skryť ▴" : "Podpisy ▾") { isExpanded.toggle() }
-                        .buttonStyle(.link)
-                        .accessibilityLabel(isExpanded ? "Skryť podpisy" : "Zobraziť podpisy")
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+    private var signatureCount: Int { model.rows.filter { $0.verdict != nil }.count }
 
-            if isExpanded {
-                Divider().overlay(tint.opacity(0.3))
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.rows) { row in
-                        SignatureBannerRow(row: row)
-                    }
-                    footer
+    var body: some View {
+        HStack(spacing: 8) {
+            // The symbol and the headline read as one element; the details stay a button.
+            HStack(spacing: 8) {
+                if model.tone == .checking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: symbol).foregroundStyle(tint)
                 }
-                .padding(10)
+                Text(model.headline)
+                    .font(.callout)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityElement(children: .combine)
+            if !model.rows.isEmpty || model.note != nil {
+                Button {
+                    isShowingDetails.toggle()
+                } label: {
+                    Label(signatureCount > 0 ? "Podpisy (\(signatureCount))" : "Podrobnosti",
+                          systemImage: "signature")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(tint)
+                .help("Zobrazí podrobnosti podpisov")
+                .accessibilityLabel(signatureCount > 0
+                    ? "Zobraziť " + SignatureTreePresentation.signatureCount(signatureCount)
+                    : "Zobraziť podrobnosti")
+                .popover(isPresented: $isShowingDetails, arrowEdge: .bottom) {
+                    details
+                }
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(tint.opacity(0.35)))
+    }
+
+    /// At most about half a window high; more signatures scroll inside the bubble.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.rows) { row in
+                        SignatureBannerRow(row: row)
+                        if row.id != model.rows.last?.id { Divider() }
+                    }
+                }
+                .padding(12)
+            }
+            .frame(height: min(420, CGFloat(model.rows.count) * 66 + 16))
+            Divider()
+            footer.padding(12)
+        }
+        .frame(width: 500)
     }
 
     private var footer: some View {
@@ -130,6 +152,9 @@ private struct SignatureBannerRow: View {
                 }
                 if !row.detail.isEmpty {
                     Text(row.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if let timestamp = row.timestamp {
+                    Text(timestamp).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
                 if let reason = row.reason {
                     Text(reason).font(.caption2).foregroundStyle(.secondary)

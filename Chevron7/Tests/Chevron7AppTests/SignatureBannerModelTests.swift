@@ -76,8 +76,10 @@ final class SignatureBannerModelTests: XCTestCase {
         let model = try XCTUnwrap(SignatureBannerModel.make(from: state([
             sig("1", "Marián Čuprík", time: time, qualification: "QESIG", qts: true, covers: ["Uznesenie.pdf"]),
             sig("2", "", .valid)])))
-        XCTAssertEqual(model.rows[0].badges, ["KEP", "QTS"])
-        XCTAssertEqual(model.rows[0].detail, "7. 10. 2026 11:25 · pokrýva Uznesenie.pdf")
+        // The timestamp has its own line now, and "pokrýva" only says something when the
+        // container holds more than one file.
+        XCTAssertEqual(model.rows[0].badges, ["KEP"])
+        XCTAssertEqual(model.rows[0].detail, "Podpísané 7. 10. 2026 11:25")
         XCTAssertEqual(model.rows[1].title, "Neznámy podpisovateľ")
         XCTAssertEqual(model.rows[1].detail, "")
         XCTAssertEqual(model.note, "Informatívne overenie voči dôveryhodným zoznamom EÚ")
@@ -157,7 +159,7 @@ final class SignatureBannerModelTests: XCTestCase {
         let model = try XCTUnwrap(SignatureBannerModel.make(from: state([invalid, sig("2", "B")])))
         XCTAssertEqual(model.rows[0].verdictLabel, "Neplatný")
         XCTAssertEqual(model.rows[0].reason, "Dokument bol po podpise zmenený.")
-        XCTAssertEqual(model.rows[0].detail, "PAdES_BASELINE_B")
+        XCTAssertEqual(model.rows[0].detail, "PAdES Baseline B")
         XCTAssertEqual(model.rows[1].verdictLabel, "Platný")
         XCTAssertNil(model.rows[1].reason)
     }
@@ -173,5 +175,45 @@ final class SignatureBannerModelTests: XCTestCase {
         }
         XCTAssertEqual(SignatureBannerModel.newSignatureIDs(
             existing: SignatureTreeState(tree: existing, phase: .structural), result: result), ["new"])
+    }
+
+    /// The owner asked for the timestamp in words: who issued it, whether it is qualified,
+    /// and when. The authority and the qualification come only from full validation.
+    func testTimestampLineAfterValidation() throws {
+        var components = DateComponents()
+        components.year = 2026; components.month = 10; components.day = 7
+        components.hour = 11; components.minute = 18; components.second = 42
+        let stamp = try XCTUnwrap(Calendar.current.date(from: components))
+        let signature = DocumentSignatureInfo(id: "1", signerDisplayName: "A", format: "XAdES_BASELINE_T",
+                                              hasQualifiedTimestamp: true, state: .valid,
+                                              timestampAuthority: "Belgium BOSA", timestampTime: stamp)
+        let validated = try XCTUnwrap(SignatureBannerModel.make(from: state([signature])))
+        XCTAssertEqual(validated.rows[0].timestamp, "Časová pečiatka: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42")
+
+        var unqualified = signature
+        unqualified.hasQualifiedTimestamp = false
+        let plain = try XCTUnwrap(SignatureBannerModel.make(from: state([unqualified])))
+        XCTAssertEqual(plain.rows[0].timestamp, "Časová pečiatka: Belgium BOSA, nekvalifikovaná · 7. 10. 2026 11:18:42")
+
+        // The structural pass names the issuer DN, not the authority, and judges no qualification.
+        var structural = unqualified
+        structural.timestampAuthority = "CN=BOSA TSA, O=Belgium"
+        structural.state = .indeterminate
+        let checking = try XCTUnwrap(SignatureBannerModel.make(from: state([structural], .structural)))
+        XCTAssertEqual(checking.rows[0].timestamp, "Časová pečiatka · 7. 10. 2026 11:18:42")
+
+        let none = try XCTUnwrap(SignatureBannerModel.make(from: state([sig("2", "B")])))
+        XCTAssertNil(none.rows[0].timestamp)
+    }
+
+    func testCoverageOnlyInAContainerWithSeveralFiles() throws {
+        let covering = sig("1", "A", covers: ["zmluva.pdf"])
+        let single = try XCTUnwrap(SignatureBannerModel.make(from: state([covering], documents: [
+            SignedDataObject(name: "zmluva.pdf", content: .plain)])))
+        XCTAssertEqual(single.rows[0].detail, "")
+        let several = try XCTUnwrap(SignatureBannerModel.make(from: state([covering], documents: [
+            SignedDataObject(name: "zmluva.pdf", content: .plain),
+            SignedDataObject(name: "dolozka.xml.xdcf", content: .plain)])))
+        XCTAssertEqual(several.rows[0].detail, "pokrýva zmluva.pdf")
     }
 }

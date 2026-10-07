@@ -19,6 +19,8 @@ struct SignatureBannerModel: Equatable {
         let detail: String
         /// Why the validator did not call a signature valid, when it said.
         let reason: String?
+        /// "Časová pečiatka: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42"; nil without one.
+        let timestamp: String?
         let warning: String?
         let depth: Int
         let isNew: Bool
@@ -47,7 +49,7 @@ struct SignatureBannerModel: Equatable {
         guard summary.total > 0 || summary.unverifiedDocuments > 0 else { return nil }
         let signatures = allSignatures(in: state.tree)
         let names = namesSummary(signatures)
-        let rows = treeRows(state.tree, newSignatureIDs: newSignatureIDs)
+        let rows = treeRows(state.tree, newSignatureIDs: newSignatureIDs, validated: state.phase == .validated)
         let note = SignatureTreePresentation.phaseText(state.phase)
         switch state.phase {
         case .structural:
@@ -65,7 +67,10 @@ struct SignatureBannerModel: Equatable {
 
     static func make(from inspection: InputSignatureInspectionResult) -> SignatureBannerModel? {
         guard inspection.state != .unavailable, !inspection.signatures.isEmpty else { return nil }
-        let rows = inspection.signatures.map { row(for: $0, depth: 0, isNew: false) }
+        // ZaKo inspects structurally: no authority names nor timestamp qualification.
+        let rows = inspection.signatures.map {
+            row(for: $0, depth: 0, isNew: false, validated: false, showsCoverage: false)
+        }
         return verdictModel(summary: Counts(inspection.signatures), names: namesSummary(inspection.signatures),
                             rows: rows, note: inspection.detail)
     }
@@ -181,11 +186,13 @@ struct SignatureBannerModel: Equatable {
         }
     }
 
-    private static func treeRows(_ tree: SignatureTree, newSignatureIDs: Set<String>) -> [Row] {
+    private static func treeRows(_ tree: SignatureTree, newSignatureIDs: Set<String>, validated: Bool) -> [Row] {
         let own = tree.signatures
             .sorted { newSignatureIDs.contains($0.id) && !newSignatureIDs.contains($1.id) }
-            .map { row(for: $0, depth: 0, isNew: newSignatureIDs.contains($0.id)) }
-        return own + documentRows(tree.documents, depth: 0, path: "", newSignatureIDs: newSignatureIDs)
+            .map { row(for: $0, depth: 0, isNew: newSignatureIDs.contains($0.id), validated: validated,
+                       showsCoverage: tree.documents.count > 1) }
+        return own + documentRows(tree.documents, depth: 0, path: "", newSignatureIDs: newSignatureIDs,
+                                  validated: validated)
     }
 
     /// Data objects with signatures of their own, and those that could not be verified.
@@ -193,7 +200,7 @@ struct SignatureBannerModel: Equatable {
     /// without signatures) is left out, as before. Ids carry the path, so the same signed
     /// file under two names never gives two rows one id.
     private static func documentRows(_ documents: [SignedDataObject], depth: Int, path: String,
-                                     newSignatureIDs: Set<String>) -> [Row] {
+                                     newSignatureIDs: Set<String>, validated: Bool) -> [Row] {
         documents.flatMap { document -> [Row] in
             let documentPath = path + document.name + "/"
             switch document.content {
@@ -204,14 +211,15 @@ struct SignatureBannerModel: Equatable {
                 let header = Row(id: "doc-" + documentPath, title: document.name, verdict: nil, badges: [],
                                  verdictLabel: nil,
                                  detail: SignatureTreePresentation.signatureCount(nested.signatures.count),
-                                 reason: nil, warning: nil, depth: depth, isNew: false)
+                                 reason: nil, timestamp: nil, warning: nil, depth: depth, isNew: false)
                 let signatures = nested.signatures.map { signature in
                     row(for: signature, depth: depth + 1, isNew: newSignatureIDs.contains(signature.id),
+                        validated: validated, showsCoverage: nested.documents.count > 1,
                         id: documentPath + signature.id)
                 }
                 return [header] + signatures
                     + documentRows(nested.documents.filter(isUnverified), depth: depth + 1, path: documentPath,
-                                   newSignatureIDs: newSignatureIDs)
+                                   newSignatureIDs: newSignatureIDs, validated: validated)
             case .skipped(.depthLimit):
                 return [warningRow(document, path: documentPath, depth: depth,
                                    "Podpisy v tomto súbore sa neoverovali (ďalšie vnorenie).")]
@@ -234,7 +242,7 @@ struct SignatureBannerModel: Equatable {
 
     private static func warningRow(_ document: SignedDataObject, path: String, depth: Int, _ text: String) -> Row {
         Row(id: "doc-" + path, title: document.name, verdict: nil, badges: [], verdictLabel: nil, detail: "",
-            reason: nil, warning: text, depth: depth, isNew: false)
+            reason: nil, timestamp: nil, warning: text, depth: depth, isNew: false)
     }
 
     private static func verdictLabel(_ state: DocumentSignatureInfo.State) -> String {
@@ -249,27 +257,43 @@ struct SignatureBannerModel: Equatable {
     }
 
     private static func row(for signature: DocumentSignatureInfo, depth: Int, isNew: Bool,
-                            id: String? = nil) -> Row {
+                            validated: Bool, showsCoverage: Bool, id: String? = nil) -> Row {
         var badges: [String] = []
         if let label = SignatureTreePresentation.qualificationLabel(signature.certificateQualification) {
             badges.append(label)
         }
-        if signature.hasQualifiedTimestamp {
-            badges.append("QTS")
-        } else if signature.hasTimestamp {
-            badges.append("Časová pečiatka")
-        }
         var parts: [String] = []
-        if let format = signature.format, !format.isEmpty { parts.append(format) }
-        if let time = signature.signingTime { parts.append(timeFormatter.string(from: time)) }
-        if !signature.coveredDocuments.isEmpty {
+        if let time = signature.signingTime { parts.append("Podpísané " + minuteFormatter.string(from: time)) }
+        if let format = signature.format, !format.isEmpty { parts.append(formatLabel(format)) }
+        if showsCoverage, !signature.coveredDocuments.isEmpty {
             parts.append("pokrýva " + signature.coveredDocuments.joined(separator: ", "))
         }
         let reason = signature.state == .valid ? nil
             : signature.detail.flatMap { $0.isEmpty ? nil : $0 }
         return Row(id: id ?? signature.id, title: displayName(signature), verdict: signature.state, badges: badges,
                    verdictLabel: verdictLabel(signature.state), detail: parts.joined(separator: " · "),
-                   reason: reason, warning: nil, depth: depth, isNew: isNew)
+                   reason: reason, timestamp: timestampLine(signature, validated: validated),
+                   warning: nil, depth: depth, isNew: isNew)
+    }
+
+    /// Who issued the timestamp and whether it is qualified come from full validation only:
+    /// the structural pass reports the issuer DN and judges no qualification.
+    private static func timestampLine(_ signature: DocumentSignatureInfo, validated: Bool) -> String? {
+        guard signature.hasTimestamp else { return nil }
+        var head = "Časová pečiatka"
+        if validated {
+            var facts: [String] = []
+            if let authority = signature.timestampAuthority, !authority.isEmpty { facts.append(authority) }
+            facts.append(signature.hasQualifiedTimestamp ? "kvalifikovaná" : "nekvalifikovaná")
+            head += ": " + facts.joined(separator: ", ")
+        }
+        guard let time = signature.timestampTime else { return head }
+        return head + " · " + secondFormatter.string(from: time)
+    }
+
+    /// "XAdES_BASELINE_T" reads "XAdES Baseline T".
+    private static func formatLabel(_ format: String) -> String {
+        format.split(separator: "_").map { $0 == "BASELINE" ? "Baseline" : String($0) }.joined(separator: " ")
     }
 
     private static func displayName(_ signature: DocumentSignatureInfo) -> String {
@@ -277,10 +301,13 @@ struct SignatureBannerModel: Equatable {
         return name.isEmpty ? unknownSigner : name
     }
 
-    private static let timeFormatter: DateFormatter = {
+    private static let minuteFormatter = formatter("d. M. yyyy HH:mm")
+    private static let secondFormatter = formatter("d. M. yyyy HH:mm:ss")
+
+    private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "sk_SK")
-        formatter.dateFormat = "d. M. yyyy HH:mm"
+        formatter.dateFormat = format
         return formatter
-    }()
+    }
 }

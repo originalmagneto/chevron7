@@ -11,7 +11,7 @@ When a signed PDF or ASiC-E is opened, its signatures appear only as the fourth 
 ## Goals
 
 1. One status banner above the document that says at a glance whether and by whom the document is signed and whether the signatures are valid.
-2. Details on demand, inline: the banner expands downward (the owner chose this over a popover, 2026-10-07), because a document carries few signatures (usually 1 to 4).
+2. Details on demand in a popover under the banner (revised 2026-10-07 after the owner's check of the test build: the inline expansion pushed the document down with four signatures).
 3. The same banner in four places: signing (prepare), signing (done), the Safari signing panel, ZaKo authorization.
 4. Signing stays the primary task: the signing inspector holds only what a new signature needs.
 
@@ -70,3 +70,8 @@ States (tone, symbol, headline; the symbol always accompanies the colour):
 ## Docs
 
 `CLAUDE.md` and `AGENTS.md` (identically): the signing bullet ("Signing an already signed document") and the Safari and ZaKo bullets name the banner, its states and the four places; one Slovak release note in `docs/releases/changes/`.
+
+## Revision after the owner's check (2026-10-07)
+
+- The inline expansion is replaced by a scrolling popover under the banner, opened by a bordered "Podpisy (N)" button with the `signature` symbol; nothing is remembered between documents and the document never moves.
+- Each row: verdict symbol and word, qualification, "Podpísané <time> · <format>" (format as "XAdES Baseline T"), a timestamp line "Časová pečiatka: <authority>, kvalifikovaná|nekvalifikovaná · <date and time to the second>" (authority and qualification only from full validation, as the structural pass reports the issuer DN), and "pokrýva" only in a container with more than one file. The QTS badge is dropped in favour of the timestamp line.
