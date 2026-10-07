@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** plan only, nothing implemented. Written 2026-10-07 on branch `chevron7-streamlined` (from `main` at `e1220374`) so the work can start in a fresh session on another Mac.
+**Status:** DRAFT for further elaboration with the owner. Do not execute any task until the owner explicitly approves the plan. Nothing is implemented. Written 2026-10-07 on branch `chevron7-streamlined` (from `main` at `e1220374`) so the discussion can continue in a fresh session on another Mac. Open points to settle first: whether to drop the veraPDF stack (Task 3 Step 2), whether to relax the Zulu FX JDK requirement (Task 2 Step 2), and how far to go beyond the engine (other size or simplification ideas).
 
 **Goal:** Shrink the shipped app from 285 MB installed (183 MB DMG, v1.3.3) to about 125 MB installed (about 110 MB DMG) by removing the JavaFX desktop UI stack and other engine parts Chevron7 never runs, without changing any signing behaviour.
 
