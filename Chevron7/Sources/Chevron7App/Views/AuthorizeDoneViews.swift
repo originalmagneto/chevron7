@@ -174,12 +174,16 @@ struct AuthorizeView: View {
                         .font(.callout)
                 }
             }
-            Text(store.inputSignatureInspection.detail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel("Detail overenia vstupných podpisov")
-                .accessibilityValue(store.inputSignatureInspection.detail)
+            if let banner = SignatureBannerModel.make(from: store.inputSignatureInspection) {
+                SignatureBanner(model: banner)
+            } else {
+                Text(store.inputSignatureInspection.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Detail overenia vstupných podpisov")
+                    .accessibilityValue(store.inputSignatureInspection.detail)
+            }
         }
         .glassCard(padding: 14)
         .frame(maxWidth: .infinity, alignment: .leading)
