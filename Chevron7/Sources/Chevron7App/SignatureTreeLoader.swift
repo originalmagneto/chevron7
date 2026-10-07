@@ -64,6 +64,14 @@ final class SignatureTreeLoader {
         await task.value
     }
 
+    /// Shows a known state without inspecting, as a test or a preview sets it; a running
+    /// validation is dropped so it cannot overwrite it.
+    func show(_ state: SignatureTreeState) {
+        run = UUID()
+        setValidationTask(nil)
+        self.state = state
+    }
+
     func reset() {
         run = UUID()
         state = SignatureTreeState()

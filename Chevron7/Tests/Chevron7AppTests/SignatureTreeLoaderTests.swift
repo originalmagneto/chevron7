@@ -59,4 +59,17 @@ final class SignatureTreeLoaderTests: XCTestCase {
         // empty tree of the failure remained and the document read as unsigned.
         XCTAssertEqual(loader.state, SignatureTreeState(tree: Self.structural, phase: .validationUnavailable("offline")))
     }
+
+    func testShowReplacesTheStateAndDropsARunningValidation() async throws {
+        let provider = TreeProvider(inspect: .tree(Self.structural), validate: .tree(Self.validated))
+        let loader = SignatureTreeLoader(provider: provider)
+        await loader.load(try file())
+        let task = try XCTUnwrap(loader.validationTask)
+        let shown = SignatureTreeState(tree: Self.structural, phase: .validated)
+        loader.show(shown)
+        XCTAssertTrue(task.isCancelled)
+        await provider.releaseValidation()
+        await task.value
+        XCTAssertEqual(loader.state, shown)
+    }
 }

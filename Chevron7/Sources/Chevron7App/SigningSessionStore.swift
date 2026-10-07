@@ -61,7 +61,10 @@ final class SigningSessionStore {
     private(set) var timestampQualificationByAuthority: [String: TimestampQualification] = [:]
     @ObservationIgnored private(set) lazy var existingTrees = SignatureTreeLoader(provider: signingProvider)
     @ObservationIgnored private(set) lazy var resultTrees = SignatureTreeLoader(provider: signingProvider)
-    var existingSignatureState: SignatureTreeState { existingTrees.state }
+    var existingSignatureState: SignatureTreeState {
+        get { existingTrees.state }
+        set { existingTrees.show(newValue) }
+    }
     var resultSignatureState: SignatureTreeState { resultTrees.state }
     /// Top-level signatures, for callers that predate the tree.
     var existingSignatures: [DocumentSignatureInfo] { existingSignatureState.tree.signatures }
