@@ -879,10 +879,11 @@ git commit -m "feat(signing): show existing signatures as a banner above the doc
   @MainActor @Observable final class WebSigningSignatureCheck {
       init(temporaryRoot: URL = FileManager.default.temporaryDirectory)
       private(set) var loader: SignatureTreeLoader?
+      private(set) var loadTask: Task<Void, Never>?
       private(set) var fileURL: URL?
       var bannerModel: SignatureBannerModel? { get }
       static func inspects(fileName: String, data: Data) -> Bool
-      func start(fileName: String, data: Data, provider: any QualifiedSigningProviding) async
+      func start(fileName: String, data: Data, provider: any QualifiedSigningProviding)  // synchronous setup, loads in loadTask
       func stop()
   }
   ```
@@ -926,8 +927,9 @@ final class WebSigningSignatureCheckTests: XCTestCase {
         let provider = TreeProvider(inspect: .tree(Self.signed), validate: .tree(Self.signed))
         let root = root()
         let check = WebSigningSignatureCheck(temporaryRoot: root)
-        await check.start(fileName: "a.pdf", data: Self.unsignedPDF, provider: provider)
+        check.start(fileName: "a.pdf", data: Self.unsignedPDF, provider: provider)
         XCTAssertNil(check.loader)
+        XCTAssertNil(check.loadTask)
         XCTAssertNil(check.bannerModel)
         XCTAssertEqual(files(in: root), [])
     }
@@ -936,7 +938,8 @@ final class WebSigningSignatureCheckTests: XCTestCase {
         let provider = TreeProvider(inspect: .tree(Self.signed), validate: .tree(Self.signed))
         let root = root()
         let check = WebSigningSignatureCheck(temporaryRoot: root)
-        await check.start(fileName: "zmluva.pdf", data: Self.signedPDF, provider: provider)
+        check.start(fileName: "zmluva.pdf", data: Self.signedPDF, provider: provider)
+        await check.loadTask?.value
         XCTAssertEqual(check.bannerModel?.tone, .checking)
         XCTAssertEqual(files(in: root).count, 1)
         let validation = try XCTUnwrap(check.loader?.validationTask)
@@ -949,19 +952,20 @@ final class WebSigningSignatureCheckTests: XCTestCase {
         await provider.releaseValidation()
     }
 
-    /// The coordinator starts the check in a task; a panel closed before it ran must not
-    /// leave a loader or a file behind.
-    func testStopBeforeStartRunsLeavesNothing() async {
+    /// A panel closed right after it opened: the load that had not run yet does nothing,
+    /// and neither a loader nor a file is left behind.
+    func testStopRightAfterStartLeavesNothing() async throws {
         let provider = TreeProvider(inspect: .tree(Self.signed), validate: .tree(Self.signed))
         let root = root()
         let check = WebSigningSignatureCheck(temporaryRoot: root)
-        let start = Task { await check.start(fileName: "zmluva.pdf", data: Self.signedPDF, provider: provider) }
+        check.start(fileName: "zmluva.pdf", data: Self.signedPDF, provider: provider)
+        let load = try XCTUnwrap(check.loadTask)
         check.stop()
-        await start.value
-        check.stop()
+        await load.value
         XCTAssertNil(check.loader)
+        XCTAssertNil(check.bannerModel)
         XCTAssertEqual(files(in: root), [])
-        await provider.releaseValidation()
+        XCTAssertEqual(provider.validateCalls, 0)
     }
 }
 ```
@@ -990,10 +994,9 @@ import Chevron7Kit
 @Observable
 final class WebSigningSignatureCheck {
     private(set) var loader: SignatureTreeLoader?
+    private(set) var loadTask: Task<Void, Never>?
     private(set) var fileURL: URL?
     private let temporaryRoot: URL
-    /// A `stop` while `start` is still writing the file must win: the request is over.
-    private var generation = UUID()
 
     init(temporaryRoot: URL = FileManager.default.temporaryDirectory) {
         self.temporaryRoot = temporaryRoot
@@ -1008,13 +1011,14 @@ final class WebSigningSignatureCheck {
             && (data.starts(with: Data("%PDF".utf8)) || data.starts(with: Data("PK".utf8)))
     }
 
-    func start(fileName: String, data: Data, provider: any QualifiedSigningProviding) async {
+    /// Sets everything up at once, so a `stop` that follows always finds it; only the
+    /// engine work runs later, in `loadTask`, and a cancelled one never starts.
+    func start(fileName: String, data: Data, provider: any QualifiedSigningProviding) {
         stop()
-        let generation = self.generation
         guard Self.inspects(fileName: fileName, data: data) else { return }
         let directory = temporaryRoot.appendingPathComponent("chevron7-web-signatures-\(UUID().uuidString)")
-        let name = (fileName as NSString).lastPathComponent.isEmpty ? "dokument" : (fileName as NSString).lastPathComponent
-        let url = directory.appendingPathComponent(name)
+        let lastComponent = (fileName as NSString).lastPathComponent
+        let url = directory.appendingPathComponent(lastComponent.isEmpty ? "dokument" : lastComponent)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try data.write(to: url, options: [.atomic])
@@ -1022,18 +1026,18 @@ final class WebSigningSignatureCheck {
             try? FileManager.default.removeItem(at: directory)
             return
         }
-        guard self.generation == generation else {
-            try? FileManager.default.removeItem(at: directory)
-            return
-        }
         let loader = SignatureTreeLoader(provider: provider)
         self.loader = loader
         fileURL = url
-        await loader.load(url)
+        loadTask = Task {
+            guard !Task.isCancelled else { return }
+            await loader.load(url)
+        }
     }
 
     func stop() {
-        generation = UUID()
+        loadTask?.cancel()
+        loadTask = nil
         loader?.reset()
         loader = nil
         if let fileURL {
@@ -1053,12 +1057,10 @@ In `WebSigningCoordinator`, next to `private(set) var pending: Pending?` (line 7
     let signatureCheck = WebSigningSignatureCheck()
 ```
 
-In `handle(_:)`, right after `startCardWatch()` (after line 291), before the continuation:
+In `handle(_:)`, right after `startCardWatch()` (after line 291), before the continuation (synchronous, so `finish` always finds what it has to stop):
 
 ```swift
-        let fileName = request.filename
-        let provider = self.provider
-        Task { await signatureCheck.start(fileName: fileName, data: bytes, provider: provider) }
+        signatureCheck.start(fileName: request.filename, data: bytes, provider: provider)
 ```
 
 In `finish(_:token:)` (line 574), after `pending = nil`:
@@ -1155,7 +1157,7 @@ Run, from `Chevron7/`:
 ```bash
 swift test
 scripts/check-rename-boundary.sh
-grep -rn '—' Sources/Chevron7App/SignatureBannerModel.swift Sources/Chevron7App/SignatureTreeLoader.swift Sources/Chevron7App/WebSigningSignatureCheck.swift Sources/Chevron7App/Views/SignatureBanner.swift ../CLAUDE.md ../docs/releases/changes/feat-podpisy-na-prvy-pohlad.md
+grep -rn $'\u2014' Sources/Chevron7App/SignatureBannerModel.swift Sources/Chevron7App/SignatureTreeLoader.swift Sources/Chevron7App/WebSigningSignatureCheck.swift Sources/Chevron7App/Views/SignatureBanner.swift ../CLAUDE.md ../docs/releases/changes/feat-podpisy-na-prvy-pohlad.md
 ```
 Expected: all tests PASS (a `RealStorageGuard` failure while Chevron7 itself writes its data during the run is environmental: quit Chevron7 and rerun that test); "Boundary holds"; the grep prints nothing.
 
