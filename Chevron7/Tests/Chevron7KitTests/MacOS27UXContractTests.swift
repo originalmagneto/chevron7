@@ -38,7 +38,11 @@ final class MacOS27UXContractTests: XCTestCase {
         XCTAssertTrue(MacOS27Layout.showsClausePreview(availableWidth: 1100))
     }
 
-    func testInspectorLayoutCanCollapseWithoutWideningRoot() {
+    /// The root minimum is only a floor below the columns: with an inspector beside the
+    /// canvas the window's minimum comes from the columns themselves (`MinimumSizeFloor`;
+    /// the inspector never collapsed on its own, and a window narrower than its columns
+    /// crashed in 1.4.3, see SigningWindowResizeTests).
+    func testRootMinimumIsOnlyAFloorBelowTheColumns() {
         XCTAssertEqual(MacOS27Layout.inspectorMinimumWidth, 0)
         XCTAssertLessThan(
             MacOS27Layout.rootMinimumWidth,
