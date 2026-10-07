@@ -527,7 +527,7 @@ Najnovšia verzia: **[Chevron7.dmg](https://github.com/originalmagneto/chevron7/
 
 <p>Od v0.22.2 je každé vydanie podpísané Developer ID tímu the Software s.r.o. (Q7AU96CW7H) a notarizované Apple. Staršie vydania boli podpísané ad hoc a pri prvom spustení ich bolo treba povoliť v <strong>Systémové nastavenia ▸ Súkromie a bezpečnosť ▸ Aj tak otvoriť</strong>.</p>
 
-<p>Overenie stiahnutého DMG: v poznámkach k vydaniu je SHA-256 odtlačok; porovnajte ho s výstupom <code>shasum -a 256 &lt;stiahnutý súbor&gt;.dmg</code>. Vydania do v0.4.0 vrátane vyšli ešte pod názvom Autogram macOS.</p>
+<p>Overenie stiahnutého DMG: GitHub uvádza SHA-256 odtlačok pri súbore v prílohách vydania; porovnajte ho s výstupom <code>shasum -a 256 Chevron7.dmg</code>. Vydania do v0.4.0 vrátane vyšli ešte pod názvom Autogram macOS.</p>
 </details>
 
 <details>
@@ -711,7 +711,7 @@ Aplikácia sa nainštaluje do `/Applications/Chevron7.app`.
 
 ### Vydania
 
-Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) beží pri každom pushi do `main` na GitHub runneri `xcode-27` (macOS 27, arm64). Verziu odvodí z [Conventional Commits](https://www.conventionalcommits.org/) od posledného tagu `native-v*`: `feat` zvýši minor, `fix` a `perf` patch, `!` alebo `BREAKING CHANGE` major (pri 0.x minor). Samé `docs`, `test`, `chore` či `refactor` vydanie nevytvoria a commit s `[skip release]` sa nepočíta. Workflow zostaví engine aj aplikáciu, zabalí DMG so `Install Safari Bridge.command`, pripojí `SHA256SUMS.txt` a vytvorí tag aj GitHub Release. Do repozitára nič nezapisuje: verziu aplikácia dostane cez `CHEVRON7_VERSION`, lokálny build ju berie z posledného tagu.
+Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) beží pri každom pushi do `main` na GitHub runneri `xcode-27` (macOS 27, arm64). Verziu odvodí z [Conventional Commits](https://www.conventionalcommits.org/) od posledného tagu `native-v*`: `feat` zvýši minor, `fix` a `perf` patch, `!` alebo `BREAKING CHANGE` major (pri 0.x minor). Samé `docs`, `test`, `chore` či `refactor` vydanie nevytvoria a commit s `[skip release]` sa nepočíta. Workflow zostaví engine aj aplikáciu, zabalí DMG so `Install Safari Bridge.command` a vytvorí tag aj GitHub Release s jediným DMG `Chevron7.dmg` (trvalý odkaz na najnovšiu verziu aj súbor, ktorý sťahujú automatické aktualizácie) a `appcast.xml` pre aktualizácie. Poznámky k vydaniu odkazujú na túto časť README pre požiadavky a inštaláciu. Do repozitára nič nezapisuje: verziu aplikácia dostane cez `CHEVRON7_VERSION`, lokálny build ju berie z posledného tagu.
 
 Poznámky k vydaniu sa zostavia z commitov; ručne napísaný `docs/releases/vX.Y.Z.md` má prednosť. Vydanie s konkrétnou verziou sa dá spustiť aj ručne cez **Actions ▸ Release ▸ Run workflow**. Rovnaký postup lokálne:
 

@@ -64,19 +64,5 @@ else
     section "Opravy" '^(fix|perf)(\([^)]*\))?!?:'
 fi
 cat <<NOTES
-## Požiadavky
-
-- Apple Silicon (arm64), macOS 27 alebo novší.
-- Pri podpisovaní kartou treba príslušný PKCS#11 ovládač, napríklad eID klient alebo I.CA SecureStore. Podpis mobilom vyžaduje Autogram v mobile a podporovaný NFC eID.
-- Java engine a runtime sú v aplikácii, samostatnú Javu netreba.
-
-## Inštalácia
-
-1. Otvorte \`Chevron7-v$version.dmg\` a presuňte \`Chevron7.app\` do **Applications**.
-2. Pri prvom spustení macOS raz potvrdí otvorenie aplikácie stiahnutej z internetu.
-3. Na podpisovanie zo Safari si aplikácia pri prvom spustení sama zaregistruje prepojenie (macOS ho ohlási ako položku na pozadí). Potom v Safari zapnite rozšírenie **Chevron7** v **Settings > Extensions**.
-
-Najnovšia verzia je vždy na https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg
-
-Kontrolné súčty sú v \`SHA256SUMS.txt\`. Web: https://chevron7.slovensko.app
+Požiadavky, inštalácia a trvalý odkaz na najnovšiu verziu: [README, časť Stiahnutie](https://github.com/originalmagneto/chevron7#stiahnutie).
 NOTES
