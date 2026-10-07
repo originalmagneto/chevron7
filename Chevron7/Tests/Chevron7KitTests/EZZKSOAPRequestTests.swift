@@ -18,7 +18,7 @@ final class EZZKSOAPRequestTests: XCTestCase {
         XCTAssertEqual(EZZKEnvironment.production.soapServiceURL.absoluteString,
                        "https://ezzk.iomo.sk/EZZK.Svc.Wcf/EZZKService.svc")
         XCTAssertEqual(EZZKEnvironment.sandbox.pinnedCertificateSHA256,
-                       "d16f5b61720a595308565dd84e32935e7a7de83a6c2fa8f0e6413451ed2b12e2")
+                       "c644c9fcf80417880eecc8fdffccc19d9e495d878e6473e04d9c3a366f8cca09")
         XCTAssertNil(EZZKEnvironment.production.pinnedCertificateSHA256)
     }
 

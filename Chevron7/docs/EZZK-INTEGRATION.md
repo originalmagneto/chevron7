@@ -240,7 +240,7 @@ only the account name.
 
 ## Maintenance
 
-- The test certificate is self-signed, `CN=ezzk-test.iomo.sk`, and expires on 2026-10-20. When it is renewed, read the new digest and update `EZZKEnvironment.pinnedCertificateSHA256`:
+- The test certificate is self-signed, `CN=ezzk-test.iomo.sk`; the one issued on 2026-09-28 expires on 2027-10-25 (the server switched to it before the previous one, pinned until v1.4.3 and valid until 2026-10-20, expired, without notice, which broke test mode until the pin was updated). When it is renewed, read the new digest and update `EZZKEnvironment.pinnedCertificateSHA256`:
 
   ```bash
   echo | openssl s_client -connect ezzk-test.iomo.sk:443 -servername ezzk-test.iomo.sk 2>/dev/null | openssl x509 -outform DER | shasum -a 256
