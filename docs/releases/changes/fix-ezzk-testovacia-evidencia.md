@@ -1,0 +1,1 @@
+- **Testovacia evidencia EZZK opäť funguje.** Prevádzkovateľ EZZK vymenil certifikát testovacieho servera a Chevron7 sa naň odmietal pripojiť s hlásením, že sa certifikát testovacieho prostredia zmenil. Chevron7 teraz pozná nový certifikát. Ostrej evidencie sa to netýkalo.
