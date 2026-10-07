@@ -27,6 +27,34 @@
 
 Podrobný popis všetkých funkcií je v [príručke](docs/PRIRUCKA.md).
 
+## Ako to funguje
+
+**Zaručená konverzia** prejde piatimi krokmi od skenu listiny po kontajner pre klienta. Evidenčné číslo pridelí EZZK pri autorizácii a podpísaný záznam o konverzii sa do centrálnej evidencie odošle sám.
+
+<p align="center">
+  <img src="docs/diagrams/process-zako.svg" alt="Zaručená konverzia: vstup, overenie, doložka, autorizácia a hotovo, s evidenčným číslom z EZZK a záznamom odoslaným do CEZZK" width="100%">
+</p>
+
+**Bezpečnostné prvky** hľadá umelá inteligencia priamo na Macu. Každý návrh skontroluje advokát a právne posúdenie ostáva na ňom.
+
+<p align="center">
+  <img src="docs/diagrams/ai-vision.svg" alt="AI Vision: analýza strany, návrhy kandidátov, lokálne posúdenie výrezu a kontrola človekom" width="100%">
+</p>
+
+**Detekcia sa učí z vašej kontroly.** Čo potvrdíte alebo odmietnete, sa uloží ako príklad len na tomto Macu. Na ďalšom dokumente sú preto návrhy presnejšie.
+
+<p align="center">
+  <img src="docs/diagrams/ai-learning.svg" alt="Učenie detekcie: potvrdiť uloží pozitívny príklad, odmietnuť negatívny, zmazať vlastný rámec nič neuloží; ďalší dokument sa porovná s vašimi príkladmi" width="100%">
+</p>
+
+**Podpis mobilom** nepotrebuje čítačku. Mac dokument zašifruje kľúčom, ktorý pozná len on, iPhone ho podpíše občianskym preukazom cez NFC a podpísaný súbor sa vráti na Mac.
+
+<p align="center">
+  <img src="docs/diagrams/mobile-signing.svg" alt="Podpis mobilom: Chevron7 nahrá zašifrovaný dokument na server Autogramu v mobile, iPhone ho po naskenovaní QR kódu podpíše a Mac si podpísaný dokument stiahne" width="100%">
+</p>
+
+Ďalšie diagramy (rýchla akcia vo Finderi, PDF/A, stavy evidencie, trénovanie detektora) sú v [galérii diagramov](docs/gallery.html) a v [príručke](docs/PRIRUCKA.md).
+
 ## Stiahnutie
 
 **[Stiahnuť Chevron7.dmg](https://github.com/originalmagneto/chevron7/releases/latest/download/Chevron7.dmg)** (odkaz vždy vedie na najnovšiu verziu). Nainštalovaná aplikácia sa ďalej aktualizuje sama, ponuka **Chevron7 ▸ Skontrolovať aktualizácie…** to urobí hneď. Všetky vydania a ich poznámky sú v [GitHub Releases](https://github.com/originalmagneto/chevron7/releases).
@@ -87,6 +115,10 @@ Ak vám Chevron7 šetrí čas, môžete dobrovoľne [podporiť jeho vývoj](http
 </p>
 
 ## Pre vývojárov
+
+<p align="center">
+  <img src="docs/diagrams/architecture.svg" alt="Architektúra Chevron7: povrchy (SwiftUI, Safari, Autogram v mobile), jadro (session stores, Chevron7Kit, podpisové jadro) a dôvera (evidencia, EZZK, karty)" width="100%">
+</p>
 
 Zostavenie zo zdrojov, testy, vydania, nástroje príkazového riadka a architektúra sú v [Chevron7/docs/DEVELOPMENT.md](Chevron7/docs/DEVELOPMENT.md). Pravidlá projektu a podrobné poznámky k architektúre sú v [CLAUDE.md](CLAUDE.md), fakty, ktoré smie tvrdiť web, v [PRODUCT.md](PRODUCT.md) a vizuálny systém webu v [DESIGN.md](DESIGN.md).
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1160" height="520" viewBox="0 0 1160 520" role="img" aria-labelledby="proc-title proc-desc">
   <title id="proc-title">Zaručená konverzia: pracovný tok a stav integrácie</title>
-  <desc id="proc-desc">Päť krokov aplikácie od vstupu cez kontrolu a doložku po autorizáciu a výsledok. EZZK evidenčné číslo je podmienkou autorizácie; produkčné odoslanie do CEZZK čaká na integračné overenie.</desc>
+  <desc id="proc-desc">Päť krokov aplikácie od vstupu cez kontrolu a doložku po autorizáciu a výsledok. EZZK pridelí evidenčné číslo pri autorizácii a podpísaný záznam o konverzii sa sám odošle do CEZZK.</desc>
   <defs><marker id="proc-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4f5d75"/></marker></defs>
   <rect width="1160" height="520" fill="#f5f5f5"/>
   <text x="32" y="50" font-family="Georgia, serif" font-size="30" fill="#2d3142">Zaručená konverzia: od skenu po výsledok</text>
@@ -33,23 +33,23 @@
     <text x="722" y="160" font-size="19" font-weight="600" fill="#2d3142">4 · Autorizácia</text>
     <text x="722" y="198" font-size="15" fill="#4f5d75">PDF/A + XML</text>
     <text x="722" y="224" font-size="15" fill="#4f5d75">Mandátny KEP + QTS</text>
-    <text x="722" y="250" font-size="15" fill="#4f5d75">Karta alebo mobil</text>
+    <text x="722" y="250" font-size="15" fill="#4f5d75">Karta s mandátom</text>
   </g>
   <g font-family="Arial, Helvetica, sans-serif"><rect x="928" y="128" width="200" height="160" rx="8" fill="#ffffff" stroke="#b5bdc9"/>
     <text x="946" y="160" font-size="19" font-weight="600" fill="#2d3142">5 · Hotovo</text>
-    <text x="946" y="198" font-size="15" fill="#4f5d75">Výsledné súbory</text>
-    <text x="946" y="224" font-size="15" fill="#4f5d75">Lokálna evidencia</text>
+    <text x="946" y="198" font-size="15" fill="#4f5d75">Kontajner pre klienta</text>
+    <text x="946" y="224" font-size="15" fill="#4f5d75">Záznam v Registri</text>
     <text x="946" y="250" font-size="15" fill="#4f5d75">Náhľad a Finder</text>
   </g>
   <g font-family="Arial, Helvetica, sans-serif">
     <rect x="480" y="356" width="424" height="100" rx="8" fill="#eceff3" stroke="#b5bdc9"/>
     <text x="500" y="388" font-size="18" font-weight="600" fill="#2d3142">EZZK: evidenčné číslo a čas</text>
     <text x="500" y="414" font-size="15" fill="#4f5d75">Prihlásenie a dostupná služba sú podmienkou.</text>
-    <text x="500" y="438" font-size="15" fill="#4f5d75">Bez evidenčného čísla autorizácia nepokračuje.</text>
-    <rect x="928" y="356" width="200" height="100" rx="8" fill="#f5f5f5" stroke="#b5bdc9" stroke-dasharray="4 4"/>
-    <text x="946" y="388" font-size="18" font-weight="600" fill="#2d3142">CEZZK produkcia</text>
-    <text x="946" y="414" font-size="15" fill="#4f5d75">Odoslanie čaká na</text>
-    <text x="946" y="438" font-size="15" fill="#4f5d75">integračné overenie.</text>
+    <text x="500" y="438" font-size="15" fill="#4f5d75">Číslo pridelí EZZK pri autorizácii.</text>
+    <rect x="928" y="356" width="200" height="100" rx="8" fill="#eceff3" stroke="#b5bdc9"/>
+    <text x="946" y="388" font-size="18" font-weight="600" fill="#2d3142">CEZZK</text>
+    <text x="946" y="414" font-size="15" fill="#4f5d75">Záznam sa odošle sám,</text>
+    <text x="946" y="438" font-size="15" fill="#4f5d75">stav ukáže Register.</text>
     <text x="32" y="492" font-size="14" fill="#4f5d75">Každá neprázdna strana vyžaduje ľudskú kontrolu. Formulárový balík zostáva pilotný.</text>
   </g>
 </svg>
