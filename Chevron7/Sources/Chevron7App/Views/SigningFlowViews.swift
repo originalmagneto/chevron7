@@ -19,7 +19,7 @@ struct SigningFlowView: View {
         .overlay {
             if isTargeted { targetedOverlay }
         }
-        .onDrop(of: [UTType.pdf, UTType(importedAs: "org.autogram.asice", conformingTo: .data), .jpeg, .png, .tiff], isTargeted: $isTargeted) { providers in
+        .onDrop(of: ContainerFileTypes.documents + [.jpeg, .png, .tiff], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
         .task { await store.refreshIdentities() }
@@ -51,8 +51,12 @@ struct SigningFlowView: View {
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         let pdfProvider = providers.first { $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) }
-        let asiceType = UTType(importedAs: "org.autogram.asice", conformingTo: .data)
-        let asiceProvider = providers.first { $0.hasItemConformingToTypeIdentifier(asiceType.identifier) }
+        let asiceTypes = ContainerFileTypes.asice
+        let asiceProvider = providers.first { provider in
+            asiceTypes.contains { provider.hasItemConformingToTypeIdentifier($0.identifier) }
+        }
+        let asiceType = asiceTypes.first { asiceProvider?.hasItemConformingToTypeIdentifier($0.identifier) == true }
+            ?? asiceTypes[0]
         let imageTypes = [UTType.jpeg, .png, .tiff, .heic]
         let imageProvider = imageTypes.compactMap { type in
             providers.first { $0.hasItemConformingToTypeIdentifier(type.identifier) } != nil ? type : nil
@@ -189,7 +193,7 @@ struct SigningIntakeView: View {
 
     private func openPanel() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf, UTType(importedAs: "org.autogram.asice", conformingTo: .data)]
+        panel.allowedContentTypes = ContainerFileTypes.documents
         panel.allowsMultipleSelection = true
         panel.message = "Vyberte PDF dokumenty na podpísanie."
         panel.begin { response in
