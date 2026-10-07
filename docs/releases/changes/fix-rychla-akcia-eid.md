@@ -1,0 +1,1 @@
+- **Rýchla akcia vo Finderi s občianskym preukazom pýta PIN menej krát.** Pri podpise eID kartou cez pravé tlačidlo vo Finderi sa Chevron7 už nepýta na PIN vo vlastnom okne (eID ho od neho nepotrebuje) a vopred nečíta certifikáty z karty, čo otváralo okno eID klienta o raz viac. Ostanú len okná eID klienta pri samotnom podpise, rovnako ako v aplikácii.
