@@ -962,11 +962,9 @@ struct SigningDoneView: View {
         VStack(spacing: 10) {
             if let banner = SignatureBannerModel.make(
                 from: store.resultSignatureState,
-                // Only a source inspected in this session tells which signature is new;
-                // a queue item signed earlier marks none.
-                newSignatureIDs: store.existingSignatureState.phase == .idle ? [] :
-                    SignatureBannerModel.newSignatureIDs(existing: store.existingSignatureState.tree,
-                                                         result: store.resultSignatureState.tree)) {
+                // Only a source inspected in this session tells which signature is new.
+                newSignatureIDs: SignatureBannerModel.newSignatureIDs(existing: store.existingSignatureState,
+                                                                      result: store.resultSignatureState.tree)) {
                 SignatureBanner(model: banner,
                                 onRevalidate: { Task { await store.revalidateResultSignatures() } },
                                 revalidateDisabled: store.isSigning)

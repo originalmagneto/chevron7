@@ -124,9 +124,16 @@ private struct SignatureBannerRow: View {
                     ForEach(row.badges, id: \.self) { badge in
                         Text(badge).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     }
+                    if let verdictLabel = row.verdictLabel, let verdict = row.verdict {
+                        Text(verdictLabel).font(.caption2).foregroundStyle(SignatureTreePresentation.tint(verdict))
+                    }
                 }
                 if !row.detail.isEmpty {
                     Text(row.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if let reason = row.reason {
+                    Text(reason).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let warning = row.warning {
                     Text(warning).font(.caption2).foregroundStyle(.orange)

@@ -46,6 +46,13 @@ final class SignatureTreeLoader {
     }
 
     func revalidate(_ url: URL) async {
+        // A failed inspection left no tree to validate; validating it would turn the
+        // failure into an empty tree, which reads as an unsigned document.
+        if case .failed = state.phase {
+            await load(url)
+            await validationTask?.value
+            return
+        }
         let run = UUID()
         self.run = run
         let wasValidated = state.phase == .validated

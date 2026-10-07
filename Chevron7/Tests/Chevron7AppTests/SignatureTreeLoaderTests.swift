@@ -42,4 +42,21 @@ final class SignatureTreeLoaderTests: XCTestCase {
         XCTAssertEqual(loader.state, SignatureTreeState())
         XCTAssertNil(loader.validationTask)
     }
+
+    /// After a failed inspection there is no tree to validate: "Overiť znova" inspects
+    /// afresh instead of turning the failure into an empty, signature-less tree.
+    func testRevalidateAfterAFailedInspectionInspectsAgain() async throws {
+        let provider = TreeProvider(inspect: .failed("Engine zlyhal."), validate: .failed("offline"))
+        let loader = SignatureTreeLoader(provider: provider)
+        let url = try file()
+        await loader.load(url)
+        XCTAssertEqual(loader.state.phase, .failed("Engine zlyhal."))
+        provider.inspectResult = .tree(Self.structural)
+        await provider.releaseValidation()
+        await loader.revalidate(url)
+        await loader.validationTask?.value
+        // The signatures found by the new inspection stay, without a verdict; before, the
+        // empty tree of the failure remained and the document read as unsigned.
+        XCTAssertEqual(loader.state, SignatureTreeState(tree: Self.structural, phase: .validationUnavailable("offline")))
+    }
 }

@@ -14,7 +14,11 @@ struct SignatureBannerModel: Equatable {
         let title: String
         let verdict: DocumentSignatureInfo.State?
         let badges: [String]
+        /// "Platný", "Neplatný", "Neurčitý" or "Neoverené"; nil for a document row.
+        let verdictLabel: String?
         let detail: String
+        /// Why the validator did not call a signature valid, when it said.
+        let reason: String?
         let warning: String?
         let depth: Int
         let isNew: Bool
@@ -64,6 +68,18 @@ struct SignatureBannerModel: Equatable {
         let rows = inspection.signatures.map { row(for: $0, depth: 0, isNew: false) }
         return verdictModel(summary: Counts(inspection.signatures), names: namesSummary(inspection.signatures),
                             rows: rows, note: inspection.detail)
+    }
+
+    /// Which signatures of `result` this session added, judged against the source's tree
+    /// only once that tree was actually inspected: an idle, running or failed inspection
+    /// leaves it empty, and every earlier signature would read as new.
+    static func newSignatureIDs(existing: SignatureTreeState, result: SignatureTree) -> Set<String> {
+        switch existing.phase {
+        case .structural, .validated, .validationUnavailable:
+            return newSignatureIDs(existing: existing.tree, result: result)
+        case .idle, .inspecting, .failed:
+            return []
+        }
     }
 
     /// The signatures this session added: those whose id the source did not have, or, when
@@ -169,32 +185,71 @@ struct SignatureBannerModel: Equatable {
         let own = tree.signatures
             .sorted { newSignatureIDs.contains($0.id) && !newSignatureIDs.contains($1.id) }
             .map { row(for: $0, depth: 0, isNew: newSignatureIDs.contains($0.id)) }
-        let documents = tree.documents.flatMap { document -> [Row] in
+        return own + documentRows(tree.documents, depth: 0, path: "", newSignatureIDs: newSignatureIDs)
+    }
+
+    /// Data objects with signatures of their own, and those that could not be verified.
+    /// An unsigned data object (the engine lists every PDF, an unsigned one as a signed PDF
+    /// without signatures) is left out, as before. Ids carry the path, so the same signed
+    /// file under two names never gives two rows one id.
+    private static func documentRows(_ documents: [SignedDataObject], depth: Int, path: String,
+                                     newSignatureIDs: Set<String>) -> [Row] {
+        documents.flatMap { document -> [Row] in
+            let documentPath = path + document.name + "/"
             switch document.content {
             case .plain:
                 return []
             case .signed(_, let nested):
-                let header = Row(id: "doc-" + document.name, title: document.name, verdict: nil, badges: [],
+                guard !nested.signatures.isEmpty || nested.isContainer else { return [] }
+                let header = Row(id: "doc-" + documentPath, title: document.name, verdict: nil, badges: [],
+                                 verdictLabel: nil,
                                  detail: SignatureTreePresentation.signatureCount(nested.signatures.count),
-                                 warning: nil, depth: 0, isNew: false)
-                return [header] + nested.signatures.map { row(for: $0, depth: 1, isNew: newSignatureIDs.contains($0.id)) }
+                                 reason: nil, warning: nil, depth: depth, isNew: false)
+                let signatures = nested.signatures.map { signature in
+                    row(for: signature, depth: depth + 1, isNew: newSignatureIDs.contains(signature.id),
+                        id: documentPath + signature.id)
+                }
+                return [header] + signatures
+                    + documentRows(nested.documents.filter(isUnverified), depth: depth + 1, path: documentPath,
+                                   newSignatureIDs: newSignatureIDs)
             case .skipped(.depthLimit):
-                return [warningRow(document, "Podpisy v tomto súbore sa neoverovali (ďalšie vnorenie).")]
+                return [warningRow(document, path: documentPath, depth: depth,
+                                   "Podpisy v tomto súbore sa neoverovali (ďalšie vnorenie).")]
             case .skipped(.tooLarge):
-                return [warningRow(document, "Podpisy v tomto súbore sa neoverovali (súbor je príliš veľký).")]
+                return [warningRow(document, path: documentPath, depth: depth,
+                                   "Podpisy v tomto súbore sa neoverovali (súbor je príliš veľký).")]
             case .failed:
-                return [warningRow(document, "Podpisy v tomto súbore sa nepodarilo overiť.")]
+                return [warningRow(document, path: documentPath, depth: depth,
+                                   "Podpisy v tomto súbore sa nepodarilo overiť.")]
             }
         }
-        return own + documents
     }
 
-    private static func warningRow(_ document: SignedDataObject, _ text: String) -> Row {
-        Row(id: "doc-" + document.name, title: document.name, verdict: nil, badges: [], detail: "",
-            warning: text, depth: 0, isNew: false)
+    private static func isUnverified(_ document: SignedDataObject) -> Bool {
+        switch document.content {
+        case .skipped, .failed: true
+        case .plain, .signed: false
+        }
     }
 
-    private static func row(for signature: DocumentSignatureInfo, depth: Int, isNew: Bool) -> Row {
+    private static func warningRow(_ document: SignedDataObject, path: String, depth: Int, _ text: String) -> Row {
+        Row(id: "doc-" + path, title: document.name, verdict: nil, badges: [], verdictLabel: nil, detail: "",
+            reason: nil, warning: text, depth: depth, isNew: false)
+    }
+
+    private static func verdictLabel(_ state: DocumentSignatureInfo.State) -> String {
+        switch state {
+        case .valid: "Platný"
+        case .invalid: "Neplatný"
+        // DSS INDETERMINATE: the check could not conclude, typically because fresh
+        // revocation data for a signature made moments ago is not published yet.
+        case .indeterminate: "Neurčitý"
+        case .unknown: "Neoverené"
+        }
+    }
+
+    private static func row(for signature: DocumentSignatureInfo, depth: Int, isNew: Bool,
+                            id: String? = nil) -> Row {
         var badges: [String] = []
         if let label = SignatureTreePresentation.qualificationLabel(signature.certificateQualification) {
             badges.append(label)
@@ -205,12 +260,16 @@ struct SignatureBannerModel: Equatable {
             badges.append("Časová pečiatka")
         }
         var parts: [String] = []
+        if let format = signature.format, !format.isEmpty { parts.append(format) }
         if let time = signature.signingTime { parts.append(timeFormatter.string(from: time)) }
         if !signature.coveredDocuments.isEmpty {
             parts.append("pokrýva " + signature.coveredDocuments.joined(separator: ", "))
         }
-        return Row(id: signature.id, title: displayName(signature), verdict: signature.state, badges: badges,
-                   detail: parts.joined(separator: " · "), warning: nil, depth: depth, isNew: isNew)
+        let reason = signature.state == .valid ? nil
+            : signature.detail.flatMap { $0.isEmpty ? nil : $0 }
+        return Row(id: id ?? signature.id, title: displayName(signature), verdict: signature.state, badges: badges,
+                   verdictLabel: verdictLabel(signature.state), detail: parts.joined(separator: " · "),
+                   reason: reason, warning: nil, depth: depth, isNew: isNew)
     }
 
     private static func displayName(_ signature: DocumentSignatureInfo) -> String {

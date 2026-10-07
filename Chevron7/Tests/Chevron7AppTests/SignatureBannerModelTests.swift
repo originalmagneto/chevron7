@@ -125,4 +125,53 @@ final class SignatureBannerModelTests: XCTestCase {
         let invalid = try XCTUnwrap(SignatureBannerModel.make(from: .completed(signatures: [sig("1", "A", .invalid)])))
         XCTAssertEqual(invalid.tone, .invalid)
     }
+
+    /// The engine lists every PDF data object, an unsigned one as a signed PDF without
+    /// signatures; "x.pdf · 0 podpisov" read as if the document were unsigned.
+    func testUnsignedDataObjectsAreNotListedAndNestedFailuresAre() throws {
+        let nestedContainer = SignatureTree(signatures: [sig("n1", "Ján Novák")], documents: [
+            SignedDataObject(name: "hlboko.asice", content: .skipped(.depthLimit))])
+        let model = try XCTUnwrap(SignatureBannerModel.make(from: state([sig("1", "A")], documents: [
+            SignedDataObject(name: "dokument.pdf", content: .signed(.pdf, SignatureTree())),
+            SignedDataObject(name: "vnutorny.asice", content: .signed(.asic, nestedContainer))])))
+        XCTAssertEqual(model.rows.map(\.title), ["A", "vnutorny.asice", "Ján Novák", "hlboko.asice"])
+        XCTAssertEqual(model.rows.map(\.depth), [0, 0, 1, 1])
+        XCTAssertEqual(model.rows[3].warning, "Podpisy v tomto súbore sa neoverovali (ďalšie vnorenie).")
+        XCTAssertEqual(Set(model.rows.map(\.id)).count, model.rows.count)
+    }
+
+    /// The same signed PDF under two names must not give two rows one id.
+    func testNestedRowIdsAreUniquePerDocument() throws {
+        let nested = SignatureTree(signatures: [sig("same", "Ján Novák")])
+        let model = try XCTUnwrap(SignatureBannerModel.make(from: state([], documents: [
+            SignedDataObject(name: "a.pdf", content: .signed(.pdf, nested)),
+            SignedDataObject(name: "b.pdf", content: .signed(.pdf, nested))])))
+        XCTAssertEqual(Set(model.rows.map(\.id)).count, model.rows.count)
+    }
+
+    /// The verdict in words and the validator's reason, which the inspector rows showed.
+    func testRowsNameTheVerdictAndItsReason() throws {
+        var invalid = sig("1", "A", .invalid)
+        invalid.detail = "Dokument bol po podpise zmenený."
+        invalid.format = "PAdES_BASELINE_B"
+        let model = try XCTUnwrap(SignatureBannerModel.make(from: state([invalid, sig("2", "B")])))
+        XCTAssertEqual(model.rows[0].verdictLabel, "Neplatný")
+        XCTAssertEqual(model.rows[0].reason, "Dokument bol po podpise zmenený.")
+        XCTAssertEqual(model.rows[0].detail, "PAdES_BASELINE_B")
+        XCTAssertEqual(model.rows[1].verdictLabel, "Platný")
+        XCTAssertNil(model.rows[1].reason)
+    }
+
+    /// Only a source tree that was actually inspected tells which signatures are new; a
+    /// failed or still running inspection leaves it empty and would mark every one.
+    func testNewSignaturesOnlyFromAnInspectedSource() {
+        let result = SignatureTree(signatures: [sig("old", "Ján Novák"), sig("new", "Marián Čuprík")])
+        let existing = SignatureTree(signatures: [sig("old", "Ján Novák")])
+        for phase: SignatureTreeState.Phase in [.idle, .inspecting, .failed("x")] {
+            XCTAssertEqual(SignatureBannerModel.newSignatureIDs(
+                existing: SignatureTreeState(tree: SignatureTree(), phase: phase), result: result), [], "\(phase)")
+        }
+        XCTAssertEqual(SignatureBannerModel.newSignatureIDs(
+            existing: SignatureTreeState(tree: existing, phase: .structural), result: result), ["new"])
+    }
 }
