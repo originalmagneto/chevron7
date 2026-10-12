@@ -116,15 +116,27 @@ private actor JudgementCell {
 public struct FoundationModelClassifier: ElementClassifying {
     public let judge: any FoundationJudging
     public let timeoutSeconds: Double
+    /// Limit for a crop that finds the model cold (`FoundationModelGate.Lease.isCold`):
+    /// its first answer after loading took 8.7 s, over the usual limit on its own.
+    public let coldStartTimeoutSeconds: Double
+    /// Serializes model calls; the limit of a crop starts only once it holds the gate.
+    public let gate: FoundationModelGate
 
-    public init(judge: any FoundationJudging, timeoutSeconds: Double = 8) {
+    public init(judge: any FoundationJudging, timeoutSeconds: Double = 8,
+                coldStartTimeoutSeconds: Double? = nil,
+                gate: FoundationModelGate = FoundationModelGate()) {
         self.judge = judge
         self.timeoutSeconds = timeoutSeconds
+        self.coldStartTimeoutSeconds = max(timeoutSeconds, coldStartTimeoutSeconds ?? timeoutSeconds)
+        self.gate = gate
     }
 
-    public static func makeIfAvailable(timeoutSeconds: Double = 8) -> FoundationModelClassifier? {
+    public static func makeIfAvailable(timeoutSeconds: Double = 8,
+                                       coldStartTimeoutSeconds: Double = 20) -> FoundationModelClassifier? {
         guard SystemLanguageModel.default.isAvailable else { return nil }
-        return FoundationModelClassifier(judge: SystemFoundationJudge(), timeoutSeconds: timeoutSeconds)
+        return FoundationModelClassifier(judge: SystemFoundationJudge(), timeoutSeconds: timeoutSeconds,
+                                         coldStartTimeoutSeconds: coldStartTimeoutSeconds,
+                                         gate: .shared)
     }
 
     public func classify(crop: CGImage, hint: SecurityElement.Kind?) async throws -> ElementJudgement {
@@ -136,9 +148,11 @@ public struct FoundationModelClassifier: ElementClassifying {
     public func classify(crop: CGImage, hint: SecurityElement.Kind?,
                          textCoverage: Double?) async throws -> ElementJudgement {
         let judge = self.judge
-        let timeout = timeoutSeconds
         let crop = crop
         let context = Self.contextText(textCoverage: textCoverage)
+        let gate = self.gate
+        let lease = await gate.acquire()
+        let timeout = lease.isCold ? coldStartTimeoutSeconds : timeoutSeconds
         // The judge runs in its own detached task, outside the task group, because
         // `withThrowingTaskGroup` only returns once every child task has finished.
         // `LanguageModelSession.respond` is not guaranteed to observe cancellation, so if the
@@ -147,38 +161,59 @@ public struct FoundationModelClassifier: ElementClassifying {
         // Instead the judge writes its outcome into an actor-isolated cell, and a cancellable
         // polling child inside the group reads that cell. This lets the group (and therefore
         // `classify`) return as soon as the timeout fires, without ever awaiting the judge task.
+        // The judge task releases the gate when the model is done with it, so an abandoned
+        // call never overlaps the next one.
         let cell = JudgementCell()
         let judgeTask = Task {
             do {
                 let result = Self.map(try await judge.judge(crop: crop, hint: hint, context: context))
                 await cell.set(.success(result))
+                await gate.release(lease, answered: true)
             } catch {
                 await cell.set(.failure(error))
+                await gate.release(lease, answered: false)
             }
         }
-        let result: ElementJudgement? = try await withThrowingTaskGroup(of: ElementJudgement?.self) { group in
-            group.addTask {
-                while !Task.isCancelled {
-                    if let outcome = await cell.result {
-                        return try outcome.get()
+        let result: ElementJudgement?
+        do {
+            result = try await withThrowingTaskGroup(of: ElementJudgement?.self) { group in
+                group.addTask {
+                    while !Task.isCancelled {
+                        if let outcome = await cell.result {
+                            return try outcome.get()
+                        }
+                        try await Task.sleep(for: .milliseconds(50))
                     }
-                    try await Task.sleep(for: .milliseconds(50))
+                    return nil
                 }
-                return nil
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    return nil
+                }
+                let first = try await group.next() ?? nil
+                group.cancelAll()
+                return first
             }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
-                return nil
-            }
-            let first = try await group.next() ?? nil
-            group.cancelAll()
-            return first
+        } catch {
+            if await cell.result == nil { Self.releaseAfterCap(lease, gate: gate, seconds: timeout) }
+            throw error
         }
         if result == nil {
             judgeTask.cancel()
+            Self.releaseAfterCap(lease, gate: gate, seconds: timeout)
         }
         return result ?? ElementJudgement(kind: nil, confidence: 0, decidedBy: .foundationModel,
                                           isUnsure: true)
+    }
+
+    /// A call that ignores cancellation keeps the model at most `seconds` past its
+    /// limit, so a wedged model cannot hold the gate for good.
+    private static func releaseAfterCap(_ lease: FoundationModelGate.Lease, gate: FoundationModelGate,
+                                        seconds: Double) {
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            await gate.release(lease, answered: false)
+        }
     }
 
     static func contextText(textCoverage: Double?) -> String {
