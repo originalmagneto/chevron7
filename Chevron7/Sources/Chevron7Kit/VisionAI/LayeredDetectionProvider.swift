@@ -5,6 +5,7 @@ import Foundation
 import CoreGraphics
 import PDFKit
 import os
+import Chevron7Identity
 
 /// A page rendered and OCRed exactly once, then shared by every detection stage.
 ///
@@ -46,18 +47,27 @@ public struct DetectionRunStats: Sendable, Equatable {
 
 /// Counts how often the secondary (Foundation Model) classifier was invoked
 /// during one detection run. Created per run, so the count never leaks between runs.
+/// After `consecutiveTimeoutLimit` timeouts in a row it stops asking the model for
+/// the rest of the run: model calls are serialized, so a model that keeps timing out
+/// would otherwise cost every remaining crop its full limit one after another.
 final class CallCountingClassifier: ElementClassifying, @unchecked Sendable {
+    static let consecutiveTimeoutLimit = 3
+    private static let logger = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "VisionAI")
+
     let wrapped: any ElementClassifying
     private let calls = OSAllocatedUnfairLock(initialState: 0)
     private let unsureCalls = OSAllocatedUnfairLock(initialState: 0)
+    private let consecutiveTimeouts = OSAllocatedUnfairLock(initialState: 0)
     private let elapsed = OSAllocatedUnfairLock(initialState: 0.0)
 
     init(wrapping wrapped: any ElementClassifying) { self.wrapped = wrapped }
 
     var count: Int { calls.withLock { $0 } }
-    /// Calls that produced no usable answer (unsure result or a thrown error).
+    /// Crops the model gave no usable answer for: unsure results, thrown errors,
+    /// and crops skipped after the run stopped asking the model.
     var unsure: Int { unsureCalls.withLock { $0 } }
-    /// Wall-clock seconds spent inside the wrapped classifier.
+    /// Wall-clock seconds spent inside the wrapped classifier, including time a
+    /// crop waited for the model while another page's crop held it.
     var seconds: Double { elapsed.withLock { $0 } }
 
     func classify(crop: CGImage, hint: SecurityElement.Kind?) async throws -> ElementJudgement {
@@ -66,6 +76,10 @@ final class CallCountingClassifier: ElementClassifying, @unchecked Sendable {
 
     func classify(crop: CGImage, hint: SecurityElement.Kind?,
                   textCoverage: Double?) async throws -> ElementJudgement {
+        if consecutiveTimeouts.withLock({ $0 >= Self.consecutiveTimeoutLimit }) {
+            unsureCalls.withLock { $0 += 1 }
+            return ElementJudgement(kind: nil, confidence: 0, decidedBy: .foundationModel, isUnsure: true)
+        }
         calls.withLock { $0 += 1 }
         let start = Date()
         defer { let dt = Date().timeIntervalSince(start); elapsed.withLock { $0 += dt } }
@@ -76,12 +90,23 @@ final class CallCountingClassifier: ElementClassifying, @unchecked Sendable {
             } else {
                 result = try await wrapped.classify(crop: crop, hint: hint)
             }
-            if result.isUnsure { unsureCalls.withLock { $0 += 1 } }
+            if result.isUnsure {
+                unsureCalls.withLock { $0 += 1 }
+                let streak = consecutiveTimeouts.withLock { $0 += 1; return $0 }
+                Self.logger.notice("Foundation Model gave no answer in time (\(streak, privacy: .public) in a row)")
+                if streak == Self.consecutiveTimeoutLimit {
+                    Self.logger.error("Foundation Model timed out \(streak, privacy: .public) times in a row; not asked again in this run")
+                }
+            } else {
+                consecutiveTimeouts.withLock { $0 = 0 }
+            }
             return result
         } catch {
             // A throwing secondary is as uninformative as a timeout; count it,
-            // then let the caller's `try?` turn it into an absent judgement.
+            // then let the caller's `try?` turn it into an absent judgement. It
+            // returned at once, so it does not count towards the timeout streak.
             unsureCalls.withLock { $0 += 1 }
+            Self.logger.error("Foundation Model failed: \(String(describing: error), privacy: .public)")
             throw error
         }
     }

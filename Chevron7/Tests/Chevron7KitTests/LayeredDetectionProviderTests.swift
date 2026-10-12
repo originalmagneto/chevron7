@@ -30,7 +30,9 @@ final class LayeredDetectionProviderTests: XCTestCase {
         var count: Int { calls.withLock { $0 } }
         func classify(crop: CGImage, hint: SecurityElement.Kind?) async throws -> ElementJudgement {
             calls.withLock { $0 += 1 }
-            return .unsure
+            // A decisive answer: an unsure one reads as a model timeout, and the
+            // run stops asking the model after a few of those in a row.
+            return ElementJudgement(kind: nil, confidence: 0, decidedBy: .foundationModel)
         }
     }
 
