@@ -63,6 +63,8 @@ final class SigningSessionStore {
     private(set) var lastMobileSigningMethod: MobileSigningMethod?
     /// The engine's verdict on the last signature's timestamp, when it judged one.
     private(set) var lastTimestampQualification: TimestampQualification?
+    /// The authority the last card signature asked for its timestamps, as the done screen names it.
+    private(set) var lastTimestampAuthority: TimestampAuthority?
     /// The last verdict per timestamp authority URL in this app run, shown under the pickers.
     private(set) var timestampQualificationByAuthority: [String: TimestampQualification] = [:]
     @ObservationIgnored private(set) lazy var existingTrees = SignatureTreeLoader(provider: signingProvider)
@@ -250,6 +252,21 @@ final class SigningSessionStore {
             next.selectedTSAURL = newValue
             settingsStore.settings = next
         }
+    }
+
+    /// The authority a signature in `format` uses for the current choice: an ASiC-E never gets
+    /// BOSA, whose timestamp slovensko.sk does not see in XAdES, and takes Sectigo instead.
+    func timestampAuthority(for format: SigningOutputFormat) -> TimestampAuthority {
+        settings.timestampAuthority(signsXAdES: format == .attachedASIC)
+    }
+
+    /// The authority URL the next signature in the current format sends to the engine.
+    var signatureTSAURL: String { timestampAuthority(for: outputFormat).url }
+
+    /// Shown under the pickers while BOSA is chosen and the format is ASiC-E.
+    var timestampAuthoritySubstitutionNote: String? {
+        outputFormat == .attachedASIC && TimestampAuthority.isUnseenInXAdES(selectedTSAURL)
+            ? TimestampAuthority.xadesSubstitutionNote : nil
     }
 
     var batchASiCPackaging: AppSettings.BatchASiCPackaging {
@@ -547,7 +564,7 @@ final class SigningSessionStore {
 
     /// The last verdict for the authority chosen now, as a note under the picker.
     var selectedAuthorityQualificationNote: (text: String, isWarning: Bool)? {
-        guard let verdict = timestampQualificationByAuthority[selectedTSAURL] else { return nil }
+        guard let verdict = timestampQualificationByAuthority[signatureTSAURL] else { return nil }
         return ("Naposledy: \(verdict.slovakDescription)", verdict != .qualified)
     }
 
@@ -622,7 +639,8 @@ final class SigningSessionStore {
         lastSignatureContentTimestamped = contentTimestamped
         lastMobileSigningMethod = viaMobile ? mobileMethod : nil
         lastTimestampQualification = nil
-        let authorityURL = selectedTSAURL
+        let authorityURL = signatureTSAURL
+        lastTimestampAuthority = viaMobile ? nil : timestampAuthority(for: outputFormat)
         statusText = includeVisibleSignature ? "Pripravujem vizuálny podpis…" : "Podpisujem…"
 
         do {
@@ -801,7 +819,7 @@ final class SigningSessionStore {
                     SigningRequest(pdfData: data,
                                    identityID: identityID,
                                    includeTimestamp: timestamped,
-                                   tsaURL: timestamped || contentTimestamped ? selectedTSAURL : nil,
+                                   tsaURL: timestamped || contentTimestamped ? authorityURL : nil,
                                    outputFormat: outputFormat,
                                    pin: signingPIN.isEmpty ? nil : signingPIN,
                                    extraFiles: [ASiCEPackager.Entry(path: pdfName, data: data)],
@@ -1082,7 +1100,7 @@ final class SigningSessionStore {
             asicPackaging: batchASiCPackaging,
             containerStem: nil,
             includeQualifiedTimestamp: addsQualifiedTimestamp(viaMobile: false),
-            tsaURL: addsQualifiedTimestamp(viaMobile: false) ? selectedTSAURL : nil,
+            tsaURL: addsQualifiedTimestamp(viaMobile: false) ? signatureTSAURL : nil,
             convertToPDFA: convertToPDFA,
             pdfaMode: pdfaMode,
             selectedIdentityID: identityID,
@@ -1175,7 +1193,7 @@ final class SigningSessionStore {
         snapshot.includeQualifiedTimestamp = addsQualifiedTimestamp(viaMobile: false)
         snapshot.includeContentTimestamp = addsContentTimestamp(viaMobile: false)
         snapshot.tsaURL = snapshot.includeQualifiedTimestamp || snapshot.includeContentTimestamp
-            ? selectedTSAURL : nil
+            ? timestampAuthority(for: snapshot.outputFormat).url : nil
         snapshot.convertToPDFA = convertToPDFA
         snapshot.pdfaMode = pdfaMode
     }

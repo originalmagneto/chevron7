@@ -792,6 +792,12 @@ struct SigningPrepareView: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        if let note = store.timestampAuthoritySubstitutionNote {
+                            Label(note, systemImage: "info.circle")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let note = store.selectedAuthorityQualificationNote {
                             Label(note.text, systemImage: note.isWarning ? "exclamationmark.triangle.fill" : "checkmark.seal")
                                 .font(.caption2)
@@ -1066,8 +1072,8 @@ struct SigningDoneView: View {
                         let signature = store.resultSignatures.first
                         ForEach(SigningTimestampPresentation.authorityRows(
                             mobileMethod: store.lastMobileSigningMethod,
-                            settingsAuthorityName: store.settings.activeTSA.name,
-                            settingsAuthorityURL: store.settings.activeTSA.url,
+                            settingsAuthorityName: (store.lastTimestampAuthority ?? store.settings.activeTSA).name,
+                            settingsAuthorityURL: (store.lastTimestampAuthority ?? store.settings.activeTSA).url,
                             validatedAuthority: store.resultSignatureState.phase == .validated
                                 ? signature?.timestampAuthority : nil), id: \.label) { row in
                             detailRow(row.label, row.value)
@@ -1357,6 +1363,12 @@ struct SigningBatchView: View {
                                 Label(warning, systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let note = store.timestampAuthoritySubstitutionNote {
+                                Label(note, systemImage: "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }

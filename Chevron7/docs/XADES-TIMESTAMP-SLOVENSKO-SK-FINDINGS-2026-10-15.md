@@ -65,7 +65,15 @@ Reading the results:
 - C "Nie", D "Áno": both the TSA and the encoding matter; do both changes.
 - C and D "Nie": Sectigo is refused too (likely the listing rule); only a directly listed RSA authority such as CA Disig works, which needs a contract and credentials support.
 
-Still open: a PAdES signed with Sectigo selected in Settings, before Sectigo becomes the default for PAdES too. The replacement default TSA is the owner's choice.
+Still open: a PAdES signed with Sectigo selected in Settings, before Sectigo becomes the default for PAdES too.
+
+## Decision and change (2026-10-15)
+
+The owner: Sectigo Qualified as the default only for ASiC-E (XAdES) and ZaKo; PAdES stays on BOSA until a PAdES with Sectigo is checked on slovensko.sk.
+
+- An XAdES signature never takes BOSA: `TimestampAuthority.authorityURL(forSelected:signsXAdES:)` swaps BOSA for Sectigo for the signature timestamp and the content timestamp, in the main window, the batch (by its format), an extended container and the browser panel, and the engine provider applies the same rule to whatever `tsaURL` it receives.
+- ZaKo outside Demo hands the engine `TimestampAuthority.xadesQualifiedURLs` (Sectigo, then CA Disig), so neither the client ASiC-E nor the record container can get BOSA.
+- The stored choice is not migrated. A stored BOSA is the shipped default for almost everyone and cannot be told apart from a deliberate pick, and no one has a reason to want an XAdES timestamp slovensko.sk cannot see, so BOSA chosen means BOSA for PAdES and Sectigo for ASiC-E, which the pickers and Settings say under the choice. Another built-in (Sectigo, CA Disig) and every custom URL are sent as chosen.
 
 ## Method
 

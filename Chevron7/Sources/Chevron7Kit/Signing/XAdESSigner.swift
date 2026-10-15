@@ -114,7 +114,10 @@ public struct XAdESSigner: Sendable {
                 "<ds:SignatureValue Id=\"value-\(signatureID)\">\(signatureValue.base64EncodedString())</ds:SignatureValue>"
             let signatureValueC14N = Self.exclusiveC14N(signatureValueElement, namespaces: [("ds", Self.dsNS)])
             let reply = try await RFC3161TimestampClient().requestToken(
-                for: Data(signatureValueC14N.utf8), tsaURL: tsaURL)
+                for: Data(signatureValueC14N.utf8),
+                tsaURL: URL(string: TimestampAuthority.authorityURL(forSelected: tsaURL.absoluteString,
+                                                                     signsXAdES: true)) ?? tsaURL,
+                fallbacks: TimestampAuthority.xadesQualifiedURLs)
             timestampGenTime = reply.genTime
             let tsID = "TS-" + UUID().uuidString.lowercased()
             unsignedBlock =

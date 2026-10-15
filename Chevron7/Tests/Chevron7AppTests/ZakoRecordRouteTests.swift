@@ -227,8 +227,10 @@ final class ZakoRecordRouteTests: XCTestCase {
         guard requests.count == 2 else {
             return XCTFail("expected the client container and the record to be signed, got \(requests.count) requests")
         }
-        let qualified = TimestampAuthority.qualifiedURLs.map(\.absoluteString)
-        XCTAssertFalse(qualified.isEmpty)
+        let qualified = TimestampAuthority.xadesQualifiedURLs.map(\.absoluteString)
+        XCTAssertEqual(qualified.first, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertFalse(qualified.contains(TimestampAuthority.bosaURL),
+                       "slovensko.sk does not see a BOSA timestamp in the client ASiC-E or the record")
         for request in requests {
             XCTAssertTrue(request.includeTimestamp)
             XCTAssertEqual(request.timestampServers, qualified)

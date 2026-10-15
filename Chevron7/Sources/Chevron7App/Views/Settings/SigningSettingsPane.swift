@@ -62,6 +62,9 @@ struct SigningSettingsPane: View {
                           systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
+                if TimestampAuthority.isUnseenInXAdES(settings.activeTSA.url) {
+                    Label(TimestampAuthority.xadesSubstitutionNote, systemImage: "info.circle")
+                }
             }
 
             Section {

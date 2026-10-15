@@ -890,7 +890,21 @@ final class EngineBridgeTimestampRoutingTests: XCTestCase {
         let captured = try XCTUnwrap(engine.capturedRequest)
         XCTAssertTrue(captured.contentTimestamp)
         XCTAssertEqual(captured.signatureLevelOverride, "XAdES_BASELINE_B")
-        XCTAssertEqual(captured.timestampServersOverride, ["http://tsa.belgium.be/connect"])
+        // BOSA chosen, but an XAdES content timestamp comes from Sectigo (slovensko.sk sees no BOSA in XAdES).
+        XCTAssertEqual(captured.timestampServersOverride, [TimestampAuthority.sectigoQualifiedURL])
+    }
+
+    /// slovensko.sk does not see a BOSA (ECDSA) timestamp in XAdES: whoever sends BOSA for an
+    /// ASiC-E (the panel, an older caller), the engine gets Sectigo; a PAdES keeps BOSA.
+    func testAnXAdESNeverReachesTheEngineWithBOSA() async throws {
+        let engine = RecordingSigningEngine()
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(request(tsaURL: TimestampAuthority.bosaURL))
+        XCTAssertEqual(engine.capturedRequest?.timestampServersOverride, [TimestampAuthority.sectigoQualifiedURL])
+
+        var pades = request(tsaURL: TimestampAuthority.bosaURL)
+        pades.outputFormat = .embeddedPAdES
+        XCTAssertEqual(EngineBridgeSigningProvider.timestampServers(for: pades, signsXAdES: false),
+                       [TimestampAuthority.bosaURL])
     }
 
     /// A portal decides its own format, so a content timestamp never reaches a portal request.
