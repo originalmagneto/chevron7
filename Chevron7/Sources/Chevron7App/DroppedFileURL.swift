@@ -5,26 +5,66 @@ import Foundation
 
 /// Resolves the file a drop came from.
 ///
-/// `NSItemProvider` hands a dropped file URL over in one of three shapes
-/// depending on the source: a `URL`, an `NSURL`, or the URL's data
-/// representation. Reading the drop as bytes instead loses both the location and
-/// the name, which sends the signed output to a temporary directory under a
-/// generated name. Everything that accepts a drop resolves the URL first and
-/// falls back to bytes only when the drop carries no file.
+/// SwiftUI's `onDrop(of:)` hands over a provider that registers only the first
+/// declared type the drag matches (`com.adobe.pdf` for a PDF from Finder), never
+/// `public.file-url`, even with `.fileURL` in the list, so asking for the file URL
+/// fails and reading the drop as bytes loses both the location and the name: the
+/// signed output then went to a temporary directory under a generated name.
+/// Asking for the document's own type in place returns the original file.
 enum DroppedFileURL {
-    static func resolve(from item: Any?) -> URL? {
-        let url: URL?
-        switch item {
-        case let value as URL:
-            url = value
-        case let value as NSURL:
-            url = value as URL
-        case let value as Data:
-            url = URL(dataRepresentation: value, relativeTo: nil)
-        default:
-            url = nil
+    /// Calls `completion` with the original file when the source opens it in place,
+    /// with a copy under the document's own name when the source hands over a file
+    /// that disappears once the callback returns (a file promise, another app's
+    /// copy), or with nil when the provider carries no file of that type.
+    static func load(from provider: NSItemProvider,
+                     typeIdentifier: String,
+                     temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+                     completion: @escaping @Sendable (URL?) -> Void) {
+        guard provider.hasItemConformingToTypeIdentifier(typeIdentifier) else {
+            completion(nil)
+            return
         }
-        guard let url, url.isFileURL else { return nil }
-        return url
+        _ = provider.loadInPlaceFileRepresentation(forTypeIdentifier: typeIdentifier) { url, isInPlace, _ in
+            guard let url, url.isFileURL else {
+                completion(nil)
+                return
+            }
+            completion(isInPlace ? url : keepCopy(of: url, in: temporaryDirectory))
+        }
+    }
+
+    /// A unique temporary file that carries `name`, for a drop that has no file of
+    /// its own to point at.
+    static func temporaryFile(named name: String,
+                              in temporaryDirectory: URL = FileManager.default.temporaryDirectory) -> URL? {
+        let folder = temporaryDirectory
+            .appendingPathComponent("dropped-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+        return folder.appendingPathComponent(name)
+    }
+
+    /// The PDF name for a drop that carries only bytes: the source's suggested
+    /// name when it gives one, else "dokument".
+    static func pdfName(suggested: String?) -> String {
+        let stem = suggested
+            .map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension }
+            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        return "\(stem ?? "dokument").pdf"
+    }
+
+    private static func keepCopy(of url: URL, in temporaryDirectory: URL) -> URL? {
+        guard let destination = temporaryFile(named: url.lastPathComponent, in: temporaryDirectory) else {
+            return nil
+        }
+        do {
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        } catch {
+            return nil
+        }
     }
 }
