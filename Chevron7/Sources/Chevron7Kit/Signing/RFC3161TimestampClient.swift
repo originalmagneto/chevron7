@@ -51,12 +51,14 @@ public struct RFC3161TimestampClient: Sendable {
             DER.boolean(true)
         ])    }
 
-    public func requestToken(for data: Data, tsaURL: URL) async throws -> TimestampReply {
+    /// Asks the chosen authority, then each of `fallbacks` until one answers.
+    public func requestToken(for data: Data, tsaURL: URL,
+                             fallbacks: [URL] = TimestampAuthority.qualifiedURLs) async throws -> TimestampReply {
         var lastError: Error = TimestampError.transportFailure("žiadny TSA")
         var candidates: [URL] = []
         let selectedUnqualified = TimestampAuthority.isRetiredUnqualified(tsaURL.absoluteString)
         if !selectedUnqualified { candidates.append(tsaURL) }
-        for extra in TimestampAuthority.qualifiedURLs where !candidates.contains(extra) {
+        for extra in fallbacks where !candidates.contains(extra) {
             candidates.append(extra)
         }
         for url in candidates {

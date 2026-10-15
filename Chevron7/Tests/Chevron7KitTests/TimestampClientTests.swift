@@ -192,6 +192,54 @@ final class TimestampClientTests: XCTestCase {
         let asked = await transport.asked()
         XCTAssertEqual(asked, [try XCTUnwrap(TimestampAuthority.qualifiedURLs.first)])
     }
+
+    /// slovensko.sk does not see a BOSA timestamp in XAdES (every BOSA unit is ECDSA), so an
+    /// XAdES gets Sectigo for BOSA; PAdES, other built-ins and custom URLs keep the choice.
+    func testAnXAdESNeverGetsBOSA() {
+        XCTAssertEqual(TimestampAuthority.authorityURL(forSelected: TimestampAuthority.bosaURL, signsXAdES: true),
+                       TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertEqual(TimestampAuthority.authorityURL(forSelected: " HTTP://TSA.BELGIUM.BE/CONNECT ", signsXAdES: true),
+                       TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertEqual(TimestampAuthority.authorityURL(forSelected: TimestampAuthority.bosaURL, signsXAdES: false),
+                       TimestampAuthority.bosaURL)
+        XCTAssertEqual(TimestampAuthority.authorityURL(forSelected: "http://tsa.disig.sk/qts", signsXAdES: true),
+                       "http://tsa.disig.sk/qts")
+        XCTAssertEqual(TimestampAuthority.authorityURL(forSelected: "https://tsa.kancelaria.test/tsp", signsXAdES: true),
+                       "https://tsa.kancelaria.test/tsp")
+        XCTAssertEqual(TimestampAuthority.legacyDefaultURL, TimestampAuthority.bosaURL, "PAdES keeps BOSA as the default")
+        XCTAssertFalse(TimestampAuthority.xadesSubstitutionNote.contains("\u{2014}"))
+    }
+
+    /// ZaKo's list for its XAdES containers: Sectigo first, never BOSA, every one qualified.
+    func testTheXAdESListStartsWithSectigoAndLeavesOutBOSA() {
+        let urls = TimestampAuthority.xadesQualifiedURLs.map(\.absoluteString)
+        XCTAssertEqual(urls.first, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertFalse(urls.contains(TimestampAuthority.bosaURL))
+        XCTAssertTrue(urls.contains("http://tsa.disig.sk/qts"))
+        XCTAssertTrue(Set(urls).isSubset(of: Set(TimestampAuthority.qualifiedURLs.map(\.absoluteString))))
+    }
+
+    func testSettingsNameTheAuthorityEachFormatUses() {
+        let defaults = AppSettings()
+        XCTAssertEqual(defaults.timestampAuthority(signsXAdES: false).url, TimestampAuthority.bosaURL)
+        XCTAssertEqual(defaults.timestampAuthority(signsXAdES: true).url, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertTrue(defaults.timestampAuthority(signsXAdES: true).name.contains("Sectigo"))
+        let custom = AppSettings(customTSAServers: ["https://tsa.kancelaria.test/tsp"],
+                                 selectedTSAURL: "https://tsa.kancelaria.test/tsp")
+        XCTAssertEqual(custom.timestampAuthority(signsXAdES: true).url, "https://tsa.kancelaria.test/tsp")
+    }
+
+    /// The local XAdES signer (Keychain, Demo) asks Sectigo for BOSA and never falls back to BOSA.
+    func testTheTimestampClientUsesTheGivenFallbacks() async throws {
+        let transport = URLRecordingTransport(response: Data())
+        let client = RFC3161TimestampClient(transport: transport)
+        _ = try? await client.requestToken(for: Data("d".utf8),
+                                           tsaURL: try XCTUnwrap(URL(string: TimestampAuthority.sectigoQualifiedURL)),
+                                           fallbacks: TimestampAuthority.xadesQualifiedURLs)
+        let asked = await transport.asked().map(\.absoluteString)
+        XCTAssertEqual(asked.first, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertFalse(asked.contains(TimestampAuthority.bosaURL))
+    }
 }
 
 private actor URLRecordingTransport: LLMTransport {

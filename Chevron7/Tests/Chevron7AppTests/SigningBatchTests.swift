@@ -1170,7 +1170,8 @@ final class SigningBatchTests: XCTestCase {
         let recorded = await provider.recordedRequests()
         XCTAssertEqual(recorded.count, 2)
         XCTAssertTrue(recorded.allSatisfy { $0.includeContentTimestamp && !$0.includeTimestamp })
-        XCTAssertTrue(recorded.allSatisfy { $0.tsaURL == "http://tsa.belgium.be/connect" })
+        // An ASiC-E never takes BOSA, whose timestamp slovensko.sk does not see in XAdES.
+        XCTAssertTrue(recorded.allSatisfy { $0.tsaURL == TimestampAuthority.sectigoQualifiedURL })
     }
 
     /// A phone signature's stamp never names the Settings authority: the phone service
@@ -1230,7 +1231,8 @@ final class SigningBatchTests: XCTestCase {
         let recorded = await provider.recordedRequests()
         let request = try XCTUnwrap(recorded.first)
         XCTAssertTrue(request.includeTimestamp)
-        XCTAssertEqual(request.tsaURL, TimestampAuthority.legacyDefaultURL)
+        // The selection falls back to the default (BOSA), which an ASiC-E swaps for Sectigo.
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.sectigoQualifiedURL)
         XCTAssertEqual(store.selectedTSAURL, TimestampAuthority.legacyDefaultURL)
         XCTAssertNil(store.timestampAuthorityWarning)
     }
@@ -1250,7 +1252,83 @@ final class SigningBatchTests: XCTestCase {
 
         let recorded = await provider.recordedRequests()
         let request = try XCTUnwrap(recorded.first)
-        XCTAssertEqual(request.tsaURL, TimestampAuthority.legacyDefaultURL)
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.sectigoQualifiedURL)
+    }
+
+    /// slovensko.sk does not see a BOSA timestamp in XAdES (ECDSA), so an ASiC-E gets Sectigo
+    /// with a note under the picker, while PAdES keeps BOSA.
+    func testAnASiCEOfTheDefaultAuthorityTimestampsWithSectigo() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.outputFormat = .attachedASIC
+        XCTAssertEqual(store.selectedTSAURL, TimestampAuthority.bosaURL)
+        let note = try XCTUnwrap(store.timestampAuthoritySubstitutionNote)
+        XCTAssertFalse(note.contains("\u{2014}"))
+
+        await store.sign()
+
+        let recorded = await provider.recordedRequests()
+        let request = try XCTUnwrap(recorded.first)
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertEqual(store.lastTimestampAuthority?.url, TimestampAuthority.sectigoQualifiedURL)
+        XCTAssertEqual(store.selectedTSAURL, TimestampAuthority.bosaURL, "The choice itself stays")
+    }
+
+    func testAPAdESOfTheDefaultAuthorityKeepsBOSA() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.outputFormat = .embeddedPAdES
+        XCTAssertNil(store.timestampAuthoritySubstitutionNote)
+
+        await store.sign()
+
+        let recorded = await provider.recordedRequests()
+        let request = try XCTUnwrap(recorded.first)
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.bosaURL)
+        XCTAssertEqual(store.lastTimestampAuthority?.url, TimestampAuthority.bosaURL)
+    }
+
+    /// Another built-in or a custom authority is never overridden, also for an ASiC-E.
+    func testAnASiCEKeepsAnAuthorityOtherThanBOSA() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.outputFormat = .attachedASIC
+        store.selectedTSAURL = "http://tsa.disig.sk/qts"
+        XCTAssertNil(store.timestampAuthoritySubstitutionNote)
+        XCTAssertEqual(store.signatureTSAURL, "http://tsa.disig.sk/qts")
+        store.addCustomTSA("https://tsa.kancelaria.test/tsp")
+        XCTAssertEqual(store.signatureTSAURL, "https://tsa.kancelaria.test/tsp")
+        XCTAssertNil(store.timestampAuthoritySubstitutionNote)
+    }
+
+    /// The batch picks the authority by the batch's format: ASiC-E Sectigo, PAdES BOSA.
+    func testTheBatchPicksTheAuthorityByFormat() async throws {
+        let provider = RecordingSigningProvider(alwaysAddsQualifiedTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "a.pdf"), makePDF(named: "b.pdf")], selectLast: false)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.outputFormat = .embeddedPAdES
+
+        await store.prepareBatch(ids: store.queue.map(\.id))
+        XCTAssertEqual(store.batchSettingsSnapshot?.tsaURL, TimestampAuthority.bosaURL)
+        store.outputFormat = .attachedASIC
+        store.refreshReadyBatchOptions()
+        XCTAssertEqual(store.batchSettingsSnapshot?.tsaURL, TimestampAuthority.sectigoQualifiedURL)
+        await store.startBatch()
+
+        let recorded = await provider.recordedRequests()
+        XCTAssertEqual(recorded.count, 2)
+        XCTAssertTrue(recorded.allSatisfy { $0.tsaURL == TimestampAuthority.sectigoQualifiedURL })
     }
 
     /// A custom authority is still sent, but every picker warns that its qualification is unknown.

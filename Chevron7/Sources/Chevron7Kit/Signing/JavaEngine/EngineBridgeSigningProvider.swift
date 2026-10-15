@@ -392,13 +392,14 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     /// Timestamp endpoints handed to the engine: an explicit list (ZaKo outside Demo) wins,
-    /// otherwise the authority the person chose (`tsaURL`). Without either the engine falls
-    /// back to its own timestamp preferences.
-    static func timestampServers(for request: SigningRequest) -> [String]? {
+    /// otherwise the authority the person chose (`tsaURL`), which an XAdES signature takes only
+    /// when slovensko.sk can see its timestamp (`TimestampAuthority.authorityURL`). Without
+    /// either the engine falls back to its own timestamp preferences.
+    static func timestampServers(for request: SigningRequest, signsXAdES: Bool) -> [String]? {
         if let servers = request.timestampServers, !servers.isEmpty { return servers }
         guard let chosen = request.tsaURL?.trimmingCharacters(in: .whitespacesAndNewlines),
               !chosen.isEmpty else { return nil }
-        return [chosen]
+        return [TimestampAuthority.authorityURL(forSelected: chosen, signsXAdES: signsXAdES)]
     }
 
     /// Serial the engine reads as "the signing key on this token".
@@ -581,7 +582,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             signatureLevelOverride: request.signatureLevelOverride
                 ?? Self.untimestampedLevel(for: request, wantsPAdES: wantsPAdES,
                                            sourceIsContainer: sourceURL.pathExtension.lowercased() == "asice"),
-            timestampServersOverride: Self.timestampServers(for: request),
+            timestampServersOverride: Self.timestampServers(for: request, signsXAdES: !wantsPAdES),
             contentTimestamp: Self.wantsContentTimestamp(request))
 
         statusLog("Podpisujem kvalifikovaným podpisom (DSS)…")

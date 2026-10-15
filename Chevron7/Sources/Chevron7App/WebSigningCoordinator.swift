@@ -554,7 +554,8 @@ final class WebSigningCoordinator {
                 pdfData: bytes,
                 identityID: identityID,
                 includeTimestamp: wantsTimestamp,
-                tsaURL: wantsTimestamp ? settingsStore.settings.activeTSA.url : nil,
+                tsaURL: wantsTimestamp
+                    ? settingsStore.settings.timestampAuthority(signsXAdES: wantsContainer).url : nil,
                 outputFormat: wantsContainer ? .attachedASIC : .embeddedPAdES,
                 pin: pin.isEmpty ? nil : pin,
                 extraFiles: attachments,

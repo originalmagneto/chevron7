@@ -16,15 +16,18 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
 
     public var id: String { url }
 
-    public static let legacyDefaultURL = "http://tsa.belgium.be/connect"
+    public static let legacyDefaultURL = bosaURL
+
+    public static let bosaURL = "http://tsa.belgium.be/connect"
+    public static let sectigoQualifiedURL = "http://timestamp.sectigo.com/qualified"
 
     /// The authorities the pickers offer. Every one is qualified, because the pickers sit under
     /// the switch "Kvalifikovaná časová pečiatka (QTS)" and card signing always timestamps.
     public static let builtIn: [TimestampAuthority] = [
-        TimestampAuthority(name: "Belgium BOSA (kvalifikovaná)", url: "http://tsa.belgium.be/connect", isQualified: true),
+        TimestampAuthority(name: "Belgium BOSA (kvalifikovaná)", url: bosaURL, isQualified: true),
         // Upstream Autogram's first default authority (UserSettings.DEFAULT_TSA_SERVER), free and
         // signed by "Sectigo Qualified Time Stamping Signer" of Sectigo (Europe) SL, Spain.
-        TimestampAuthority(name: "Sectigo (ES, kvalifikovaná)", url: "http://timestamp.sectigo.com/qualified", isQualified: true),
+        TimestampAuthority(name: "Sectigo (ES, kvalifikovaná)", url: sectigoQualifiedURL, isQualified: true),
         TimestampAuthority(name: "CA Disig (SK, kvalifikovaná, vyžaduje zmluvu s Disig)", url: "http://tsa.disig.sk/qts", isQualified: true)
     ]
 
@@ -60,6 +63,34 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     public static var qualifiedURLs: [URL] {
         builtIn.filter(\.isQualified).compactMap { URL(string: $0.url) }
     }
+
+    /// Authorities whose timestamp slovensko.sk does not see in an XAdES signature. Every BOSA
+    /// unit signs with ECDSA under an ecdsa-with-SHA384 chain, which the central e-filing
+    /// office's XAdES validator does not support, so an ASiC-E from it shows "Predbežne platný"
+    /// without a timestamp while a PAdES with the same unit passes (owner's uploads, 2026-10-15,
+    /// docs/XADES-TIMESTAMP-SLOVENSKO-SK-FINDINGS-2026-10-15.md).
+    public static func isUnseenInXAdES(_ url: String) -> Bool {
+        url.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(bosaURL) == .orderedSame
+    }
+
+    /// The authority a signature of this format gets for the person's choice: an XAdES (ASiC-E)
+    /// signature never takes one slovensko.sk cannot see and gets Sectigo Qualified instead;
+    /// PAdES, other built-ins and custom URLs keep the choice.
+    public static func authorityURL(forSelected selected: String, signsXAdES: Bool) -> String {
+        signsXAdES && isUnseenInXAdES(selected) ? sectigoQualifiedURL : selected
+    }
+
+    /// Qualified authorities for XAdES, in the order tried: Sectigo first, never one
+    /// slovensko.sk cannot see. ZaKo hands exactly these to the engine.
+    public static var xadesQualifiedURLs: [URL] {
+        let usable = builtIn.filter { $0.isQualified && !isUnseenInXAdES($0.url) }
+        let ordered = usable.filter { $0.url == sectigoQualifiedURL } + usable.filter { $0.url != sectigoQualifiedURL }
+        return ordered.compactMap { URL(string: $0.url) }
+    }
+
+    /// Shown under the pickers while BOSA is chosen for (or could reach) an ASiC-E signature.
+    public static let xadesSubstitutionNote =
+        "Podpis ASiC-E (XAdES) dostane časovú pečiatku od Sectigo: pečiatku BOSA v ASiC-E slovensko.sk nezobrazí. PAdES ostáva na BOSA."
 
     public static func resolveSelected(customServers: [String], selectedTSAURL: String)
         -> [TimestampAuthority] {

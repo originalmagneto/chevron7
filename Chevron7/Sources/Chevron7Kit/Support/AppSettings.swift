@@ -347,6 +347,18 @@ public struct AppSettings: Codable, Sendable {
             ?? TimestampAuthority.builtIn[0]
     }
 
+    /// The authority a signature of this format uses: `activeTSA`, except that an XAdES
+    /// (ASiC-E) signature never gets one slovensko.sk cannot see
+    /// (`TimestampAuthority.authorityURL(forSelected:signsXAdES:)`).
+    public func timestampAuthority(signsXAdES: Bool) -> TimestampAuthority {
+        let active = activeTSA
+        let url = TimestampAuthority.authorityURL(forSelected: active.url, signsXAdES: signsXAdES)
+        guard url != active.url else { return active }
+        return availableTSAServers.first { $0.url == url }
+            ?? TimestampAuthority.builtIn.first { $0.url == url }
+            ?? active
+    }
+
     /// A custom authority: the app cannot tell whether it is qualified.
     public var activeTSAQualificationIsUnverified: Bool {
         !TimestampAuthority.isBuiltIn(activeTSA.url)
