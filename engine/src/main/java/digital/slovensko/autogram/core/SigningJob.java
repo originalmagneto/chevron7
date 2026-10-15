@@ -2,6 +2,7 @@ package digital.slovensko.autogram.core;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import digital.slovensko.autogram.core.eforms.EFormUtils;
@@ -18,6 +19,7 @@ import eu.europa.esig.dss.enumerations.SignatureForm;
 import eu.europa.esig.dss.enumerations.SignatureLevel;
 import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
+import eu.europa.esig.dss.pades.PAdESTimestampParameters;
 import eu.europa.esig.dss.pades.signature.PAdESService;
 import eu.europa.esig.dss.spi.x509.tsp.TSPSource;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
@@ -95,6 +97,19 @@ public class SigningJob {
         signatureParameters.setSigningCertificate(key.getCertificate());
         signatureParameters.setCertificateChain(key.getCertificateChain());
 
+        var documents = new ArrayList<DSSDocument>();
+        documents.add(getDocument());
+        documents.addAll(extraDocuments);
+
+        var contentTimestampSource = getParameters().getContentTimestampSource();
+        if (contentTimestampSource != null) {
+            // An AllDataObjectsTimeStamp over every data object, inside the signed properties.
+            service.setTspSource(contentTimestampSource);
+            signatureParameters.setContentTimestamps(List.of(service.getContentTimestamp(documents, signatureParameters)));
+            // The signature never claims to precede its own content timestamp.
+            signatureParameters.bLevel().setSigningDate(new Date());
+        }
+
         if (signatureParameters.getSignatureLevel().equals(SignatureLevel.XAdES_BASELINE_T))
             service.setTspSource(getParameters().getTspSource());
 
@@ -103,9 +118,6 @@ public class SigningJob {
             var signatureValue = key.sign(dataToSign, getParameters().getDigestAlgorithm());
             return service.signDocument(getDocument(), signatureParameters, signatureValue);
         }
-        var documents = new ArrayList<DSSDocument>();
-        documents.add(getDocument());
-        documents.addAll(extraDocuments);
         var dataToSign = service.getDataToSign(documents, signatureParameters);
         var signatureValue = key.sign(dataToSign, getParameters().getDigestAlgorithm());
         return service.signDocument(documents, signatureParameters, signatureValue);
@@ -156,15 +168,28 @@ public class SigningJob {
         signatureParameters.setSigningCertificate(key.getCertificate());
         signatureParameters.setCertificateChain(key.getCertificateChain());
 
+        var document = getDocument();
+        var contentTimestampSource = jobParameters.getContentTimestampSource();
+        if (contentTimestampSource != null) {
+            // A document timestamp revision the signature then covers: the PAdES way of
+            // including a qualified timestamp in the signed data (MIRRI, § 23 ods. 1 písm. b)).
+            service.setTspSource(contentTimestampSource);
+            var timestampParameters = new PAdESTimestampParameters();
+            timestampParameters.setDigestAlgorithm(jobParameters.getDigestAlgorithm());
+            document = service.timestamp(document, timestampParameters);
+            if (signatureParameters.getImageParameters().isEmpty())
+                signatureParameters.bLevel().setSigningDate(new Date());
+        }
+
         if (signatureParameters.getSignatureLevel().equals(SignatureLevel.PAdES_BASELINE_T)) {
             service.setTspSource(getParameters().getTspSource());
             signatureParameters.setContentSize(9472*2);
         }
 
-        var dataToSign = service.getDataToSign(getDocument(), signatureParameters);
+        var dataToSign = service.getDataToSign(document, signatureParameters);
         var signatureValue = key.sign(dataToSign, jobParameters.getDigestAlgorithm());
 
-        return service.signDocument(getDocument(), signatureParameters, signatureValue);
+        return service.signDocument(document, signatureParameters, signatureValue);
     }
 
     public static FileDocument createDSSFileDocumentFromFile(File file) {

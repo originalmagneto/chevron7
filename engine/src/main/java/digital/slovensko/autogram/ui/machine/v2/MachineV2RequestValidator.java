@@ -133,23 +133,33 @@ public final class MachineV2RequestValidator {
         for (var server : value.getAsJsonArray("servers")) {
             servers.add(server.getAsString());
         }
-        return new Timestamp(List.copyOf(servers), authentication(value));
+        return new Timestamp(List.copyOf(servers), authentication(value), content(value));
+    }
+
+    private static boolean content(JsonObject value) {
+        return value.has("content") && value.get("content").getAsBoolean();
     }
 
     private static void validateTimestamp(JsonObject value, String signatureLevel) {
-        if ((value.size() != 2 && value.size() != 3) || !value.has("required") || !value.get("required").isJsonPrimitive()
-                || !value.has("servers") || !value.get("servers").isJsonArray()) {
+        var optionalFields = (value.has("authentication") ? 1 : 0) + (value.has("content") ? 1 : 0);
+        if (value.size() != 2 + optionalFields || !value.has("required") || !value.get("required").isJsonPrimitive()
+                || !value.getAsJsonPrimitive("required").isBoolean()
+                || !value.has("servers") || !value.get("servers").isJsonArray()
+                || value.has("content") && (!value.get("content").isJsonPrimitive()
+                        || !value.getAsJsonPrimitive("content").isBoolean())) {
             throw invalid();
         }
-        // Baseline B carries no timestamp, so it names no authority.
+        // Baseline B carries no signature timestamp, so it names no authority unless a
+        // content timestamp needs one.
         if (!signatureLevel.endsWith("_T")) {
             if (value.get("required").getAsBoolean()
-                    || !value.getAsJsonArray("servers").isEmpty()) {
+                    || value.getAsJsonArray("servers").isEmpty() != !content(value)) {
                 throw invalid();
             }
-            return;
-        }
-        if (!value.get("required").getAsBoolean() || value.getAsJsonArray("servers").isEmpty()) {
+            if (!content(value)) {
+                return;
+            }
+        } else if (!value.get("required").getAsBoolean() || value.getAsJsonArray("servers").isEmpty()) {
             throw invalid();
         }
         for (var server : value.getAsJsonArray("servers")) {
@@ -266,7 +276,7 @@ public final class MachineV2RequestValidator {
     public record ValidatedSignFile(String id, String source, String target, VisibleSignatureAppearance.Snapshot appearance) {
     }
 
-    public record Timestamp(List<String> servers, Authentication authentication) {
+    public record Timestamp(List<String> servers, Authentication authentication, boolean content) {
     }
 
     public record Authentication(String type, String username, char[] secret) {

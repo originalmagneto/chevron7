@@ -50,6 +50,8 @@ public class SigningParameters {
     private final TSPSource tspSource;
     private VisiblePadesAppearance visiblePadesAppearance;
     private boolean plainRecordXdc;
+    private TSPSource contentTimestampSource;
+    private boolean extendsExistingContainer;
 
     private SigningParameters(
             SignatureLevel level, DigestAlgorithm digestAlgorithm, ASiCContainerType container, SignaturePackaging signaturePackaging,
@@ -183,9 +185,11 @@ public class SigningParameters {
         if (level != SignatureLevel.XAdES_BASELINE_T && level != SignatureLevel.CAdES_BASELINE_T)
             throw new SigningParametersException("Nesprávny typ podpisu", "Existujúci ASiC vyžaduje XAdES alebo CAdES Baseline T");
 
-        return new SigningParameters(level, DigestAlgorithm.SHA256, ASiCContainerType.ASiC_E,
+        var parameters = new SigningParameters(level, DigestAlgorithm.SHA256, ASiCContainerType.ASiC_E,
                 SignaturePackaging.ENVELOPING, signAsEn319132, null, null, null,
                 new EFormAttributes(null, null, null, null, null, null, false), checkPDFACompliance, 640, tspSource);
+        parameters.extendsExistingContainer = true;
+        return parameters;
     }
 
         public ASiCWithXAdESSignatureParameters getASiCWithXAdESSignatureParameters() {
@@ -370,6 +374,30 @@ public class SigningParameters {
 
     public TSPSource getTspSource() {
         return tspSource;
+    }
+
+    /// A qualified timestamp included in the signed data (§ 23 ods. 1 písm. b) zákona
+    /// č. 305/2013 Z. z.): an AllDataObjectsTimeStamp for XAdES in a new ASiC-E, a document
+    /// timestamp revision before the signature for PAdES. Independent of the signature
+    /// timestamp, so a Baseline B signature can carry one too. Never for CAdES, an existing
+    /// container being extended or a record XDC.
+    public void setContentTimestampSource(TSPSource source) throws SigningParametersException {
+        if (source != null) {
+            var supported = switch (getSignatureType()) {
+                case PAdES -> true;
+                case XAdES -> getContainer() == ASiCContainerType.ASiC_E && !plainRecordXdc
+                        && !extendsExistingContainer;
+                default -> false;
+            };
+            if (!supported)
+                throw new SigningParametersException("Časová pečiatka údajov nie je podporovaná",
+                        "Časová pečiatka údajov sa pridáva iba k novému podpisu PAdES alebo XAdES v ASiC-E");
+        }
+        contentTimestampSource = source;
+    }
+
+    public TSPSource getContentTimestampSource() {
+        return contentTimestampSource;
     }
 
     public boolean shouldEmbedSchemas() {
