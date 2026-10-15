@@ -1088,21 +1088,19 @@ final class SigningBatchTests: XCTestCase {
         XCTAssertEqual(request.tsaURL, "http://tsa.disig.sk/qts")
     }
 
-    /// § 23 ods. 1 písm. b): the card signature asks for a timestamp inside the signed data with
-    /// the chosen authority, even with the signature timestamp switched off.
-    func testTheContentTimestampGoesAlongWithTheChosenAuthority() async throws {
+    /// § 23 ods. 1 písm. b): with QTS the card signature also asks for a timestamp inside the
+    /// signed data, from the same chosen authority.
+    func testQTSBringsTheContentTimestampWithTheChosenAuthority() async throws {
         let provider = RecordingSigningProvider(addsContentTimestamp: true)
         let store = makeStore(provider: provider)
         await store.addDocuments(at: [makePDF(named: "podanie.pdf")], selectLast: true)
         store.identities = await provider.availableIdentities()
         store.selectedIdentityID = "identity"
         store.selectedTSAURL = "http://tsa.belgium.be/connect"
-        store.includeQualifiedTimestamp = false
         store.outputFormat = .embeddedPAdES
-        XCTAssertFalse(store.includeContentTimestamp, "Off by default")
+        XCTAssertTrue(store.includeQualifiedTimestamp, "QTS is on by default")
         XCTAssertTrue(store.contentTimestampIsAvailable)
-        store.includeContentTimestamp = true
-        XCTAssertTrue(store.showsTimestampAuthorityPicker)
+        XCTAssertEqual(store.qualifiedTimestampContentNote, SigningSessionStore.contentTimestampNote)
 
         await store.sign()
 
@@ -1110,57 +1108,54 @@ final class SigningBatchTests: XCTestCase {
         let request = try XCTUnwrap(recorded.first)
         XCTAssertNil(store.lastError)
         XCTAssertTrue(request.includeContentTimestamp)
-        XCTAssertFalse(request.includeTimestamp)
+        XCTAssertTrue(request.includeTimestamp)
         XCTAssertEqual(request.tsaURL, "http://tsa.belgium.be/connect")
+        XCTAssertTrue(store.lastSignatureContentTimestamped)
     }
 
-    func testWithoutTheSwitchNoContentTimestampIsAskedFor() async throws {
+    func testWithoutQTSNoContentTimestampIsAskedFor() async throws {
         let provider = RecordingSigningProvider(addsContentTimestamp: true)
         let store = makeStore(provider: provider)
         await store.addDocuments(at: [makePDF(named: "zmluva.pdf")], selectLast: true)
         store.identities = await provider.availableIdentities()
         store.selectedIdentityID = "identity"
+        store.includeQualifiedTimestamp = false
+        XCTAssertNil(store.qualifiedTimestampContentNote)
 
         await store.sign()
 
         let recorded = await provider.recordedRequests()
         let request = try XCTUnwrap(recorded.first)
         XCTAssertFalse(request.includeContentTimestamp)
+        XCTAssertFalse(request.includeTimestamp)
     }
 
-    /// The phone services build their own signature, so the switch blocks the phone.
-    func testThePhoneRefusesAContentTimestamp() async throws {
+    /// The phone services build their own signature: QTS on still lets the phone sign, with
+    /// their timestamp only.
+    func testThePhoneSignsWithQTSButWithoutAContentTimestamp() async throws {
         let provider = RecordingSigningProvider(addsContentTimestamp: true)
         let store = makeStore(provider: provider)
         await store.addDocuments(at: [makePDF(named: "podanie.pdf")], selectLast: true)
-        store.includeContentTimestamp = true
 
-        XCTAssertFalse(store.canSignViaMobile)
-        await store.sign(viaMobile: true)
-
-        XCTAssertEqual(store.lastError, SigningSessionStore.contentTimestampNeedsCardMessage)
-        XCTAssertFalse(store.isSigning)
-        let recorded = await provider.recordedRequests()
-        XCTAssertTrue(recorded.isEmpty)
+        XCTAssertTrue(store.addsContentTimestamp(viaMobile: false))
+        XCTAssertFalse(store.addsContentTimestamp(viaMobile: true))
     }
 
-    func testAProviderWithoutContentTimestampsOffersNoSwitch() {
+    func testAProviderWithoutContentTimestampsAddsNone() {
         let store = makeStore(provider: RecordingSigningProvider())
-        store.includeContentTimestamp = true
 
         XCTAssertFalse(store.contentTimestampIsAvailable)
         XCTAssertFalse(store.addsContentTimestamp(viaMobile: false))
+        XCTAssertNil(store.qualifiedTimestampContentNote)
     }
 
-    func testTheBatchCarriesTheContentTimestamp() async throws {
+    func testTheBatchCarriesTheContentTimestampWithQTS() async throws {
         let provider = RecordingSigningProvider(addsContentTimestamp: true)
         let store = makeStore(provider: provider)
         await store.addDocuments(at: [makePDF(named: "a.pdf"), makePDF(named: "b.pdf")], selectLast: false)
         store.identities = await provider.availableIdentities()
         store.selectedIdentityID = "identity"
         store.selectedTSAURL = "http://tsa.belgium.be/connect"
-        store.includeQualifiedTimestamp = false
-        store.includeContentTimestamp = true
         store.outputFormat = .attachedASIC
 
         await store.prepareBatch(ids: store.queue.map(\.id))
@@ -1169,9 +1164,21 @@ final class SigningBatchTests: XCTestCase {
 
         let recorded = await provider.recordedRequests()
         XCTAssertEqual(recorded.count, 2)
-        XCTAssertTrue(recorded.allSatisfy { $0.includeContentTimestamp && !$0.includeTimestamp })
+        XCTAssertTrue(recorded.allSatisfy { $0.includeContentTimestamp && $0.includeTimestamp })
         // An ASiC-E never takes BOSA, whose timestamp slovensko.sk does not see in XAdES.
         XCTAssertTrue(recorded.allSatisfy { $0.tsaURL == TimestampAuthority.sectigoQualifiedURL })
+    }
+
+    func testTheBatchWithoutQTSAddsNoContentTimestamp() async throws {
+        let provider = RecordingSigningProvider(addsContentTimestamp: true)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "a.pdf"), makePDF(named: "b.pdf")], selectLast: false)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = "identity"
+        store.includeQualifiedTimestamp = false
+
+        await store.prepareBatch(ids: store.queue.map(\.id))
+        XCTAssertEqual(store.batchSettingsSnapshot?.includeContentTimestamp, false)
     }
 
     /// A phone signature's stamp never names the Settings authority: the phone service

@@ -21,11 +21,9 @@ final class SigningSessionStore {
     var identities: [SigningIdentityInfo] = []
     var selectedIdentityID: String?
 
+    /// The QTS switch. With the card it also puts a qualified timestamp inside the signed data
+    /// (§ 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.), see `addsContentTimestamp(viaMobile:)`.
     var includeQualifiedTimestamp = true
-    /// A qualified timestamp inside the signed data, for an officially certified signature on the
-    /// podanie itself (§ 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.). Off by default and never
-    /// remembered: the card path only, never the phone.
-    var includeContentTimestamp = false
     var includeVisibleSignature = false
     /// Set when a card signature needs a PIN nobody entered; the window asks for it in a sheet.
     var isAskingForSigningPIN = false
@@ -532,24 +530,28 @@ final class SigningSessionStore {
             || (!viaMobile && (signingProvider.alwaysAddsQualifiedTimestamp || sourceSignatureKind == .asicContainer))
     }
 
-    /// The switch exists only where the provider adds one and the signature is a new one: an
-    /// existing container is extended and keeps its own data.
+    /// Only a provider that adds one, and only to a new signature: an existing container is
+    /// extended and keeps its own data.
     var contentTimestampIsAvailable: Bool {
         signingProvider.addsContentTimestamp && sourceSignatureKind != .asicContainer
     }
 
+    /// A signature with QTS gets both timestamps: one inside the signed data before signing (the
+    /// time after which it was signed) and the signature timestamp after it. The phone services
+    /// build their own signature, so a phone signature carries only theirs.
     func addsContentTimestamp(viaMobile: Bool) -> Bool {
-        includeContentTimestamp && !viaMobile && contentTimestampIsAvailable
+        includeQualifiedTimestamp && !viaMobile && contentTimestampIsAvailable
     }
 
-    static let contentTimestampExplanation = "Zapnite len vtedy, keď zákon vyžaduje úradne osvedčený podpis na samotnom podaní (§ 23 ods. 1 písm. b) zákona o e-Governmente). Pred podpisom pridá kvalifikovanú časovú pečiatku do podpísaných údajov. Na prílohy ani bežné dokumenty ju netreba."
-    static let contentTimestampShortExplanation = "Len keď zákon vyžaduje úradne osvedčený podpis na samotnom podaní (§ 23 ods. 1 písm. b) zákona o e-Governmente)."
-    static let contentTimestampNeedsCardMessage = "Časovú pečiatku údajov pridá len podpis kartou. Vypnite ju alebo podpíšte kartou."
+    static let contentTimestampNote = "Pri podpise kartou pridá aj časovú pečiatku údajov pred podpisom, ako ju vyžaduje úradne osvedčený podpis (§ 23 ods. 1 písm. b) zákona o e-Governmente)."
 
-    /// The authority picker shows whenever either timestamp will be asked for.
+    /// The note under the QTS switch, only where the card adds the timestamp inside the data.
+    var qualifiedTimestampContentNote: String? {
+        contentTimestampIsAvailable && qualifiedTimestampSwitchIsOn ? Self.contentTimestampNote : nil
+    }
+
     var showsTimestampAuthorityPicker: Bool {
         qualifiedTimestampSwitchIsOn || signingProvider.alwaysAddsQualifiedTimestamp
-            || (includeContentTimestamp && contentTimestampIsAvailable)
     }
 
     static let mobileTimestampAuthorityLabel = "služba podpisu mobilom"
@@ -600,8 +602,6 @@ final class SigningSessionStore {
     var canSignViaMobile: Bool {
         document != nil && !isSigning && isMobileSigningAvailable
             && sourceSignatureKind != .asicContainer
-            // The phone services build their own signature: no timestamp inside the signed data.
-            && !includeContentTimestamp
             // The phone path can only bake a stamp into the PDF, which a signed PDF refuses.
             && !(preservesSourceBytes && includeVisibleSignature)
     }
@@ -629,10 +629,6 @@ final class SigningSessionStore {
 
     func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
         guard let document else { return }
-        if viaMobile, includeContentTimestamp {
-            lastError = Self.contentTimestampNeedsCardMessage
-            return
-        }
         // Ask for the PIN instead of failing with "Certifikát nie je dostupný".
         if !viaMobile, signingNeedsPIN {
             lastError = nil
