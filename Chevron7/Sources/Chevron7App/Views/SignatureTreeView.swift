@@ -7,6 +7,12 @@ import Chevron7Kit
 enum SignatureTreePresentation {
     static let officialValidationURL = URL(string: "https://www.slovensko.sk/sk/e-sluzby/sluzba-overenia-zep")!
 
+    /// A timestamp inside the signed data: the time after which the signature was made
+    /// (§ 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.).
+    static let dataTimestampLabel = "Časová pečiatka údajov"
+    /// A timestamp over the finished signature: the time before which it was made.
+    static let signatureTimestampLabel = "Časová pečiatka podpisu"
+
     static func signatureCount(_ count: Int) -> String {
         switch count {
         case 1: "1 podpis"

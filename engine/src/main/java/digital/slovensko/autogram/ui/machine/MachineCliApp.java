@@ -192,7 +192,7 @@ public final class MachineCliApp {
         return new InspectRequest(List.copyOf(files));
     }
 
-    private static SignRequest requiredSignRequest(JsonObject payload) {
+    static SignRequest requiredSignRequest(JsonObject payload) {
         if (payload.size() != 6 || !payload.has("driver") || !payload.has("certificateSerial") || !payload.has("pin")
                 || !payload.has("signatureLevel") || !payload.has("timestamp") || !payload.has("files")
                 || !isNonBlankString(payload.get("driver")) || !isNonBlankString(payload.get("certificateSerial"))
@@ -262,10 +262,13 @@ public final class MachineCliApp {
     }
 
     private static QualifiedTimestampRequest requiredTimestamp(JsonObject timestamp) {
-        if ((timestamp.size() != 2 && timestamp.size() != 3) || !timestamp.has("required") || !timestamp.has("servers")
+        var optionalFields = (timestamp.has("authentication") ? 1 : 0) + (timestamp.has("content") ? 1 : 0);
+        if (timestamp.size() != 2 + optionalFields || !timestamp.has("required") || !timestamp.has("servers")
                 || !timestamp.get("required").isJsonPrimitive()
                 || !timestamp.getAsJsonPrimitive("required").isBoolean()
-                || !timestamp.get("servers").isJsonArray()) {
+                || !timestamp.get("servers").isJsonArray()
+                || timestamp.has("content") && (!timestamp.get("content").isJsonPrimitive()
+                        || !timestamp.getAsJsonPrimitive("content").isBoolean())) {
             throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
         }
         var servers = new ArrayList<String>();
@@ -277,7 +280,8 @@ public final class MachineCliApp {
         }
         var authentication = timestamp.has("authentication")
                 ? requiredTimestampAuthentication(timestamp.get("authentication")) : null;
-        return new QualifiedTimestampRequest(timestamp.get("required").getAsBoolean(), List.copyOf(servers), authentication);
+        return new QualifiedTimestampRequest(timestamp.get("required").getAsBoolean(), List.copyOf(servers), authentication,
+                timestamp.has("content") && timestamp.get("content").getAsBoolean());
     }
 
     private static TimestampAuthentication requiredTimestampAuthentication(JsonElement value) {

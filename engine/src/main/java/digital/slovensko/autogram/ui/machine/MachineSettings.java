@@ -18,6 +18,8 @@ public final class MachineSettings extends UserSettings {
     private final String disabledPkcs11DriverPath = disabledPath("pkcs11");
     private final List<String> trustedList;
     private EFormRequest eform;
+    private boolean contentTimestamp;
+    private TSPSource testTspSource;
 
     public EFormRequest getEform() {
         return eform;
@@ -25,6 +27,16 @@ public final class MachineSettings extends UserSettings {
 
     public void setEform(EFormRequest eform) {
         this.eform = eform;
+    }
+
+    /// A qualified timestamp included in the signed data, from the same authorities as the
+    /// signature timestamp (§ 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.).
+    public boolean getContentTimestamp() {
+        return contentTimestamp;
+    }
+
+    public void setContentTimestamp(boolean contentTimestamp) {
+        this.contentTimestamp = contentTimestamp;
     }
 
     public MachineSettings() {
@@ -76,8 +88,14 @@ public final class MachineSettings extends UserSettings {
     /// SIGNING_FAILED, and the app can say that the timestamp was the problem.
     @Override
     public TSPSource getTspSource() {
-        var source = super.getTspSource();
+        var source = testTspSource != null && super.getTspSource() != null ? testTspSource : super.getTspSource();
         return source == null ? null : new TimestampFailureSource(source);
+    }
+
+    /// Test hook: answer the configured authorities with this source, so a test signs a real
+    /// timestamp without the network. The authorities must still be configured.
+    void answerTimestampsWith(TSPSource source) {
+        testTspSource = source;
     }
 
     static final class TimestampFailureSource implements TSPSource {

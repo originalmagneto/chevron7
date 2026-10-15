@@ -61,6 +61,9 @@ public final class MachineRequestValidator {
         if (request.signatureLevel().endsWith("_T")) {
             validateTimestamp(request.timestamp());
         }
+        if (request.timestamp() != null && request.timestamp().content()) {
+            validateTimestampServers(request.timestamp());
+        }
         var hasAttachments = request.files().stream().anyMatch(file -> file != null && !file.attachments().isEmpty());
         if (hasAttachments && (request.eform() != null || !request.signatureLevel().startsWith("XAdES_"))) {
             throw invalidRequest();
@@ -72,6 +75,10 @@ public final class MachineRequestValidator {
         if (timestamp == null || !timestamp.required()) {
             throw new MachineProtocolException("TIMESTAMP_REQUIRED");
         }
+        validateTimestampServers(timestamp);
+    }
+
+    private static void validateTimestampServers(QualifiedTimestampRequest timestamp) {
         if (timestamp.servers() == null || timestamp.servers().isEmpty()
                 || timestamp.servers().stream().anyMatch(server -> !isSupportedTsaUrl(server))) {
             throw new MachineProtocolException("TSA_REQUIRED");

@@ -188,22 +188,50 @@ final class SignatureBannerModelTests: XCTestCase {
                                               hasQualifiedTimestamp: true, state: .valid,
                                               timestampAuthority: "Belgium BOSA", timestampTime: stamp)
         let validated = try XCTUnwrap(SignatureBannerModel.make(from: state([signature])))
-        XCTAssertEqual(validated.rows[0].timestamp, "Časová pečiatka: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42")
+        XCTAssertEqual(validated.rows[0].timestamp, "Časová pečiatka podpisu: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42")
 
         var unqualified = signature
         unqualified.hasQualifiedTimestamp = false
         let plain = try XCTUnwrap(SignatureBannerModel.make(from: state([unqualified])))
-        XCTAssertEqual(plain.rows[0].timestamp, "Časová pečiatka: Belgium BOSA, nekvalifikovaná · 7. 10. 2026 11:18:42")
+        XCTAssertEqual(plain.rows[0].timestamp, "Časová pečiatka podpisu: Belgium BOSA, nekvalifikovaná · 7. 10. 2026 11:18:42")
 
         // The structural pass names the issuer DN, not the authority, and judges no qualification.
         var structural = unqualified
         structural.timestampAuthority = "CN=BOSA TSA, O=Belgium"
         structural.state = .indeterminate
         let checking = try XCTUnwrap(SignatureBannerModel.make(from: state([structural], .structural)))
-        XCTAssertEqual(checking.rows[0].timestamp, "Časová pečiatka · 7. 10. 2026 11:18:42")
+        XCTAssertEqual(checking.rows[0].timestamp, "Časová pečiatka podpisu · 7. 10. 2026 11:18:42")
 
         let none = try XCTUnwrap(SignatureBannerModel.make(from: state([sig("2", "B")])))
         XCTAssertNil(none.rows[0].timestamp)
+        XCTAssertNil(none.rows[0].dataTimestamp)
+    }
+
+    /// § 23 ods. 1 písm. b): a timestamp inside the signed data has its own line, apart from the
+    /// signature timestamp, and a Baseline B signature can carry it alone.
+    func testDataTimestampHasItsOwnLine() throws {
+        var components = DateComponents()
+        components.year = 2026; components.month = 10; components.day = 7
+        components.hour = 11; components.minute = 18; components.second = 40
+        let dataTime = try XCTUnwrap(Calendar.current.date(from: components))
+        components.second = 42
+        let signatureTime = try XCTUnwrap(Calendar.current.date(from: components))
+        let both = DocumentSignatureInfo(
+            id: "1", signerDisplayName: "A", format: "PAdES_BASELINE_T", hasQualifiedTimestamp: true, state: .valid,
+            timestampAuthority: "Belgium BOSA", timestampTime: signatureTime,
+            dataTimestamp: .init(authority: "Belgium BOSA", time: dataTime, isQualified: true))
+        let validated = try XCTUnwrap(SignatureBannerModel.make(from: state([both])))
+        XCTAssertEqual(validated.rows[0].dataTimestamp,
+                       "Časová pečiatka údajov: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:40")
+        XCTAssertEqual(validated.rows[0].timestamp,
+                       "Časová pečiatka podpisu: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42")
+
+        let dataOnly = DocumentSignatureInfo(
+            id: "2", signerDisplayName: "B", format: "XAdES_BASELINE_B", state: .indeterminate,
+            dataTimestamp: .init(authority: "CN=Sectigo", time: dataTime))
+        let checking = try XCTUnwrap(SignatureBannerModel.make(from: state([dataOnly], .structural)))
+        XCTAssertEqual(checking.rows[0].dataTimestamp, "Časová pečiatka údajov · 7. 10. 2026 11:18:40")
+        XCTAssertNil(checking.rows[0].timestamp)
     }
 
     func testCoverageOnlyInAContainerWithSeveralFiles() throws {

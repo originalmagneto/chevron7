@@ -114,7 +114,8 @@ public final class MachineSigningService {
             }
             try (var session = sessionFactory.apply(request)) {
                 for (; processedFiles < preparedFiles.size(); processedFiles++) {
-                    signFile(requestId, session, preparedFiles.get(processedFiles), validatedRequest.request().signatureLevel());
+                    signFile(requestId, session, preparedFiles.get(processedFiles), validatedRequest.request().signatureLevel(),
+                            request.timestamp() != null && request.timestamp().content());
                 }
             }
         } catch (Throwable exception) {
@@ -153,7 +154,7 @@ public final class MachineSigningService {
                     request.signatureLevel(), new QualifiedTimestampRequest(request.signatureLevel().endsWith("_T"),
                     request.timestamp().servers(),
                     authentication == null ? null : new TimestampAuthentication(authentication.type(), authentication.username(),
-                            authentication.secret())), files, request.eform()));
+                            authentication.secret()), request.timestamp().content()), files, request.eform()));
         } finally {
             Arrays.fill(pin, '\0');
             request.clearPin();
@@ -176,7 +177,8 @@ public final class MachineSigningService {
         }
     }
 
-    private void signFile(String requestId, SigningSession session, PreparedFile prepared, String requestedLevel) {
+    private void signFile(String requestId, SigningSession session, PreparedFile prepared, String requestedLevel,
+            boolean contentTimestamp) {
         var file = prepared.file();
         writer.write("file.signingStarted", requestId, file.id(), new JsonObject());
         try {
@@ -194,6 +196,10 @@ public final class MachineSigningService {
                             prepared.hasVisibleAppearance(), requestedLevel)
                     : outputValidationFailure(signedContent, previousSignatureIds,
                             prepared.hasVisibleAppearance(), requestedLevel);
+            if (validationFailure == null && contentTimestamp) {
+                validationFailure = contentTimestampFailure(signedContent,
+                        wrapsSignedSource(prepared, previousSignatureIds, signedContent) ? Set.of() : previousSignatureIds);
+            }
             if (validationFailure != null) {
                 throw MachineProtocolException.fromFailure(validationFailure);
             }
@@ -289,6 +295,14 @@ public final class MachineSigningService {
             boolean visibleAppearance, String requestedLevel) {
         try {
             return outputValidator.validationFailure(content, previousSignatureIds, visibleAppearance, requestedLevel);
+        } catch (Throwable exception) {
+            throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
+        }
+    }
+
+    private String contentTimestampFailure(byte[] content, Set<String> previousSignatureIds) {
+        try {
+            return outputValidator.contentTimestampFailure(content, previousSignatureIds);
         } catch (Throwable exception) {
             throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
         }
@@ -718,6 +732,12 @@ public final class MachineSigningService {
             return null;
         }
 
+        /// The new signature must carry an intact timestamp inside its signed data when one was
+        /// requested. A validator that cannot tell refuses.
+        default String contentTimestampFailure(byte[] content, Set<String> previousSignatureIds) throws Exception {
+            return "OUTPUT_VALIDATION_FAILED";
+        }
+
         /// A signed source wrapped into a new container must come back byte-identical as the
         /// container's signed data object. A validator that cannot prove that refuses.
         default String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
@@ -752,13 +772,16 @@ public final class MachineSigningService {
             try {
                 settings.setSignatureLevel(SignatureLevel.valueOf(request.signatureLevel()));
                 settings.setEform(request.eform());
-                // Baseline-B carries no timestamp, so no TSA is configured for it.
-                if (request.signatureLevel().endsWith("_T")) {
+                // Baseline B carries no signature timestamp; a content timestamp still needs the
+                // authorities. Without either, no source is left over from an earlier request.
+                var contentTimestamp = request.timestamp() != null && request.timestamp().content();
+                settings.setContentTimestamp(contentTimestamp);
+                if (request.signatureLevel().endsWith("_T") || contentTimestamp) {
                     settings.setTsaServer(String.join(",", request.timestamp().servers()), timestampDataLoader);
-                    settings.setTsaEnabled(true);
                 } else {
-                    settings.setTsaEnabled(false);
+                    settings.setTsaServer(null, timestampDataLoader);
                 }
+                settings.setTsaEnabled(request.signatureLevel().endsWith("_T"));
                 var driver = driverDetector.getAvailableDrivers().stream()
                         .filter(candidate -> candidate.getShortname().equals(request.driver()))
                         .findFirst()
@@ -882,6 +905,22 @@ public final class MachineSigningService {
         }
 
         private static SigningParameters signingParameters(InMemoryDocument document, MachineSettings settings) throws Exception {
+            var parameters = newSignatureParameters(document, settings);
+            if (settings.getContentTimestamp()) {
+                if (settings.getTspSource() == null) {
+                    throw new MachineProtocolException("TSA_REQUIRED");
+                }
+                parameters.setContentTimestampSource(settings.getTspSource());
+            }
+            return parameters;
+        }
+
+        private static SigningParameters newSignatureParameters(InMemoryDocument document, MachineSettings settings)
+                throws Exception {
+            // Only a Baseline T level gets the signature timestamp source; the authorities may be
+            // configured for a content timestamp alone.
+            var signatureTimestampSource = settings.getSignatureLevel().name().endsWith("_T")
+                    ? settings.getTspSource() : null;
             var eform = settings.getEform();
             if (eform != null) {
                 // Same entry point the HTTP SignEndpoint uses, so XDCBuilder and the
@@ -901,7 +940,7 @@ public final class MachineSigningService {
                         false,
                         0,
                         document,
-                        settings.getTspSource(),
+                        signatureTimestampSource,
                         false);
             }
             if (document.getMimeType().equals(MimeTypeEnum.ASICE)) {
@@ -925,12 +964,12 @@ public final class MachineSigningService {
                     throw new IOException("A record is signed as XAdES in an ASiC-E");
                 }
                 // Local route: the XDC already references its form; nothing is fetched or re-wrapped.
-                return SigningParameters.buildForPlainRecordXdc(document, level, settings.getTspSource());
+                return SigningParameters.buildForPlainRecordXdc(document, level, signatureTimestampSource);
             }
             var level = settings.getSignatureLevel();
             if (level == SignatureLevel.XAdES_BASELINE_T) {
                 return SigningParameters.buildForASiCWithXAdES(document, false, false,
-                        settings.getTspSource(), true);
+                        signatureTimestampSource, true);
             }
             if (level == SignatureLevel.XAdES_BASELINE_B) {
                 // A portal's ASiC-E envelope around a PDF: the same container as
@@ -940,7 +979,7 @@ public final class MachineSigningService {
             if (AutogramMimeType.isTxt(document.getMimeType()) || document.getMimeType().equals(MimeTypeEnum.PNG)) {
                 throw new IOException("Plain text and images are signed as XAdES in an ASiC-E");
             }
-            return SigningParameters.buildForPDF(document, false, false, settings.getTspSource());
+            return SigningParameters.buildForPDF(document, false, false, signatureTimestampSource);
         }
         @Override
         public void close() {
@@ -1190,8 +1229,26 @@ public final class MachineSigningService {
         }
 
         @Override
+        public String contentTimestampFailure(byte[] content, Set<String> previousSignatureIds) {
+            var added = inspectionService.inspect(content).getAsJsonArray("signatures").asList().stream()
+                    .map(value -> value.getAsJsonObject())
+                    .filter(signature -> !previousSignatureIds.contains(string(signature, "id"))).toList();
+            if (added.size() != 1 || !added.getFirst().has("timestamps")) {
+                return "OUTPUT_VALIDATION_FAILED";
+            }
+            var intact = added.getFirst().getAsJsonArray("timestamps").asList().stream()
+                    .map(value -> value.getAsJsonObject())
+                    .anyMatch(timestamp -> isInSignedData(timestamp) && hasCryptographicIntegrity(timestamp));
+            return intact ? null : "OUTPUT_VALIDATION_FAILED";
+        }
+
+        @Override
         public boolean isValid(byte[] content) {
             return isValid(content, Set.of());
+        }
+
+        private static boolean isInSignedData(JsonObject timestamp) {
+            return booleanField(timestamp, "inSignedData", "inSignedData");
         }
 
         private static byte[] readPathNoFollow(Path target) throws IOException {
@@ -1221,9 +1278,10 @@ public final class MachineSigningService {
             if (!signature.has("timestamps") || !signature.get("timestamps").isJsonArray()) {
                 return false;
             }
+            // A content timestamp lies inside the signed data; Baseline T needs a signature timestamp.
             return signature.getAsJsonArray("timestamps").asList().stream()
                     .map(value -> value.getAsJsonObject())
-                    .anyMatch(PdfOutputValidator::hasCryptographicIntegrity);
+                    .anyMatch(timestamp -> !isInSignedData(timestamp) && hasCryptographicIntegrity(timestamp));
         }
 
         private static boolean hasQualifiedTimestamp(JsonObject signature) {
@@ -1257,9 +1315,16 @@ record SignRequest(
     }
 }
 
-record QualifiedTimestampRequest(boolean required, List<String> servers, TimestampAuthentication authentication) {
+/// `required`: a signature timestamp (Baseline T). `content`: a qualified timestamp included in
+/// the signed data as well, from the same `servers`.
+record QualifiedTimestampRequest(boolean required, List<String> servers, TimestampAuthentication authentication,
+        boolean content) {
     QualifiedTimestampRequest(boolean required, List<String> servers) {
-        this(required, servers, null);
+        this(required, servers, null, false);
+    }
+
+    QualifiedTimestampRequest(boolean required, List<String> servers, TimestampAuthentication authentication) {
+        this(required, servers, authentication, false);
     }
 
     void clearAuthentication() {
