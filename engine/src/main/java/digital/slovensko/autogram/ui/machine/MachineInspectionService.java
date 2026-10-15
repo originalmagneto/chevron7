@@ -551,13 +551,16 @@ public final class MachineInspectionService {
         addEnum(signature, "indication", report.getIndication(signatureId));
         addEnum(signature, "subIndication", report.getSubIndication(signatureId));
         addString(signature, "validationReason", firstValidationReason(report, signatureId));
-        signature.addProperty("qualifiedTimestampValid",
-                timestampQualificationEvaluator.hasValidQualifiedTimestamp(report, signatureId));
-
         var known = new LinkedHashMap<String, SignatureTimestamp>();
+        var inSignedData = new java.util.HashSet<String>();
         for (var timestamp : signatureTimestamps) {
             known.put(timestamp.token().getDSSIdAsString(), timestamp);
+            if (timestamp.inSignedData()) {
+                inSignedData.add(timestamp.token().getDSSIdAsString());
+            }
         }
+        signature.addProperty("qualifiedTimestampValid",
+                timestampQualificationEvaluator.hasValidQualifiedTimestamp(report, signatureId, inSignedData));
         var ids = new LinkedHashSet<String>();
         // A document timestamp of an earlier revision is not one of the signature's own in the
         // simple report, so it comes first from the validator, in document order.
