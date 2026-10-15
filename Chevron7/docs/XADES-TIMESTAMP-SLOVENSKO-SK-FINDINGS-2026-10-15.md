@@ -6,6 +6,7 @@ Chevron7 1.5.3, eID card of the owner, same day, same TSA setting (BOSA, the def
 
 - ASiC-E XAdES Baseline T (`Test dohoda_podpisane.asice`): slovensko.sk informative validation shows "Predbežne platný" (Kód stavu 3, Kód výsledku 17), type `XadesBPLevelT`, "Obsahuje časovú pečiatku: Nie", column "Bez časovej pečiatky".
 - PAdES Baseline T of a PDF: "Platný" with its timestamp.
+- A second ASiC-E (`Test dohoda 6_podpisane.asice`, about 15:38Z, a PR #83 test build with the content timestamp on) carries an `xades:AllDataObjectsTimeStamp` and a `xades:SignatureTimeStamp`, both from BOSA "Timestamp Unit 202302" (ECDSA chain, exc-c14n, SHA-512 imprint). slovensko.sk reported it exactly like the first: "Predbežne platný", 3 / 17, `XadesBPLevelT`, "Obsahuje časovú pečiatku: Nie". A PAdES from the same build (document timestamp plus signature timestamp, BOSA, SHA-512 imprints) was "Platný" with its timestamp listed.
 
 DSS (our engine, 6.4) validates the same ASiC-E as `TOTAL_PASSED` with a valid QTSA timestamp. The container is correct; the Slovak validator does not see the timestamp.
 
