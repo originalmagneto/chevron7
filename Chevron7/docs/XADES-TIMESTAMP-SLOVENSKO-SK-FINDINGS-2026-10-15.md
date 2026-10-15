@@ -10,9 +10,9 @@ Chevron7 1.5.3, eID card of the owner, same day, same TSA setting (BOSA, the def
 
 DSS (our engine, 6.4) validates the same ASiC-E as `TOTAL_PASSED` with a valid QTSA timestamp. The container is correct; the Slovak validator does not see the timestamp.
 
-## Cause (most likely, not yet confirmed by an upload)
+## Cause (confirmed by the owner's uploads, see "Confirmation files")
 
-The BOSA timestamp is signed with elliptic curves, which the Slovak XAdES validator does not support.
+The BOSA timestamp is signed with elliptic curves, which the Slovak XAdES validator does not support. The encoding of the timestamp (canonicalization, imprint algorithm) plays no part.
 
 - Every BOSA unit is ECDSA. `tsa.belgium.be/connect` answers with "Timestamp Unit 202302": P-256 key, token signed `ecdsa-with-SHA256`, unit and "Timestamp CA" certificates signed `ecdsa-with-SHA384` up to "Belgium Root CA6" (P-384). The Belgian trusted list shows the same for all four BOSA units (EC1/EC2 TSU 2021, TSU 202301, TSU 202302).
 - The central e-filing office (CEP) validates XAdES with Ditec's D.Verifier-SVR-XAdES and PAdES with a different component. Its documentation (Dokumentácia funkčnosti CEP v1.17, 10. 5. 2024, chapter 5.1 "Podporované kryptografické funkcie a algoritmy", page 14, columns PAdES / XAdES / CAdES) lists `ecdsaWithSHA256` for PAdES and XAdES, but `ecdsaWithSHA384` and `ecdsaWithSHA512` for PAdES only, and warns that an XAdES with EC-DSA is verified only when its certificates and revocation data are signed with RSA.
@@ -25,8 +25,8 @@ The BOSA timestamp is signed with elliptic curves, which the Slovak XAdES valida
 - Trusted list: TSU 202302 is listed directly and granted in the Belgian list (CEP chapter 5.1.4.3 refuses a unit that is only issued by a listed service).
 - Wrong imprint: the token's message imprint equals SHA-512 of the exclusive-c14n `ds:SignatureValue`, as the element's `ds:CanonicalizationMethod` declares. Inclusive c14n would give another value (it adds the inherited `xmlns:asic`).
 - Profile conformity: XAdES_ZEPbp v1.0 (Ditec, 4.3.1.1 and 4.4.5.1) allows c14n, c14n11 and exc-c14n and only requires the timestamp to name its canonicalization; CEP lists SHA-512 as supported for XAdES.
-
-Two encoding differences remain unproven as factors and are covered by the test files: DSS defaults the XAdES timestamp to exclusive c14n and a SHA-512 imprint (`XAdESTimestampParameters`, `TimestampParameters`), and the engine never overrides them, while every Ditec-made container on this Mac uses inclusive c14n and SHA-256. A 2019 court seal from the MS SR system on this Mac uses exc-c14n with an RSA (NBÚ) timestamp, a sign that exc-c14n itself is accepted.
+- Encoding: DSS defaults the XAdES timestamp to exclusive c14n and a SHA-512 imprint (`XAdESTimestampParameters`, `TimestampParameters`), and the engine never overrides them, while Ditec-made containers use inclusive c14n and SHA-256. The uploads show this does not matter: B (BOSA, inclusive, SHA-256) failed like A, and C (Sectigo, exclusive, SHA-512) passed like D. No engine change is needed.
+- Trusted list rule for Sectigo: its Spanish list entry names the CA rather than the signing unit, which CEP 5.1.4.3 calls invalid, but C and D were accepted with their timestamp, so the rule does not hit Sectigo for XAdES.
 
 ## Impact
 
@@ -40,7 +40,7 @@ Two encoding differences remain unproven as factors and are covered by the test 
 | Built-in | Unit key | Listed directly in its TL | Free | CEP risk |
 | --- | --- | --- | --- | --- |
 | BOSA | ECDSA P-256, chain ECDSA-SHA384 | yes | yes | XAdES timestamp invisible (this report) |
-| Sectigo Qualified | RSA 4096, `sha384WithRSAEncryption` | no: the Spanish list names "Sectigo Qualified Time Stamping CA R35", not "Signer #3" | yes | CEP 5.1.4.3 calls a unit that is only issued by a listed service invalid; may fail for PAdES and XAdES alike |
+| Sectigo Qualified | RSA 4096, `sha384WithRSAEncryption` | no: the Spanish list names "Sectigo Qualified Time Stamping CA R35", not "Signer #3" | yes | XAdES accepted with its timestamp (files C, D); PAdES not yet uploaded |
 | CA Disig | RSA (TSU 1 to 3, aTSU 1 to 3) | yes | no, contract | none known |
 
 Other RSA units listed directly in the Slovak list: NASES, Ardaco, NFQES, MO SR (none public and free as far as known).
@@ -49,12 +49,14 @@ Other RSA units listed directly in the Slovak list: NASES, Ardaco, NFQES, MO SR 
 
 Built from the owner's real signature by replacing only the unsigned `xades:SignatureTimeStamp` (everything up to `xades:UnsignedProperties` byte-identical, so the card signature stays valid; DSS 6.4 rates all four `TOTAL_PASSED` with a valid QTSA timestamp). They sit in the shared notes folder `xades-timestamp-test-files/` (not in the repository, they carry the owner's signature):
 
-| File | TSA | c14n | Imprint | Expected if ECDSA is the cause |
-| --- | --- | --- | --- | --- |
-| `A_original_BOSA_exclusive_sha512.asice` | BOSA | exclusive | SHA-512 | Nie (observed) |
-| `B_BOSA_inclusive_sha256.asice` | BOSA | inclusive | SHA-256 | Nie |
-| `C_Sectigo_exclusive_sha512.asice` | Sectigo | exclusive | SHA-512 | Áno, unless the 5.1.4.3 listing rule hits Sectigo |
-| `D_Sectigo_inclusive_sha256.asice` | Sectigo | inclusive | SHA-256 | as C |
+| File | TSA | c14n | Imprint | Expected if ECDSA is the cause | slovensko.sk, 2026-10-15 |
+| --- | --- | --- | --- | --- | --- |
+| `A_original_BOSA_exclusive_sha512.asice` | BOSA | exclusive | SHA-512 | Nie | Predbežne platný (3 / 17), "Obsahuje časovú pečiatku: Nie", "Bez časovej pečiatky" |
+| `B_BOSA_inclusive_sha256.asice` | BOSA | inclusive | SHA-256 | Nie | as A |
+| `C_Sectigo_exclusive_sha512.asice` | Sectigo | exclusive | SHA-512 | Áno, unless the 5.1.4.3 listing rule hits Sectigo | Platný (1 / 0), "Obsahuje časovú pečiatku: Áno", 15. 10. 2026 15:51 UTC, `XadesBPLevelT` |
+| `D_Sectigo_inclusive_sha256.asice` | Sectigo | inclusive | SHA-256 | as C | as C |
+
+Result: B "Nie", C and D "Áno", the second case below. ECDSA is confirmed as the cause and Sectigo works for XAdES.
 
 Reading the results:
 
@@ -63,7 +65,7 @@ Reading the results:
 - C "Nie", D "Áno": both the TSA and the encoding matter; do both changes.
 - C and D "Nie": Sectigo is refused too (likely the listing rule); only a directly listed RSA authority such as CA Disig works, which needs a contract and credentials support.
 
-Also worth one upload: a PAdES signed with Sectigo selected in Settings, since Sectigo's listing would affect PAdES as well.
+Still open: a PAdES signed with Sectigo selected in Settings, before Sectigo becomes the default for PAdES too. The replacement default TSA is the owner's choice.
 
 ## Method
 
