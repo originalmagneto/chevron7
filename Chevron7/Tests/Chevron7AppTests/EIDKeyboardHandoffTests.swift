@@ -77,7 +77,7 @@ final class EIDKeyboardHandoffTests: XCTestCase {
         store.signingPIN = "123456"
         store.identities = [SigningIdentityInfo(
             id: "engine:eid", label: "Karta pripojená: eID", issuerSummary: "",
-            isQualified: true, hasPrivateKey: true, requiresPIN: true, usesProtectedAuthenticationPath: true)]
+            isQualified: true, hasPrivateKey: true, requiresPIN: false, usesProtectedAuthenticationPath: true)]
 
         await store.resolveCertificateForPreview(force: true)
 
@@ -117,6 +117,59 @@ final class EIDKeyboardHandoffTests: XCTestCase {
         XCTAssertEqual(log.events, ["sign"])
     }
 
+    // MARK: No PIN for an eID
+
+    /// The main window asks for a PIN only for a card that takes it from the app;
+    /// an eID's BOK goes to the eID client, so neither the field nor the sheet appears.
+    func testOnlyAPINCardNeedsAPINToSign() {
+        let log = EventLog()
+        XCTAssertFalse(makeSigningStore(log: log, identity: Self.eid).signingNeedsPIN)
+        XCTAssertTrue(makeSigningStore(log: log, identity: Self.pinCard).signingNeedsPIN)
+    }
+
+    func testAnEIDReadsItsCertificatesWithoutAPIN() async {
+        let log = EventLog()
+        let store = makeSigningStore(log: log, identity: Self.eid)
+
+        await store.resolveCertificateForPreview(force: true)
+
+        XCTAssertEqual(log.events, ["begin", "resolve", "end"])
+    }
+
+    func testAPINCardWaitsForItsPINBeforeReadingCertificates() async {
+        let log = EventLog()
+        let store = makeSigningStore(log: log, identity: Self.pinCard)
+
+        await store.resolveCertificateForPreview(force: true)
+
+        XCTAssertEqual(log.events, [])
+    }
+
+    func testSigningWithAnEIDAndNoPINGoesStraightToTheCard() async throws {
+        let log = EventLog()
+        let store = makeSigningStore(log: log, identity: Self.eid)
+        store.document = try XCTUnwrap(PDFDocument(data: TestPDFBuilderApp.typicalContractPDF()))
+
+        await store.sign()
+
+        XCTAssertFalse(store.isAskingForSigningPIN)
+        XCTAssertEqual(log.events, ["begin", "sign", "end"])
+    }
+
+    /// A visible stamp needs the signer's name, which an eID reads with its BOK.
+    func testTheBatchCardAsksForAPINOnlyForAPINCard() {
+        let log = EventLog()
+        let eid = makeSigningStore(log: log, identity: Self.eid)
+        eid.includeVisibleSignature = true
+        XCTAssertFalse(eid.batchNeedsPIN)
+        XCTAssertTrue(makeSigningStore(log: log, identity: Self.pinCard).batchNeedsPIN)
+
+        let noCard = makeSigningStore(log: log, identity: Self.eid)
+        noCard.identities = []
+        noCard.selectedIdentityID = nil
+        XCTAssertTrue(noCard.batchNeedsPIN)
+    }
+
     // MARK: ZaKo
 
     func testZakoReadingCertificatesFromAnEIDHandsTheKeyboardOver() async {
@@ -153,7 +206,7 @@ final class EIDKeyboardHandoffTests: XCTestCase {
 
     private static let eid = SigningIdentityInfo(
         id: "engine-cert:eid", label: "Ján Tester", issuerSummary: "Disig SVK eID ACA2",
-        isQualified: true, hasPrivateKey: true, requiresPIN: true, usesProtectedAuthenticationPath: true)
+        isQualified: true, hasPrivateKey: true, requiresPIN: false, usesProtectedAuthenticationPath: true)
 
     private static let pinCard = SigningIdentityInfo(
         id: "engine-cert:ica", label: "Ján Tester", issuerSummary: "I.CA Qualified 2 CA",

@@ -450,8 +450,11 @@ final class SigningSessionStore {
     }
 
     /// Certifikát musí byť známy pred vykreslením grafického podpisu.
+    /// An eID reads its certificates with an empty PIN: the engine asks the eID client
+    /// for the BOK in its own window.
     func resolveCertificateForPreview(force: Bool = false) async {
-        guard !signingProviderIsDemo, !signingPIN.isEmpty, !isResolvingCertificate else { return }
+        guard !signingProviderIsDemo, !signingPIN.isEmpty || selectedCardAsksForBOK,
+              !isResolvingCertificate else { return }
         guard force || !hasResolvedCertificate else { return }
         guard force || lastCertificateLoadPIN != signingPIN else { return }
 
@@ -621,7 +624,23 @@ final class SigningSessionStore {
         EIDKeyboardHandoff.applies(to: identities.first { $0.id == identityID } ?? identities.first)
     }
 
+    /// The selected card takes its BOK in the eID client's window, so nothing waits for a PIN here.
+    var selectedCardAsksForBOK: Bool {
+        asksEIDForBOK(selectedIdentityID)
+    }
+
+    /// Whether the batch card shows its PIN row and refuses to start without a PIN:
+    /// a card that takes its PIN from the app, or (outside Demo) no card known yet or a
+    /// visible stamp, whose signer name needs the certificates, unless an eID reads them.
+    var batchNeedsPIN: Bool {
+        if identities.first(where: { $0.id == selectedIdentityID })?.requiresPIN == true { return true }
+        guard !signingProviderIsDemo else { return false }
+        if identities.isEmpty { return true }
+        return batchSettingsSnapshot?.includeVisibleSignature == true && !selectedCardAsksForBOK
+    }
+
     /// The selected card takes its PIN from the app (not the eID's BOK window) and none is entered.
+    /// The engine reports `requiresPIN` false for an eID (`usesProtectedAuthenticationPath`).
     var signingNeedsPIN: Bool {
         guard let selected = identities.first(where: { $0.id == selectedIdentityID }) else { return false }
         return selected.requiresPIN && signingPIN.isEmpty
@@ -1057,7 +1076,9 @@ final class SigningSessionStore {
         }
 
         let pin = signingPIN
+        // An eID's certificates are read again too, with its BOK instead of a PIN.
         let requiresCertificateResolution = identity.requiresPIN
+            || identity.usesProtectedAuthenticationPath
             || discoveredIdentityID.hasPrefix(EngineBridgeSigningProvider.syntheticIdentityIDPrefix)
         guard !identity.requiresPIN || !pin.isEmpty else {
             blockingErrors.append("Pre vybraný certifikát je potrebný PIN.")
