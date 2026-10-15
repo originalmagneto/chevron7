@@ -411,6 +411,32 @@ final class MachineRequestEncodingTests: XCTestCase {
         XCTAssertEqual(payload.timestamp, .object(["required": .bool(false), "servers": .array([])]))
     }
 
+    /// A content timestamp names its authorities even at Baseline B, where no signature
+    /// timestamp is asked for; the engine reads `content` on both protocol versions.
+    func testAContentTimestampNamesItsServersAtBaselineB() {
+        let request = EngineSigningRequest(sessionID: UUID(), driverID: "secure_store", certificateSerial: "1",
+                                           pin: Secret("1234"), files: [], outputFormat: .pades,
+                                           signatureLevelOverride: "PAdES_BASELINE_B", contentTimestamp: true)
+        let payload = AutogramCLIEngine.levelAndTimestamp(for: request, endpoints: ["http://tsa.belgium.be/connect"])
+
+        XCTAssertEqual(payload.level, "PAdES_BASELINE_B")
+        XCTAssertEqual(payload.timestamp, .object([
+            "required": .bool(false), "servers": .array([.string("http://tsa.belgium.be/connect")]),
+            "content": .bool(true)]))
+    }
+
+    func testAContentTimestampRidesAlongWithTheSignatureTimestamp() {
+        let request = EngineSigningRequest(sessionID: UUID(), driverID: "secure_store", certificateSerial: "1",
+                                           pin: Secret("1234"), files: [], outputFormat: .asiceXAdES,
+                                           contentTimestamp: true)
+        let payload = AutogramCLIEngine.levelAndTimestamp(for: request, endpoints: ["http://tsa.belgium.be/connect"])
+
+        XCTAssertEqual(payload.level, "XAdES_BASELINE_T")
+        XCTAssertEqual(payload.timestamp, .object([
+            "required": .bool(true), "servers": .array([.string("http://tsa.belgium.be/connect")]),
+            "content": .bool(true)]))
+    }
+
     func testAppFlowsKeepTheQualifiedTimestamp() {
         let payload = AutogramCLIEngine.levelAndTimestamp(for: request(format: .asiceXAdES, override: nil),
                                                           endpoints: ["https://tsa.example.test"])
@@ -850,6 +876,31 @@ final class EngineBridgeTimestampRoutingTests: XCTestCase {
 
         XCTAssertEqual(engine.capturedRequest?.timestampServersOverride,
                        ["http://tsa.belgium.be/connect", "http://time.certum.pl"])
+    }
+
+    /// The switch reaches the engine for the app's own signature, with the chosen authority
+    /// even when the signature timestamp is off.
+    func testTheContentTimestampReachesTheEngineWithTheChosenAuthority() async throws {
+        let engine = RecordingSigningEngine()
+        var signing = request(tsaURL: nil)
+        signing.tsaURL = "http://tsa.belgium.be/connect"
+        signing.includeContentTimestamp = true
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(signing)
+
+        let captured = try XCTUnwrap(engine.capturedRequest)
+        XCTAssertTrue(captured.contentTimestamp)
+        XCTAssertEqual(captured.signatureLevelOverride, "XAdES_BASELINE_B")
+        XCTAssertEqual(captured.timestampServersOverride, ["http://tsa.belgium.be/connect"])
+    }
+
+    /// A portal decides its own format, so a content timestamp never reaches a portal request.
+    func testAPortalRequestNeverCarriesAContentTimestamp() async throws {
+        let engine = RecordingSigningEngine()
+        var signing = request(tsaURL: nil, level: "XAdES_BASELINE_B")
+        signing.includeContentTimestamp = true
+        _ = try await EngineBridgeSigningProvider(engine: engine).sign(signing)
+
+        XCTAssertEqual(engine.capturedRequest?.contentTimestamp, false)
     }
 
     func testABlankAuthorityIsNoOverride() async throws {

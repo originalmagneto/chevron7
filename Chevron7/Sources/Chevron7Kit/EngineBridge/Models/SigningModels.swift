@@ -75,6 +75,9 @@ struct EngineSigningRequest: Sendable {
     /// qualified list. When set and non-empty, `AutogramCLIEngine.sign` uses exactly
     /// these for a Baseline T signature instead of `timestampSourceProvider.load()`.
     let timestampServersOverride: [String]?
+    /// A qualified timestamp inside the signed data from the same authorities
+    /// (`timestamp.content` in the machine protocol), whatever the level.
+    let contentTimestamp: Bool
 
     init(
         sessionID: UUID,
@@ -85,7 +88,8 @@ struct EngineSigningRequest: Sendable {
         outputFormat: EngineSigningOutputFormat = .automatic,
         eform: EFormSigningAttributes? = nil,
         signatureLevelOverride: String? = nil,
-        timestampServersOverride: [String]? = nil
+        timestampServersOverride: [String]? = nil,
+        contentTimestamp: Bool = false
     ) {
         self.sessionID = sessionID
         self.driverID = driverID
@@ -96,6 +100,7 @@ struct EngineSigningRequest: Sendable {
         self.eform = eform
         self.signatureLevelOverride = signatureLevelOverride
         self.timestampServersOverride = timestampServersOverride
+        self.contentTimestamp = contentTimestamp
     }
 }
 

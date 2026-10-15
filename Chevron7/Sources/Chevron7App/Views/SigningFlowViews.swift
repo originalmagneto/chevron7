@@ -761,7 +761,24 @@ struct SigningPrepareView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if store.qualifiedTimestampSwitchIsOn || store.signingProvider.alwaysAddsQualifiedTimestamp {
+                if store.contentTimestampIsAvailable {
+                    Toggle(isOn: $store.includeContentTimestamp) {
+                        Label(SignatureTreePresentation.dataTimestampLabel, systemImage: "clock.badge.questionmark")
+                            .font(.callout)
+                    }
+                    .help(SigningSessionStore.contentTimestampExplanation)
+                    Text(SigningSessionStore.contentTimestampShortExplanation)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if store.includeContentTimestamp, store.isMobileSigningAvailable {
+                        Text("Len pri podpise kartou.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if store.showsTimestampAuthorityPicker {
                     VStack(alignment: .leading, spacing: 4) {
                         Picker("", selection: $store.selectedTSAURL) {
                             ForEach(store.settings.availableTSAServers) { server in
@@ -1044,7 +1061,7 @@ struct SigningDoneView: View {
                 }
             }
 
-            if store.lastSignatureTimestamped {
+            if store.lastSignatureTimestamped || store.lastSignatureContentTimestamped {
                 GroupBox("Časová pečiatka") {
                     VStack(alignment: .leading, spacing: 5) {
                         let signature = store.resultSignatures.first
@@ -1067,8 +1084,14 @@ struct SigningDoneView: View {
                            let signingTime = signature.signingTime {
                             detailRow("Čas podpisu", signingTime.formatted(date: .abbreviated, time: .standard))
                         }
+                        if let dataTime = store.resultSignatures.first?.dataTimestamp?.time {
+                            detailRow(SignatureTreePresentation.dataTimestampLabel,
+                                      dataTime.formatted(date: .abbreviated, time: .standard))
+                        }
                         if let timestampTime = store.resultSignatures.first?.timestampTime {
-                            detailRow("Čas pečiatky", timestampTime.formatted(date: .abbreviated, time: .standard))
+                            detailRow(store.lastSignatureContentTimestamped
+                                      ? SignatureTreePresentation.signatureTimestampLabel : "Čas pečiatky",
+                                      timestampTime.formatted(date: .abbreviated, time: .standard))
                         }
                         if let detail = store.resultSignatures.first?.detail {
                             detailRow("Validácia", detail)
@@ -1310,7 +1333,18 @@ struct SigningBatchView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if store.includeQualifiedTimestamp || timestampLocked {
+                        if store.contentTimestampIsAvailable {
+                            Toggle(SignatureTreePresentation.dataTimestampLabel,
+                                   isOn: batchOption(\.includeContentTimestamp))
+                                .toggleStyle(.checkbox)
+                                .help(SigningSessionStore.contentTimestampExplanation)
+                            Text(SigningSessionStore.contentTimestampShortExplanation)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if store.includeQualifiedTimestamp || timestampLocked
+                            || (store.includeContentTimestamp && store.contentTimestampIsAvailable) {
                             Picker("Služba TSA", selection: batchOption(\.selectedTSAURL)) {
                                 ForEach(store.settings.availableTSAServers) { server in
                                     Text(server.name).tag(server.url)
@@ -1929,6 +1963,9 @@ struct SigningBatchView: View {
                     ?? "Balenie: samostatný kontajner pre každý dokument")
             }
             lines.append("Časová pečiatka: \(snapshot.includeQualifiedTimestamp ? (snapshot.tsaURL ?? "zapnutá") : "vypnutá")")
+            if snapshot.includeContentTimestamp {
+                lines.append("\(SignatureTreePresentation.dataTimestampLabel): zapnutá")
+            }
             lines.append("PDF/A: \(snapshot.convertToPDFA ? "zapnuté" : "vypnuté")")
         }
         lines += ["", "Dokumenty:"]

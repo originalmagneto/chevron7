@@ -161,6 +161,9 @@ private struct SignatureBannerRow: View {
                 if !row.detail.isEmpty {
                     Text(row.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
+                if let dataTimestamp = row.dataTimestamp {
+                    Text(dataTimestamp).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
                 if let timestamp = row.timestamp {
                     Text(timestamp).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }

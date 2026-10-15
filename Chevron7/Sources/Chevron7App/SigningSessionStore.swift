@@ -22,6 +22,10 @@ final class SigningSessionStore {
     var selectedIdentityID: String?
 
     var includeQualifiedTimestamp = true
+    /// A qualified timestamp inside the signed data, for an officially certified signature on the
+    /// podanie itself (§ 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.). Off by default and never
+    /// remembered: the card path only, never the phone.
+    var includeContentTimestamp = false
     var includeVisibleSignature = false
     /// Set when a card signature needs a PIN nobody entered; the window asks for it in a sheet.
     var isAskingForSigningPIN = false
@@ -52,6 +56,8 @@ final class SigningSessionStore {
     private(set) var isSigningViaMobile = false
     /// Whether the last signature from `sign` carries a qualified timestamp, for the result screen.
     private(set) var lastSignatureTimestamped = false
+    /// Whether the last signature from `sign` asked for a timestamp inside the signed data.
+    private(set) var lastSignatureContentTimestamped = false
     /// How the phone signed the last document, nil when the card did; the done screen
     /// names the phone service's timestamp instead of the Settings authority then.
     private(set) var lastMobileSigningMethod: MobileSigningMethod?
@@ -210,6 +216,7 @@ final class SigningSessionStore {
         /// The shared container's file name without extension, only for a combined ASiC-E.
         var containerStem: String?
         var includeQualifiedTimestamp: Bool
+        var includeContentTimestamp: Bool = false
         var tsaURL: String?
         var convertToPDFA: Bool
         var pdfaMode: PDFAConversionMode
@@ -503,6 +510,26 @@ final class SigningSessionStore {
             || (!viaMobile && (signingProvider.alwaysAddsQualifiedTimestamp || sourceSignatureKind == .asicContainer))
     }
 
+    /// The switch exists only where the provider adds one and the signature is a new one: an
+    /// existing container is extended and keeps its own data.
+    var contentTimestampIsAvailable: Bool {
+        signingProvider.addsContentTimestamp && sourceSignatureKind != .asicContainer
+    }
+
+    func addsContentTimestamp(viaMobile: Bool) -> Bool {
+        includeContentTimestamp && !viaMobile && contentTimestampIsAvailable
+    }
+
+    static let contentTimestampExplanation = "Zapnite len vtedy, keď zákon vyžaduje úradne osvedčený podpis na samotnom podaní (§ 23 ods. 1 písm. b) zákona o e-Governmente). Pred podpisom pridá kvalifikovanú časovú pečiatku do podpísaných údajov. Na prílohy ani bežné dokumenty ju netreba."
+    static let contentTimestampShortExplanation = "Len keď zákon vyžaduje úradne osvedčený podpis na samotnom podaní (§ 23 ods. 1 písm. b) zákona o e-Governmente)."
+    static let contentTimestampNeedsCardMessage = "Časovú pečiatku údajov pridá len podpis kartou. Vypnite ju alebo podpíšte kartou."
+
+    /// The authority picker shows whenever either timestamp will be asked for.
+    var showsTimestampAuthorityPicker: Bool {
+        qualifiedTimestampSwitchIsOn || signingProvider.alwaysAddsQualifiedTimestamp
+            || (includeContentTimestamp && contentTimestampIsAvailable)
+    }
+
     static let mobileTimestampAuthorityLabel = "služba podpisu mobilom"
 
     /// The authority a visible stamp names. The phone services pick their own timestamp
@@ -551,6 +578,8 @@ final class SigningSessionStore {
     var canSignViaMobile: Bool {
         document != nil && !isSigning && isMobileSigningAvailable
             && sourceSignatureKind != .asicContainer
+            // The phone services build their own signature: no timestamp inside the signed data.
+            && !includeContentTimestamp
             // The phone path can only bake a stamp into the PDF, which a signed PDF refuses.
             && !(preservesSourceBytes && includeVisibleSignature)
     }
@@ -571,6 +600,10 @@ final class SigningSessionStore {
 
     func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
         guard let document else { return }
+        if viaMobile, includeContentTimestamp {
+            lastError = Self.contentTimestampNeedsCardMessage
+            return
+        }
         // Ask for the PIN instead of failing with "Certifikát nie je dostupný".
         if !viaMobile, signingNeedsPIN {
             lastError = nil
@@ -584,7 +617,9 @@ final class SigningSessionStore {
         isSigning = true
         isSigningViaMobile = viaMobile
         let timestamped = addsQualifiedTimestamp(viaMobile: viaMobile)
+        let contentTimestamped = addsContentTimestamp(viaMobile: viaMobile)
         lastSignatureTimestamped = timestamped
+        lastSignatureContentTimestamped = contentTimestamped
         lastMobileSigningMethod = viaMobile ? mobileMethod : nil
         lastTimestampQualification = nil
         let authorityURL = selectedTSAURL
@@ -766,7 +801,7 @@ final class SigningSessionStore {
                     SigningRequest(pdfData: data,
                                    identityID: identityID,
                                    includeTimestamp: timestamped,
-                                   tsaURL: timestamped ? selectedTSAURL : nil,
+                                   tsaURL: timestamped || contentTimestamped ? selectedTSAURL : nil,
                                    outputFormat: outputFormat,
                                    pin: signingPIN.isEmpty ? nil : signingPIN,
                                    extraFiles: [ASiCEPackager.Entry(path: pdfName, data: data)],
@@ -774,7 +809,8 @@ final class SigningSessionStore {
                                    filename: pdfName,
                                    // The engine builds the ASiC-E around the document itself;
                                    // a container packaged here ended up nested in the signed one.
-                                   signsExtraFilesAsDataObjects: true)
+                                   signsExtraFilesAsDataObjects: true,
+                                   includeContentTimestamp: contentTimestamped)
                 }
                 do {
                     signed = try await signingProvider.sign(makeRequest(with: pdfData))
@@ -1137,13 +1173,15 @@ final class SigningSessionStore {
             : nil
         // A batch signs with the card only.
         snapshot.includeQualifiedTimestamp = addsQualifiedTimestamp(viaMobile: false)
-        snapshot.tsaURL = snapshot.includeQualifiedTimestamp ? selectedTSAURL : nil
+        snapshot.includeContentTimestamp = addsContentTimestamp(viaMobile: false)
+        snapshot.tsaURL = snapshot.includeQualifiedTimestamp || snapshot.includeContentTimestamp
+            ? selectedTSAURL : nil
         snapshot.convertToPDFA = convertToPDFA
         snapshot.pdfaMode = pdfaMode
     }
 
     private static func batchOptionsError(for snapshot: BatchSettingsSnapshot) -> String? {
-        guard snapshot.includeQualifiedTimestamp,
+        guard snapshot.includeQualifiedTimestamp || snapshot.includeContentTimestamp,
               snapshot.tsaURL.flatMap({ URL(string: $0)?.scheme }) == nil else { return nil }
         return "Adresa služby časovej pečiatky nie je platná."
     }
@@ -1426,7 +1464,8 @@ final class SigningSessionStore {
                 filename: entries.first?.path,
                 // One ASiC-E with every PDF as its own data object, not a packaged
                 // container nested inside the signed one.
-                signsExtraFilesAsDataObjects: true))
+                signsExtraFilesAsDataObjects: true,
+                includeContentTimestamp: snapshot.includeContentTimestamp))
             guard let asicData = signed.asicData else {
                 throw SigningError.signingFailed("Podpisový provider nevytvoril ASiC-E kontajner.")
             }
@@ -1664,7 +1703,8 @@ final class SigningSessionStore {
             extraFiles: [ASiCEPackager.Entry(path: item.url.lastPathComponent, data: pdfData)],
             visualStamp: visualStamp,
             filename: item.url.lastPathComponent,
-            signsExtraFilesAsDataObjects: true)
+            signsExtraFilesAsDataObjects: true,
+            includeContentTimestamp: snapshot.includeContentTimestamp)
         var signed: SignedConversionResult
         do {
             try checkBatchGeneration(generation)
@@ -1695,7 +1735,8 @@ final class SigningSessionStore {
                         path: item.url.lastPathComponent, data: fallbackPDFData)],
                     visualStamp: visualStamp,
                     filename: item.url.lastPathComponent,
-                    signsExtraFilesAsDataObjects: true))
+                    signsExtraFilesAsDataObjects: true,
+                    includeContentTimestamp: snapshot.includeContentTimestamp))
                 try checkBatchGeneration(generation)
             } else {
                 throw error
