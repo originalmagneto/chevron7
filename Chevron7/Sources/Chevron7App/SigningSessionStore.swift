@@ -569,8 +569,10 @@ final class SigningSessionStore {
     }
 
     /// Whether the engine asks the eID client for the BOK, in its own window, for this identity.
+    /// The flag belongs to the card's driver, so when the reader poll replaced the
+    /// certificates with the card's placeholder (during a batch), that row decides.
     private func asksEIDForBOK(_ identityID: String?) -> Bool {
-        EIDKeyboardHandoff.applies(to: identities.first { $0.id == identityID })
+        EIDKeyboardHandoff.applies(to: identities.first { $0.id == identityID } ?? identities.first)
     }
 
     /// The selected card takes its PIN from the app (not the eID's BOK window) and none is entered.

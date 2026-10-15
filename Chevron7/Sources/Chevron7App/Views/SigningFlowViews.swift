@@ -383,7 +383,7 @@ struct SigningPrepareView: View {
                   !store.signingPIN.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            await resolveCertificateForPreview(relinquishApplicationFocus: false)
+            await resolveCertificateForPreview(blursPINField: false)
         }
         .onChange(of: bridgePlacement) { _, newValue in
             syncPlacementToStore(newValue)
@@ -590,9 +590,9 @@ struct SigningPrepareView: View {
     @MainActor
     private func resolveCertificateForPreview(
         force: Bool = false,
-        relinquishApplicationFocus: Bool = true
+        blursPINField: Bool = true
     ) async {
-        if relinquishApplicationFocus {
+        if blursPINField {
             signingPINFocused = false
         }
         await store.resolveCertificateForPreview(force: force)
@@ -646,7 +646,7 @@ struct SigningPrepareView: View {
                                         Task {
                                             await resolveCertificateForPreview(
                                                 force: true,
-                                                relinquishApplicationFocus: true)
+                                                blursPINField: true)
                                         }
                                     }
 
@@ -654,7 +654,7 @@ struct SigningPrepareView: View {
                                     Task {
                                         await resolveCertificateForPreview(
                                             force: true,
-                                            relinquishApplicationFocus: true)
+                                            blursPINField: true)
                                     }
                                 } label: {
                                     Label("Načítať certifikáty", systemImage: "arrow.clockwise")

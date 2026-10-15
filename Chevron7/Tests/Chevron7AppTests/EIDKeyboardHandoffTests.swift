@@ -69,6 +69,21 @@ final class EIDKeyboardHandoffTests: XCTestCase {
         XCTAssertEqual(log.events, ["begin", "resolve", "end"])
     }
 
+    func testTheCardsPlaceholderDecidesWhenTheSelectedCertificateIsGone() async {
+        // The reader poll replaced the certificates with the eID's placeholder row
+        // (as between batch items); the flag belongs to the driver, so it still applies.
+        let log = EventLog()
+        let store = makeSigningStore(log: log, identity: Self.eid)
+        store.signingPIN = "123456"
+        store.identities = [SigningIdentityInfo(
+            id: "engine:eid", label: "Karta pripojená: eID", issuerSummary: "",
+            isQualified: true, hasPrivateKey: true, requiresPIN: true, usesProtectedAuthenticationPath: true)]
+
+        await store.resolveCertificateForPreview(force: true)
+
+        XCTAssertEqual(log.events, ["begin", "resolve", "end"])
+    }
+
     func testReadingCertificatesFromAPINCardLeavesTheKeyboardAlone() async {
         let log = EventLog()
         let store = makeSigningStore(log: log, identity: Self.pinCard)
