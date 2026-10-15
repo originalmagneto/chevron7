@@ -70,25 +70,24 @@ struct SigningFlowView: View {
 
         // A dropped file keeps its own folder and its own name, so the signed
         // output lands beside the original instead of in a temporary directory
-        // under a generated name. Only a drop that carries no file falls back to
-        // bytes, and that output stays beside the temporary file.
-        guard isPDF, provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
+        // under a generated name (`DroppedFileURL`). Only a drop that carries no
+        // file falls back to bytes, and that output stays beside the temporary file.
+        guard isPDF else {
             importDroppedBytes(from: provider, typeIdentifier: typeIdentifier, isPDF: isPDF) { url in
                 Task { @MainActor in await store.loadDocument(at: url) }
             }
             return true
         }
 
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            guard let sourceURL = DroppedFileURL.resolve(from: item) else {
+        DroppedFileURL.load(from: provider, typeIdentifier: typeIdentifier) { sourceURL in
+            guard let sourceURL else {
                 importDroppedBytes(from: provider, typeIdentifier: typeIdentifier, isPDF: isPDF) { url in
                     Task { @MainActor in await store.loadDocument(at: url) }
                 }
                 return
             }
-            let path = sourceURL.path
             Task { @MainActor in
-                await store.loadDocument(at: URL(fileURLWithPath: path))
+                await store.loadDocument(at: sourceURL)
             }
         }
         return true
@@ -104,8 +103,8 @@ private func importDroppedBytes(from provider: NSItemProvider,
                                 completion: @escaping @Sendable (URL) -> Void) {
     provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, _ in
         guard let data else { return }
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sign-import-\(UUID().uuidString).pdf")
+        guard let tempURL = DroppedFileURL.temporaryFile(
+            named: DroppedFileURL.pdfName(suggested: provider.suggestedName)) else { return }
 
         if isPDF || data.starts(with: Data("%PDF".utf8)) {
             try? data.write(to: tempURL)
