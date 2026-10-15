@@ -58,6 +58,8 @@ final class SigningBatchTests: XCTestCase {
         await store.prepareBatch(ids: store.queue.map(\.id))
 
         XCTAssertEqual(store.batchPhase, .ready)
+        // Unchanged for an identity that is not an eID: the batch card shows its PIN row for a stamp.
+        XCTAssertTrue(store.batchNeedsPIN)
         await store.startBatch()
         XCTAssertEqual(store.batchItems.first?.state, .signed)
     }
@@ -492,6 +494,43 @@ final class SigningBatchTests: XCTestCase {
     }
  
  
+    /// An eID takes its BOK in the eID client's window: the batch reads its certificates
+    /// (the visible stamp's signer name) and signs without a PIN typed here, and never
+    /// sends one to the engine.
+    func testEIDBatchNeedsNoPIN() async {
+        let eid = SigningIdentityInfo(
+            id: "engine-cert:eid", label: "Ján Tester", issuerSummary: "Disig SVK eID ACA2",
+            isQualified: true, requiresPIN: false, usesProtectedAuthenticationPath: true)
+        let provider = RecordingSigningProvider(availableIdentity: eid)
+        let store = makeStore(provider: provider)
+        let handoff = CountingHandoff()
+        store.middlewareInput = handoff
+        await store.addDocuments(at: [makePDF(named: "eid-batch.pdf")], selectLast: false)
+        store.identities = await provider.availableIdentities()
+        store.selectedIdentityID = eid.id
+        store.includeQualifiedTimestamp = false
+        store.outputFormat = .embeddedPAdES
+        store.includeVisibleSignature = true
+        store.visualPlacement = VisibleSignaturePlacement(
+            pageIndex: 0,
+            pageRect: CGRect(x: 350, y: 100, width: 180, height: 70),
+            rotationDegrees: 0)
+
+        await store.prepareBatch(ids: store.queue.map(\.id))
+
+        XCTAssertEqual(store.batchPhase, .ready, store.lastError ?? "batch did not become ready")
+        XCTAssertEqual(store.batchSettingsSnapshot?.includeVisibleSignature, true)
+        XCTAssertFalse(store.batchNeedsPIN)
+        let resolveCount = await provider.resolveCount()
+        XCTAssertEqual(resolveCount, 1)
+        await store.startBatch()
+        XCTAssertEqual(store.batchItems.first?.state, .signed)
+        let requestPINs = await provider.requestPINs()
+        XCTAssertEqual(requestPINs, [nil])
+        // The certificate read and the signature each hand the keyboard to the BOK window.
+        XCTAssertEqual(handoff.begins, 2)
+    }
+
     func testSyntheticIdentityIsReplacedByResolvedCertificate() async {
         let resolved = SigningIdentityInfo(
             id: "engine-cert:authoritative",
@@ -1560,4 +1599,13 @@ private actor RecordingSigningProvider: QualifiedSigningProviding {
     func availableStarted() -> Bool {
         didStartAvailable
     }
+}
+
+/// Stands in for `EIDKeyboardHandoff`, which needs a running app, and counts its handoffs.
+@MainActor
+private final class CountingHandoff: MiddlewareInputHandoff {
+    private(set) var begins = 0
+
+    func begin() { begins += 1 }
+    func end() {}
 }

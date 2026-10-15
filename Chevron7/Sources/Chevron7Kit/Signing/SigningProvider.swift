@@ -17,6 +17,8 @@ public struct SigningIdentityInfo: Identifiable, Hashable, Sendable {
     public var hasPrivateKey: Bool
     public var pkcs11CertSHA256Hex: String?
     public var pkcs11IsRSA: Bool
+    /// The app collects the card's PIN (its own field or sheet). False for a card that
+    /// takes it in the middleware's window instead (`usesProtectedAuthenticationPath`).
     public var requiresPIN: Bool
     /// The card takes its PIN in the middleware's own window (an eID reports
     /// CKF_PROTECTED_AUTHENTICATION_PATH), so a prompt may skip its PIN field.

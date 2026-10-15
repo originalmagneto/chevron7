@@ -812,6 +812,9 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return MandateCertificate.matches(subject: displayName, issuer: issuer)
     }
 
+    static let pinLoadCertificatesHint = "Zadajte PIN pre načítanie certifikátov"
+    static let eidLoadCertificatesHint = "BOK zadáte v okne eID klienta"
+
     static func syntheticIdentity(driverNames: [String] = [], driverID connectedDriverID: String? = nil) -> SigningIdentityInfo {
         let label: String
         if driverNames.isEmpty {
@@ -823,11 +826,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         return SigningIdentityInfo(
             id: "\(syntheticIdentityIDPrefix)\(driverID)",
             label: label,
-            issuerSummary: "Zadajte PIN pre načítanie certifikátov",
+            issuerSummary: protectedPath ? eidLoadCertificatesHint : pinLoadCertificatesHint,
             isMandateCertificate: false,
             isQualified: true,
             hasPrivateKey: true,
-            requiresPIN: true,
+            requiresPIN: !protectedPath,
             usesProtectedAuthenticationPath: protectedPath)
     }
 
@@ -844,7 +847,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
                                                 displayName: certificate.displayName,
                                                 qualification: certificate.certificateQualification),
             hasPrivateKey: true,
-            requiresPIN: true,
+            requiresPIN: requiresPIN(driverID: connectedDriverID),
             usesProtectedAuthenticationPath: !requiresPIN(driverID: connectedDriverID))
     }
 

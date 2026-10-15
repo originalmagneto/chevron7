@@ -143,19 +143,25 @@ final class EngineBridgeSelectionTests: XCTestCase {
 
     /// eID tokens report CKF_PROTECTED_AUTHENTICATION_PATH (checked on a real card:
     /// slots Sig_ZEP and Sig_EP), so the BOK is typed in the eID client's own
-    /// window. `requiresPIN` stays true because the main window still collects it.
+    /// window and the app collects no PIN for it (`requiresPIN` false); every other
+    /// card takes its PIN from the app.
     func testOnlyEIDIdentitiesUseTheProtectedAuthenticationPath() {
         let eid = EngineBridgeSigningProvider.syntheticIdentity(driverNames: ["eID"], driverID: "eid")
         XCTAssertTrue(eid.usesProtectedAuthenticationPath)
-        XCTAssertTrue(eid.requiresPIN)
-        XCTAssertFalse(EngineBridgeSigningProvider.syntheticIdentity(driverNames: ["I.CA"], driverID: "secure_store")
-            .usesProtectedAuthenticationPath)
+        XCTAssertFalse(eid.requiresPIN)
+        XCTAssertEqual(eid.issuerSummary, EngineBridgeSigningProvider.eidLoadCertificatesHint)
+        let ica = EngineBridgeSigningProvider.syntheticIdentity(driverNames: ["I.CA"], driverID: "secure_store")
+        XCTAssertFalse(ica.usesProtectedAuthenticationPath)
+        XCTAssertTrue(ica.requiresPIN)
+        XCTAssertEqual(ica.issuerSummary, EngineBridgeSigningProvider.pinLoadCertificatesHint)
 
         let certificate = SigningCertificate(serialNumber: "42", displayName: "Marián Čuprík")
-        XCTAssertTrue(EngineBridgeSigningProvider.identityInfo(from: certificate, driverID: "eid").usesProtectedAuthenticationPath)
-        XCTAssertTrue(EngineBridgeSigningProvider.identityInfo(from: certificate, driverID: "eid").requiresPIN)
-        XCTAssertFalse(EngineBridgeSigningProvider.identityInfo(from: certificate, driverID: "secure_store")
-            .usesProtectedAuthenticationPath)
+        let eidCertificate = EngineBridgeSigningProvider.identityInfo(from: certificate, driverID: "eid")
+        XCTAssertTrue(eidCertificate.usesProtectedAuthenticationPath)
+        XCTAssertFalse(eidCertificate.requiresPIN)
+        let icaCertificate = EngineBridgeSigningProvider.identityInfo(from: certificate, driverID: "secure_store")
+        XCTAssertFalse(icaCertificate.usesProtectedAuthenticationPath)
+        XCTAssertTrue(icaCertificate.requiresPIN)
     }
 
     /// A portal looks for the original PDF by name inside the ASiC-E it gets back.

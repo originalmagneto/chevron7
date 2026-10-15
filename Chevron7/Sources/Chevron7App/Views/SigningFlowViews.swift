@@ -442,7 +442,10 @@ struct SigningPrepareView: View {
                     qualification: SigningSessionStore.qualifiedSignatureLabel,
                     timestampAuthorityName: store.includeQualifiedTimestamp ? store.settings.activeTSA.name : nil)
             } else {
-                visualState.setContent(signerName: "Podpisový certifikát", qualification: "Zadajte PIN pre náhľad")
+                visualState.setContent(
+                    signerName: "Podpisový certifikát",
+                    qualification: store.selectedCardAsksForBOK
+                        ? "Načítajte certifikáty pre náhľad" : "Zadajte PIN pre náhľad")
             }
             return
         }
@@ -598,11 +601,23 @@ struct SigningPrepareView: View {
         await store.resolveCertificateForPreview(force: force)
     }
 
-    /// An eID takes its BOK in the eID client's window, so its PIN field never takes the keyboard by itself.
+    @ViewBuilder
+    private var certificateLoadStatus: some View {
+        if store.isResolvingCertificate {
+            ProgressView("Načítavam certifikát pre náhľad…")
+                .font(.caption2)
+        }
+        if let error = store.certificateLoadError {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    /// An eID takes its BOK in the eID client's window and shows no PIN field at all.
     private func focusPINFieldIfNeeded(for identityID: String?) {
         guard let selected = store.identities.first(where: { $0.id == identityID }),
-              selected.requiresPIN, !EIDKeyboardHandoff.applies(to: selected),
-              store.signingPIN.isEmpty else { return }
+              selected.requiresPIN, store.signingPIN.isEmpty else { return }
         signingPINFocused = true
     }
 
@@ -668,15 +683,28 @@ struct SigningPrepareView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
 
-                            if store.isResolvingCertificate {
-                                ProgressView("Načítavam certifikát pre náhľad…")
-                                    .font(.caption2)
+                            certificateLoadStatus
+                        }
+                        .padding(.top, 4)
+                    } else if store.selectedCardAsksForBOK, !store.signingProviderIsDemo {
+                        // An eID takes its BOK in the eID client's window: no PIN field here.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button {
+                                Task {
+                                    await resolveCertificateForPreview(force: true)
+                                }
+                            } label: {
+                                Label("Načítať certifikáty", systemImage: "arrow.clockwise")
                             }
-                            if let error = store.certificateLoadError {
-                                Label(error, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            }
+                            .controlSize(.small)
+                            .disabled(store.isResolvingCertificate || store.isSigning)
+                            .help("Načítať certifikáty z vloženej karty")
+
+                            Text("BOK zadáte v okne eID klienta.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+
+                            certificateLoadStatus
                         }
                         .padding(.top, 4)
                     }
@@ -1143,9 +1171,7 @@ struct SigningBatchView: View {
     }
 
     private var requiresPIN: Bool {
-        selectedIdentity?.requiresPIN == true
-            || (!store.signingProviderIsDemo && store.batchSettingsSnapshot?.includeVisibleSignature == true)
-            || (!store.signingProviderIsDemo && store.identities.isEmpty)
+        store.batchNeedsPIN
     }
 
     private var pinMissing: Bool {
@@ -1916,7 +1942,7 @@ struct SigningBatchView: View {
 
     private func refreshCertificate() async {
         await store.refreshIdentities()
-        if !store.signingProviderIsDemo, !store.signingPIN.isEmpty {
+        if !store.signingProviderIsDemo, !store.signingPIN.isEmpty || store.selectedCardAsksForBOK {
             await store.resolveCertificateForPreview(force: true)
         }
     }
