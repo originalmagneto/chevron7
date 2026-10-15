@@ -760,21 +760,11 @@ struct SigningPrepareView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if store.contentTimestampIsAvailable {
-                    Toggle(isOn: $store.includeContentTimestamp) {
-                        Label(SignatureTreePresentation.dataTimestampLabel, systemImage: "clock.badge.questionmark")
-                            .font(.callout)
-                    }
-                    .help(SigningSessionStore.contentTimestampExplanation)
-                    Text(SigningSessionStore.contentTimestampShortExplanation)
+                if let note = store.qualifiedTimestampContentNote {
+                    Text(note)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if store.includeContentTimestamp, store.isMobileSigningAvailable {
-                        Text("Len pri podpise kartou.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 if store.showsTimestampAuthorityPicker {
@@ -1339,18 +1329,13 @@ struct SigningBatchView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if store.contentTimestampIsAvailable {
-                            Toggle(SignatureTreePresentation.dataTimestampLabel,
-                                   isOn: batchOption(\.includeContentTimestamp))
-                                .toggleStyle(.checkbox)
-                                .help(SigningSessionStore.contentTimestampExplanation)
-                            Text(SigningSessionStore.contentTimestampShortExplanation)
+                        if let note = store.qualifiedTimestampContentNote {
+                            Text(note)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if store.includeQualifiedTimestamp || timestampLocked
-                            || (store.includeContentTimestamp && store.contentTimestampIsAvailable) {
+                        if store.includeQualifiedTimestamp || timestampLocked {
                             Picker("Služba TSA", selection: batchOption(\.selectedTSAURL)) {
                                 ForEach(store.settings.availableTSAServers) { server in
                                     Text(server.name).tag(server.url)
