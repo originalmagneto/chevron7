@@ -331,6 +331,14 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         ]))
     }
 
+    /// A signature waits on the card inside the helper (an eID that never shows its BOK
+    /// window waited minutes), so giving up on it ends that helper; the next request starts
+    /// a fresh one. Validations keep their own session.
+    func stopSigning() async {
+        await runner.cancel()
+        await machineSession.stop()
+    }
+
     func cancel() async {
         await runner.cancel()
         await machineSession.stop()
@@ -370,8 +378,18 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }
         let machineRequest = MachineV2Request(protocolVersion: 2, requestID: requestID, operation: .sign,
             payload: signPayload)
-        let events = try await runV2(SecureMachineV2Request(envelope: machineRequest, pin: request.pin,
-            timestampAuthentication: timestamp.authentication))
+        let events: [MachineV2Event]
+        do {
+            events = try await runV2(SecureMachineV2Request(envelope: machineRequest, pin: request.pin,
+                timestampAuthentication: timestamp.authentication))
+        } catch MachineSessionProcessFailure.requestFailed(code: "SIGNING_UNAVAILABLE") {
+            // The helper keeps its card driver loaded between requests. An eID it once
+            // failed to open stayed unusable there (no BOK window, the same failure on
+            // every try) while a fresh helper signed with the same card at once, so the
+            // next signature starts a new one.
+            await machineSession.stop()
+            throw MachineSessionProcessFailure.requestFailed(code: "SIGNING_UNAVAILABLE")
+        }
         var completedFileIDs: [String] = []
         var qualifications: [String: TimestampQualification] = [:]
         continuation.yield(.started)

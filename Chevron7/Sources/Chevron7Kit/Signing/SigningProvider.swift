@@ -415,6 +415,9 @@ public protocol QualifiedSigningProviding: Sendable {
     func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult
     /// The same tree validated against the EU trusted lists (informative validation).
     func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult
+    /// Ends a `sign` still in progress, so a signature the person gave up on stops holding
+    /// the card; that `sign` then throws.
+    func cancelSigning() async
     /// Whether `sign` adds a signature to an ASiC-E handed over as the source (named by
     /// `SigningRequest.filename`) instead of wrapping that container in a new one.
     var addsSignatureToExistingContainer: Bool { get }
@@ -425,6 +428,8 @@ public protocol QualifiedSigningProviding: Sendable {
 
 extension QualifiedSigningProviding {
     public func inspectSignatures(in fileURL: URL) async -> [DocumentSignatureInfo] { [] }
+
+    public func cancelSigning() async {}
 
     public var addsSignatureToExistingContainer: Bool { false }
 

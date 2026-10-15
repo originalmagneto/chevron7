@@ -1215,6 +1215,16 @@ class MachineSigningServiceTest {
                 new MachineFileResponder(new MemoryRetainedFile(), () -> { }), settings, null, List.of()));
     }
 
+    /// SIGNING_UNAVAILABLE alone told nothing when an eID stopped opening; the cause chain
+    /// goes to stderr, which the app writes to the system log, without any message text.
+    @Test
+    void causeChainNamesEveryCauseButNoMessage() {
+        var chain = MachineSigningService.causeChain(new IllegalStateException("token at /private/card 1234",
+                new java.io.IOException("C_Login failed: CKR_FUNCTION_FAILED")));
+
+        assertEquals("java.lang.IllegalStateException <- java.io.IOException [CKR_FUNCTION_FAILED]", chain);
+    }
+
     /// Only an `.xdcf` whose root is an XMLDataContainer passes preparation; any other XML stays refused.
     @Test
     void preparationAcceptsARecordXdcButStillRefusesOtherXml() throws Exception {

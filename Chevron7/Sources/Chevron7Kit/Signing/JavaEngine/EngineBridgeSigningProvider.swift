@@ -203,6 +203,10 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         await signatureTree(in: fileURL) { [engine] files in try await engine.inspect(files: files) }
     }
 
+    public func cancelSigning() async {
+        await engine.stopSigning()
+    }
+
     public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         await signatureTree(in: fileURL) { [engine, validationTimeout] files in
             do {

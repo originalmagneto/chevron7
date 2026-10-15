@@ -119,6 +119,9 @@ public final class MachineSigningService {
             }
         } catch (Throwable exception) {
             sessionFailureCode = failureCode(exception, "SIGNING_UNAVAILABLE");
+            // The code alone said nothing when an eID stopped opening (2026-10-15); the app
+            // writes the helper's stderr to the system log.
+            System.err.println("Signing failed (" + sessionFailureCode + "): " + causeChain(exception));
             int firstUnprocessed = Math.min(processedFiles, requestFiles.size());
             failUnprocessedFiles(requestId, requestFiles.subList(firstUnprocessed, requestFiles.size()), sessionFailureCode);
         } finally {
@@ -201,6 +204,7 @@ public final class MachineSigningService {
             writer.write("file.completed", requestId, file.id(), completion(qualification));
         } catch (Throwable exception) {
             var code = failureCode(exception, "SIGNING_FAILED");
+            System.err.println("Signing a file failed (" + code + "): " + causeChain(exception));
             if (!prepared.cleanup()) {
                 code = "OUTPUT_CLEANUP_FAILED";
             }
@@ -324,6 +328,30 @@ public final class MachineSigningService {
             }
         }
         return fallback;
+    }
+
+    private static final java.util.regex.Pattern PKCS11_RETURN_CODE = java.util.regex.Pattern.compile("CKR_[A-Z_]+");
+
+    /// The exception and each cause by class, with any PKCS#11 return code its message
+    /// names (CKR_TOKEN_NOT_PRESENT), for the system log. Never the messages themselves:
+    /// they may carry a path or a secret, which the protocol keeps out for the same reason.
+    static String causeChain(Throwable exception) {
+        var chain = new StringBuilder();
+        var depth = 0;
+        for (var cause = exception; cause != null && depth < 10; cause = cause.getCause(), depth++) {
+            if (!chain.isEmpty()) {
+                chain.append(" <- ");
+            }
+            chain.append(cause.getClass().getName());
+            if (cause.getMessage() != null) {
+                var codes = PKCS11_RETURN_CODE.matcher(cause.getMessage()).results()
+                        .map(java.util.regex.MatchResult::group).distinct().toList();
+                if (!codes.isEmpty()) {
+                    chain.append(" ").append(codes);
+                }
+            }
+        }
+        return chain.toString();
     }
 
     private static String failureCountry(Throwable exception) {

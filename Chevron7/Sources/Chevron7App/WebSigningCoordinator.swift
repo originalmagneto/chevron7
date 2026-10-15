@@ -74,6 +74,8 @@ final class WebSigningCoordinator {
     var selectedIdentityID: String?
     var identities: [SigningIdentityInfo] = []
     private(set) var isWorking = false
+    /// True while `provider.sign` runs for a card, which `cancel` can stop.
+    private var cardSignatureInFlight = false
     private(set) var errorText: String?
     /// True while certificates are read from the card, which for an eID means
     /// the eID client's BOK window is open.
@@ -250,7 +252,13 @@ final class WebSigningCoordinator {
     func handle(_ request: WebSignRequest) async throws -> WebSignResponse {
         // isWorking too: after a cancel the engine may still be signing the old
         // request, and it holds the card until it ends.
-        guard pending == nil, !isWorking, !session.isOpen else { throw Failure.busy }
+        guard pending == nil, !isWorking, !session.isOpen else {
+            // The page asked again while the panel is open (PFS's own sign button, behind
+            // the floating panel); its "busy" dialog would sit unseen beneath the panel,
+            // so the panel comes to the front to show what the page is waiting for.
+            if pending != nil { prompt.show(coordinator: self) }
+            throw Failure.busy
+        }
 
         let bytes = try Self.decode(request)
         let attachmentEntries = try Self.attachmentEntries(for: request)
@@ -403,10 +411,17 @@ final class WebSigningCoordinator {
 
     func cancel() {
         // A phone signature in progress would otherwise keep the panel's slot
-        // busy until the relay times out; the card's engine call cannot be
-        // stopped, and its late result is dropped by the session token.
+        // busy until the relay times out.
         mobileSigning.cancel()
         mobileSigning.cancelEidentita()
+        // A card signature waits on the card inside the engine: an eID whose BOK
+        // window never appeared held it for minutes, and every request in the
+        // meantime was refused as busy. Stopping the engine ends that `sign`, and a
+        // late result is still dropped by the session token.
+        if cardSignatureInFlight {
+            let provider = provider
+            Task { await provider.cancelSigning() }
+        }
         finish(.failure(Failure.cancelled), token: session.currentToken)
     }
 
@@ -551,6 +566,8 @@ final class WebSigningCoordinator {
             // An eID opens the eID client's BOK window for the signature itself.
             if !needsPIN { prompt.beginMiddlewareInput() }
             let signed: SignedConversionResult
+            cardSignatureInFlight = true
+            defer { cardSignatureInFlight = false }
             do {
                 signed = try await provider.sign(signingRequest)
                 if !needsPIN { prompt.endMiddlewareInput() }
