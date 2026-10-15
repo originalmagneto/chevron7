@@ -352,7 +352,7 @@ class ContentTimestampTest {
             var generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
             var keys = generator.generateKeyPair();
-            var name = new X500Name("CN=Chevron7 Test TSA,C=SK");
+            var name = new X500Name("CN=Test TSA,C=SK");
             var now = System.currentTimeMillis();
             var builder = new JcaX509v3CertificateBuilder(name, BigInteger.valueOf(now), new Date(now - 86_400_000L),
                     new Date(now + 86_400_000L * 365), name, keys.getPublic());

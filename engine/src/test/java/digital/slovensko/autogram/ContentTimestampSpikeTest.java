@@ -28,14 +28,14 @@ import java.security.KeyStore;
 import java.util.List;
 import java.util.Objects;
 
-/// Step 0 spike, run by hand with CHEVRON7_SPIKE_OUT set: signs with a real qualified TSA.
+/// Step 0 spike, run by hand with AUTOGRAM_SPIKE_OUT set: signs with a real qualified TSA.
 class ContentTimestampSpikeTest {
-    private static final String TSA = System.getenv().getOrDefault("CHEVRON7_SPIKE_TSA",
+    private static final String TSA = System.getenv().getOrDefault("AUTOGRAM_SPIKE_TSA",
             "http://timestamp.sectigo.com/qualified");
 
     @Test
     void spike() throws Exception {
-        var out = System.getenv("CHEVRON7_SPIKE_OUT");
+        var out = System.getenv("AUTOGRAM_SPIKE_OUT");
         Assumptions.assumeTrue(out != null);
         var dir = Path.of(out);
         Files.createDirectories(dir);

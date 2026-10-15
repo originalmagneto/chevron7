@@ -18,7 +18,7 @@ Chevron7 before this change only ever added a signature timestamp (Baseline T th
 
 ## What DSS 6.4 produces (spike)
 
-`engine/src/test/java/digital/slovensko/autogram/ContentTimestampSpikeTest.java` signs `sample.pdf` with the test keystore and a real qualified authority (Sectigo Qualified, `http://timestamp.sectigo.com/qualified`). It runs only with `CHEVRON7_SPIKE_OUT=<dir>` set (and optionally `CHEVRON7_SPIKE_TSA`); the three outputs of 2026-10-15 are kept in `docs/reference/content-timestamp/2026-10-15/`.
+`engine/src/test/java/digital/slovensko/autogram/ContentTimestampSpikeTest.java` signs `sample.pdf` with the test keystore and a real qualified authority (Sectigo Qualified, `http://timestamp.sectigo.com/qualified`). It runs only with `AUTOGRAM_SPIKE_OUT=<dir>` set (and optionally `AUTOGRAM_SPIKE_TSA`); the three outputs of 2026-10-15 are kept in `docs/reference/content-timestamp/2026-10-15/`.
 
 | File | How | DSS timestamp types (diagnostic data) |
 |---|---|---|
