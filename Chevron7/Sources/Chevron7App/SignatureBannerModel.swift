@@ -19,7 +19,9 @@ struct SignatureBannerModel: Equatable {
         let detail: String
         /// Why the validator did not call a signature valid, when it said.
         let reason: String?
-        /// "Časová pečiatka: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42"; nil without one.
+        /// "Časová pečiatka údajov: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:40"; nil without one.
+        let dataTimestamp: String?
+        /// "Časová pečiatka podpisu: Belgium BOSA, kvalifikovaná · 7. 10. 2026 11:18:42"; nil without one.
         let timestamp: String?
         let warning: String?
         let depth: Int
@@ -213,7 +215,8 @@ struct SignatureBannerModel: Equatable {
                 let header = Row(id: "doc-" + documentPath, title: document.name, verdict: nil, badges: [],
                                  verdictLabel: nil,
                                  detail: SignatureTreePresentation.signatureCount(nested.signatures.count),
-                                 reason: nil, timestamp: nil, warning: nil, depth: depth, isNew: false)
+                                 reason: nil, dataTimestamp: nil, timestamp: nil, warning: nil, depth: depth,
+                                 isNew: false)
                 let signatures = nested.signatures.map { signature in
                     row(for: signature, depth: depth + 1, isNew: newSignatureIDs.contains(signature.id),
                         validated: validated, showsCoverage: nested.documents.count > 1,
@@ -244,7 +247,7 @@ struct SignatureBannerModel: Equatable {
 
     private static func warningRow(_ document: SignedDataObject, path: String, depth: Int, _ text: String) -> Row {
         Row(id: "doc-" + path, title: document.name, verdict: nil, badges: [], verdictLabel: nil, detail: "",
-            reason: nil, timestamp: nil, warning: text, depth: depth, isNew: false)
+            reason: nil, dataTimestamp: nil, timestamp: nil, warning: text, depth: depth, isNew: false)
     }
 
     private static func verdictLabel(_ state: DocumentSignatureInfo.State) -> String {
@@ -274,7 +277,8 @@ struct SignatureBannerModel: Equatable {
             : signature.detail.flatMap { $0.isEmpty ? nil : $0 }
         return Row(id: id ?? signature.id, title: displayName(signature), verdict: signature.state, badges: badges,
                    verdictLabel: verdictLabel(signature.state), detail: parts.joined(separator: " · "),
-                   reason: reason, timestamp: timestampLine(signature, validated: validated),
+                   reason: reason, dataTimestamp: dataTimestampLine(signature, validated: validated),
+                   timestamp: timestampLine(signature, validated: validated),
                    warning: nil, depth: depth, isNew: isNew)
     }
 
@@ -282,14 +286,27 @@ struct SignatureBannerModel: Equatable {
     /// the structural pass reports the issuer DN and judges no qualification.
     private static func timestampLine(_ signature: DocumentSignatureInfo, validated: Bool) -> String? {
         guard signature.hasTimestamp else { return nil }
-        var head = "Časová pečiatka"
+        return timestampLine(SignatureTreePresentation.signatureTimestampLabel, authority: signature.timestampAuthority,
+                             qualified: signature.hasQualifiedTimestamp, time: signature.timestampTime,
+                             validated: validated)
+    }
+
+    private static func dataTimestampLine(_ signature: DocumentSignatureInfo, validated: Bool) -> String? {
+        guard let timestamp = signature.dataTimestamp else { return nil }
+        return timestampLine(SignatureTreePresentation.dataTimestampLabel, authority: timestamp.authority,
+                             qualified: timestamp.isQualified, time: timestamp.time, validated: validated)
+    }
+
+    private static func timestampLine(_ label: String, authority: String?, qualified: Bool, time: Date?,
+                                      validated: Bool) -> String {
+        var head = label
         if validated {
             var facts: [String] = []
-            if let authority = signature.timestampAuthority, !authority.isEmpty { facts.append(authority) }
-            facts.append(signature.hasQualifiedTimestamp ? "kvalifikovaná" : "nekvalifikovaná")
+            if let authority, !authority.isEmpty { facts.append(authority) }
+            facts.append(qualified ? "kvalifikovaná" : "nekvalifikovaná")
             head += ": " + facts.joined(separator: ", ")
         }
-        guard let time = signature.timestampTime else { return head }
+        guard let time else { return head }
         return head + " · " + secondFormatter.string(from: time)
     }
 

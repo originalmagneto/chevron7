@@ -172,14 +172,19 @@
       ],
       "properties": {
         "required": {
-          "const": true
+          "type": "boolean",
+          "description": "A signature timestamp: true exactly for a Baseline T level."
         },
         "servers": {
           "type": "array",
-          "minItems": 1,
+          "description": "Timestamp authorities; empty only when neither a signature nor a content timestamp is asked for.",
           "items": {
             "$ref": "#/$defs/nonBlankString"
           }
+        },
+        "content": {
+          "type": "boolean",
+          "description": "A qualified timestamp included in the signed data from the same servers (an AllDataObjectsTimeStamp for XAdES, a document timestamp before the PAdES signature). Not for an existing container or a record."
         },
         "authentication": {
           "$ref": "#/$defs/timestampAuthentication"

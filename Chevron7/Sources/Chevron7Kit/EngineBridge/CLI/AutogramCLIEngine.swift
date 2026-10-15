@@ -218,9 +218,10 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                     try await helperOperationGate.withPermit {
                         let usesMachineV2 = request.eform != nil
                             || request.files.contains(where: { $0.visibleAppearance != nil })
-                        // Baseline-B asks for no timestamp, so no TSA needs configuring.
+                        // Baseline B asks for no signature timestamp, so no TSA needs configuring
+                        // unless a content timestamp does.
                         let wantsTimestamp = (request.signatureLevelOverride ?? request.outputFormat.signatureLevel)
-                            .hasSuffix("_T")
+                            .hasSuffix("_T") || request.contentTimestamp
                         let timestamp = try resolvedTimestamp(wantsTimestamp: wantsTimestamp,
                             override: request.timestampServersOverride)
                         if usesMachineV2 {
@@ -320,15 +321,20 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
 
     /// Signature level and timestamp block for both protocol versions. The level a
     /// portal asks for wins over the output format, and only a Baseline T level
-    /// requires a timestamp, so a portal's Baseline B carries none.
+    /// requires a signature timestamp, so a portal's Baseline B carries none. A content
+    /// timestamp names the same servers whatever the level (`content`, sent only when asked).
     static func levelAndTimestamp(for request: EngineSigningRequest,
                                   endpoints: [String]) -> (level: String, timestamp: JSONValue) {
         let level = request.signatureLevelOverride ?? request.outputFormat.signatureLevel
         let wantsTimestamp = level.hasSuffix("_T")
-        return (level, .object([
+        var timestamp: [String: JSONValue] = [
             "required": .bool(wantsTimestamp),
-            "servers": .array(wantsTimestamp ? endpoints.map(JSONValue.string) : [])
-        ]))
+            "servers": .array(wantsTimestamp || request.contentTimestamp ? endpoints.map(JSONValue.string) : [])
+        ]
+        if request.contentTimestamp {
+            timestamp["content"] = .bool(true)
+        }
+        return (level, .object(timestamp))
     }
 
     /// A signature waits on the card inside the helper (an eID that never shows its BOK

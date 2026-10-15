@@ -133,6 +133,17 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// signs Baseline B. Extending an existing container still timestamps (`buildForExistingASiC`).
     public var alwaysAddsQualifiedTimestamp: Bool { false }
 
+    /// The engine adds an AllDataObjectsTimeStamp to a new XAdES ASiC-E and a document
+    /// timestamp before a PAdES signature; it refuses one for an existing container.
+    public var addsContentTimestamp: Bool { true }
+
+    /// A content timestamp only for the app's own signature of a new document: a portal decides
+    /// its own format, and a record or an eForm has its own frame.
+    static func wantsContentTimestamp(_ request: SigningRequest) -> Bool {
+        request.includeContentTimestamp && request.signatureLevelOverride == nil && request.eform == nil
+            && !request.signsAsRecordContainer
+    }
+
     /// The level for a request without a timestamp: Baseline B, unless a portal named its own
     /// level or the source is an existing container, which the engine extends at Baseline T.
     static func untimestampedLevel(for request: SigningRequest, wantsPAdES: Bool,
@@ -570,7 +581,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             signatureLevelOverride: request.signatureLevelOverride
                 ?? Self.untimestampedLevel(for: request, wantsPAdES: wantsPAdES,
                                            sourceIsContainer: sourceURL.pathExtension.lowercased() == "asice"),
-            timestampServersOverride: Self.timestampServers(for: request))
+            timestampServersOverride: Self.timestampServers(for: request),
+            contentTimestamp: Self.wantsContentTimestamp(request))
 
         statusLog("Podpisujem kvalifikovaným podpisom (DSS)…")
         var outputURL: URL?

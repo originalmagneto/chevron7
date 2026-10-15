@@ -35,6 +35,7 @@ extension SignatureTree {
                 var signature = signature
                 signature.state = .indeterminate
                 signature.hasQualifiedTimestamp = false
+                signature.dataTimestamp?.isQualified = false
                 signature.certificateQualification = nil
                 return signature
             },
