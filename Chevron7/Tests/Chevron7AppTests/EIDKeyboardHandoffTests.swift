@@ -156,12 +156,10 @@ final class EIDKeyboardHandoffTests: XCTestCase {
         XCTAssertEqual(log.events, ["begin", "sign", "end"])
     }
 
-    /// A visible stamp needs the signer's name, which an eID reads with its BOK.
+    /// The visible stamp case is covered by `SigningBatchTests.testEIDBatchNeedsNoPIN`.
     func testTheBatchCardAsksForAPINOnlyForAPINCard() {
         let log = EventLog()
-        let eid = makeSigningStore(log: log, identity: Self.eid)
-        eid.includeVisibleSignature = true
-        XCTAssertFalse(eid.batchNeedsPIN)
+        XCTAssertFalse(makeSigningStore(log: log, identity: Self.eid).batchNeedsPIN)
         XCTAssertTrue(makeSigningStore(log: log, identity: Self.pinCard).batchNeedsPIN)
 
         let noCard = makeSigningStore(log: log, identity: Self.eid)

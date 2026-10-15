@@ -58,6 +58,8 @@ final class SigningBatchTests: XCTestCase {
         await store.prepareBatch(ids: store.queue.map(\.id))
 
         XCTAssertEqual(store.batchPhase, .ready)
+        // Unchanged for an identity that is not an eID: the batch card shows its PIN row for a stamp.
+        XCTAssertTrue(store.batchNeedsPIN)
         await store.startBatch()
         XCTAssertEqual(store.batchItems.first?.state, .signed)
     }
@@ -493,7 +495,8 @@ final class SigningBatchTests: XCTestCase {
  
  
     /// An eID takes its BOK in the eID client's window: the batch reads its certificates
-    /// and signs without a PIN typed here, and never sends one to the engine.
+    /// (the visible stamp's signer name) and signs without a PIN typed here, and never
+    /// sends one to the engine.
     func testEIDBatchNeedsNoPIN() async {
         let eid = SigningIdentityInfo(
             id: "engine-cert:eid", label: "Ján Tester", issuerSummary: "Disig SVK eID ACA2",
@@ -507,10 +510,16 @@ final class SigningBatchTests: XCTestCase {
         store.selectedIdentityID = eid.id
         store.includeQualifiedTimestamp = false
         store.outputFormat = .embeddedPAdES
+        store.includeVisibleSignature = true
+        store.visualPlacement = VisibleSignaturePlacement(
+            pageIndex: 0,
+            pageRect: CGRect(x: 350, y: 100, width: 180, height: 70),
+            rotationDegrees: 0)
 
         await store.prepareBatch(ids: store.queue.map(\.id))
 
         XCTAssertEqual(store.batchPhase, .ready, store.lastError ?? "batch did not become ready")
+        XCTAssertEqual(store.batchSettingsSnapshot?.includeVisibleSignature, true)
         XCTAssertFalse(store.batchNeedsPIN)
         let resolveCount = await provider.resolveCount()
         XCTAssertEqual(resolveCount, 1)
