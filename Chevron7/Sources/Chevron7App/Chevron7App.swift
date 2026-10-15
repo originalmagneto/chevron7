@@ -38,29 +38,32 @@ final class Chevron7AppModel {
         cardReader = CardReaderStatus(
             discover: { [settings] in await settings.signingProvider.availableIdentities() },
             readCardATRs: { await SmartcardSlotReader.cardATRs() })
-        updater = AppUpdater()
         let signing = signingStore
         let zako = zakoStore
         let browserSigning = webSigning
-        cardReader.onRefresh = {
-            signing.applyReaderIdentities($0)
-            // ZaKo's clause step gates the evidence number on the card, so it hears the reader too.
-            zako.applyReaderIdentities($0)
-        }
-        cardReader.isPaused = {
+        let checker = settings.statusChecker
+        let cardWorkInProgress: @MainActor () -> Bool = {
             signing.isSigning || signing.isResolvingCertificate
                 || signing.batchPhase == .preflighting || signing.batchPhase == .signing
                 || zako.isAuthorizing || zako.isResolvingCertificate
                 || browserSigning.pending != nil
         }
+        // An update found in the background waits while a signature, a ZaKo
+        // authorization, a browser request or an EZZK submission is under way.
+        updater = AppUpdater(isBusy: { cardWorkInProgress() || checker.hasWorkInFlight })
+        cardReader.onRefresh = {
+            signing.applyReaderIdentities($0)
+            // ZaKo's clause step gates the evidence number on the card, so it hears the reader too.
+            zako.applyReaderIdentities($0)
+        }
+        cardReader.isPaused = cardWorkInProgress
 
         // Rows waiting for EZZK are sent and looked up every five minutes while a regular
         // Chevron7 runs (ruling R13); a web-signing launch starts the check only once the
         // app becomes regular. The process ending stops it.
-        let checker = settings.statusChecker
         // Sparkle follows the same rule: a portal request must not raise an
         // update prompt, so a web-signing launch starts it only once the app
-        // becomes regular.
+        // becomes regular. Each start checks for a new version right away.
         let appUpdater = updater
         checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: false)
         if AppLaunchMode.current != .webSigning {

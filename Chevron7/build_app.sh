@@ -275,10 +275,13 @@ PKG
     -c "Set :CFBundleShortVersionString $VERSION" \
     "$CONTENTS/Info.plist"
 if [[ "$MODE" == "release" ]]; then
+    # The app checks at every launch itself (AppUpdater); the scheduled check every
+    # four hours covers a Chevron7 left running for days.
     /usr/libexec/PlistBuddy \
         -c "Add :SUFeedURL string $UPDATE_FEED_URL" \
         -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" \
         -c "Add :SUEnableAutomaticChecks bool true" \
+        -c "Add :SUScheduledCheckInterval integer 14400" \
         "$CONTENTS/Info.plist"
 fi
 

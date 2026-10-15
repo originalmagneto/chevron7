@@ -340,6 +340,11 @@ final class EZZKStatusChecker {
         inFlight.contains(id)
     }
 
+    /// Whether a row is being sent or looked up, or held by ZaKo while its record is signed.
+    var hasWorkInFlight: Bool {
+        !inFlight.isEmpty
+    }
+
     /// ZaKo holds its row from the moment it is registered (`.signed`, no record container)
     /// until its record is signed or has failed, so neither the periodic check nor a manual
     /// action marks it unsigned or sends it meanwhile. The hold lives in memory only: after
