@@ -15,6 +15,8 @@ protocol SigningEngine: Sendable {
     /// validation does not queue behind the hung request.
     func stopValidation() async
     func sign(request: EngineSigningRequest) -> AsyncThrowingStream<SigningEvent, Error>
+    /// Ends the helpers a signature runs on, but not a validation.
+    func stopSigning() async
     func cancel() async
 }
 
@@ -28,4 +30,6 @@ extension SigningEngine {
     }
 
     func stopValidation() async {}
+
+    func stopSigning() async {}
 }

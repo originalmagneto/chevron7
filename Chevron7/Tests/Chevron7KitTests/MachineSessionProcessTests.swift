@@ -137,6 +137,40 @@ final class MachineSessionProcessTests: XCTestCase {
         await engine.cancel()
     }
 
+    /// An eID that the helper once failed to open stayed unusable in that helper: on
+    /// pfseform.financnasprava.sk every eForm signature failed with SIGNING_UNAVAILABLE and
+    /// no BOK window, until the app was restarted, after which the same card signed at once
+    /// (2026-10-15). So the next signature after such a failure starts a fresh helper.
+    func testSignatureAfterSigningUnavailableRunsOnAFreshHelper() async throws {
+        executionTimeAllowance = 60
+        let source = directory.appending(path: "formular.xml")
+        try Data("<dokument/>".utf8).write(to: source)
+        let starts = directory.appending(path: "starts")
+        let configuration = try makeHelper(script: """
+            echo started >> '\(starts.path)'
+            while IFS= read -r line; do
+              id=$(printf '%s' "$line" | /usr/bin/sed -E 's/.*"requestId":"([^"]+)".*/\\1/')
+              printf '{"protocolVersion":2,"requestId":"%s","type":"request.failed","emittedAt":"2026-10-15T16:08:00Z","payload":{"code":"SIGNING_UNAVAILABLE"}}\\n' "$id"
+            done
+            """)
+        let engine = AutogramCLIEngine(configuration: configuration)
+
+        for _ in 0..<2 {
+            let request = EngineSigningRequest(sessionID: UUID(), driverID: "eid", certificateSerial: "*",
+                                               pin: Secret("0"), files: [SigningFile(id: "form", sourceURL: source)],
+                                               outputFormat: .asiceXAdES, eform: EFormSigningAttributes(),
+                                               signatureLevelOverride: "XAdES_BASELINE_B")
+            do {
+                for try await _ in engine.sign(request: request) {}
+                XCTFail("The signature must fail")
+            } catch {}
+        }
+
+        let lines = try String(contentsOf: starts, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.count, 2, "the second signature must not reuse the helper that failed")
+        await engine.cancel()
+    }
+
     // MARK: - Helpers
 
     private static func validate(_ requestID: String) -> MachineV2Request {
