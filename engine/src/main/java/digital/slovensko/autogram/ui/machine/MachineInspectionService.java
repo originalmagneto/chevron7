@@ -11,6 +11,8 @@ import eu.europa.esig.dss.asic.xades.validation.ASiCContainerWithXAdESValidator;
 import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.model.InMemoryDocument;
+import eu.europa.esig.dss.pades.validation.PAdESSignature;
+import eu.europa.esig.dss.pades.validation.timestamp.PdfTimestampToken;
 import eu.europa.esig.dss.simplereport.SimpleReport;
 import eu.europa.esig.dss.spi.signature.AdvancedSignature;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
@@ -20,6 +22,7 @@ import eu.europa.esig.dss.validation.SignedDocumentValidator;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -170,7 +173,9 @@ public final class MachineInspectionService {
             if (validatorReportReader == null) {
                 return inspectStructurally(new InMemoryDocument(content));
             }
-            var trusted = mapReport(validatorReportReader.read(documentValidator(new InMemoryDocument(content))));
+            var validator = documentValidator(new InMemoryDocument(content));
+            var trusted = mapAsicInspection(new AsicInspection(validatorReportReader.read(validator), null, Map.of(),
+                    signatureTimestampsIfAvailable(validator)));
             return mergeStructuralIntegrityIfAvailable(trusted, new InMemoryDocument(content));
         }
         return mapReport(byteReportReader.read(content));
@@ -216,6 +221,10 @@ public final class MachineInspectionService {
                 var structuralTimestamp = structuralTimestamps.get(stringValue(timestamp, "id"));
                 if (structuralTimestamp != null) {
                     copyBoolean(structuralTimestamp, timestamp, "cryptographicIntegrity");
+                    if (!timestamp.has("type") && structuralTimestamp.has("type")) {
+                        timestamp.add("type", structuralTimestamp.get("type"));
+                        timestamp.add("inSignedData", structuralTimestamp.get("inSignedData"));
+                    }
                 }
             }
         }
@@ -293,15 +302,68 @@ public final class MachineInspectionService {
 
     private AsicInspection readTrustedInspection(DSSDocument document, SignedDocumentValidator validator) {
         var report = validatorReportReader.read(validator);
+        var timestamps = signatureTimestampsIfAvailable(validator);
         if (!isAsic(validator)) {
-            return new AsicInspection(report, null, Map.of());
+            return new AsicInspection(report, null, Map.of(), timestamps);
         }
         var documents = asicDocuments(document, validator);
         var coverage = new LinkedHashMap<String, List<String>>();
         for (var signatureId : report.getSignatureIdList()) {
             coverage.put(signatureId, documentNames(validator.getOriginalDocuments(signatureId)));
         }
-        return new AsicInspection(report, documents, coverage);
+        return new AsicInspection(report, documents, coverage, timestamps);
+    }
+
+    /// Every timestamp of each signature, and for a PDF also a document timestamp in an earlier
+    /// revision: the signature's ByteRange covers that revision, so the timestamp is part of the
+    /// signed data (the PAdES way to include one, § 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.).
+    static Map<String, List<SignatureTimestamp>> signatureTimestamps(SignedDocumentValidator validator) {
+        var detached = validator.getDetachedTimestamps();
+        var result = new LinkedHashMap<String, List<SignatureTimestamp>>();
+        for (var signature : validator.getSignatures()) {
+            var timestamps = new ArrayList<SignatureTimestamp>();
+            var ids = new LinkedHashSet<String>();
+            if (signature instanceof PAdESSignature pades) {
+                for (var timestamp : detached) {
+                    if (timestamp instanceof PdfTimestampToken pdfTimestamp && precedes(pdfTimestamp, pades)
+                            && ids.add(timestamp.getDSSIdAsString())) {
+                        timestamps.add(new SignatureTimestamp(timestamp, true));
+                    }
+                }
+            }
+            for (var timestamp : signature.getAllTimestamps()) {
+                if (ids.add(timestamp.getDSSIdAsString())) {
+                    var type = timestamp.getTimeStampType();
+                    timestamps.add(new SignatureTimestamp(timestamp, type != null && type.isContentTimestamp()));
+                }
+            }
+            result.put(signature.getId(), List.copyOf(timestamps));
+        }
+        return result;
+    }
+
+    private static Map<String, List<SignatureTimestamp>> signatureTimestampsIfAvailable(SignedDocumentValidator validator) {
+        try {
+            return signatureTimestamps(validator);
+        } catch (RuntimeException exception) {
+            return Map.of();
+        }
+    }
+
+    private static boolean precedes(PdfTimestampToken timestamp, PAdESSignature signature) {
+        try {
+            var timestampRange = timestamp.getPdfRevision().getByteRange();
+            var signatureRange = signature.getPdfRevision().getByteRange();
+            return timestampRange.getSecondPartEnd() < signatureRange.getSecondPartEnd();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /// `inSignedData`: a content, all-data-objects or individual-data-objects timestamp, or a
+    /// PDF document timestamp the signature covers. Everything else (signature, archive,
+    /// validation data timestamps) was added after the signature value.
+    record SignatureTimestamp(TimestampToken token, boolean inSignedData) {
     }
 
     private JsonObject inspectStructurally(DSSDocument document) {
@@ -315,8 +377,10 @@ public final class MachineInspectionService {
         var asic = isAsic(validator);
         var payload = new JsonObject();
         var signaturePayloads = new com.google.gson.JsonArray();
+        var timestamps = signatureTimestampsIfAvailable(validator);
         for (var signature : validator.getSignatures()) {
-            var mapped = mapStructuralSignature(readStructuralSignature(signature));
+            var mapped = mapStructuralSignature(readStructuralSignature(signature,
+                    timestamps.get(signature.getId())));
             if (asic && withCoverage) {
                 try {
                     var covered = documentNames(validator.getOriginalDocuments(signature.getId()));
@@ -344,7 +408,8 @@ public final class MachineInspectionService {
         return payload;
     }
 
-    private static StructuralSignature readStructuralSignature(AdvancedSignature signature) {
+    private static StructuralSignature readStructuralSignature(AdvancedSignature signature,
+            List<SignatureTimestamp> signatureTimestamps) {
         boolean cryptographicIntegrity = false;
         try {
             signature.initBaselineRequirementsChecker(new CommonCertificateVerifier());
@@ -356,16 +421,18 @@ public final class MachineInspectionService {
         }
         var certificate = signature.getSigningCertificateToken();
         var signerDisplayName = certificate == null ? null : DSSUtils.parseCN(certificate.getSubject().getRFC2253());
-        var timestamps = signature.getSignatureTimestamps().stream()
-                .map(MachineInspectionService::readStructuralTimestamp).toList();
+        var timestamps = (signatureTimestamps != null ? signatureTimestamps
+                : signature.getSignatureTimestamps().stream().map(token -> new SignatureTimestamp(token, false)).toList())
+                .stream().map(MachineInspectionService::readStructuralTimestamp).toList();
         return new StructuralSignature(signature.getId(), signature.getDataFoundUpToLevel(), signerDisplayName,
                 signature.getSigningTime(), cryptographicIntegrity, timestamps);
     }
 
-    private static StructuralTimestamp readStructuralTimestamp(TimestampToken timestamp) {
+    private static StructuralTimestamp readStructuralTimestamp(SignatureTimestamp signatureTimestamp) {
+        var timestamp = signatureTimestamp.token();
         return new StructuralTimestamp(timestamp.getDSSIdAsString(), timestamp.getGenerationTime(),
                 timestamp.getIssuerX500Principal() == null ? null : timestamp.getIssuerX500Principal().getName(),
-                hasCryptographicIntegrity(timestamp));
+                hasCryptographicIntegrity(timestamp), timestamp.getTimeStampType(), signatureTimestamp.inSignedData());
     }
 
     private static boolean hasCryptographicIntegrity(TimestampToken timestamp) {
@@ -397,6 +464,8 @@ public final class MachineInspectionService {
             item.addProperty("valid", timestamp.cryptographicIntegrity());
             item.addProperty("cryptographicIntegrity", timestamp.cryptographicIntegrity());
             item.add("qualification", JsonNull.INSTANCE);
+            addEnum(item, "type", timestamp.type());
+            item.addProperty("inSignedData", timestamp.inSignedData());
             timestamps.add(item);
         }
         signature.add("timestamps", timestamps);
@@ -446,7 +515,7 @@ public final class MachineInspectionService {
     }
 
     private JsonObject mapReport(SimpleReport report) {
-        return mapAsicInspection(new AsicInspection(report, null, Map.of()));
+        return mapAsicInspection(new AsicInspection(report, null, Map.of(), Map.of()));
     }
 
     private JsonObject mapAsicInspection(AsicInspection inspection) {
@@ -454,7 +523,8 @@ public final class MachineInspectionService {
         var signatures = new com.google.gson.JsonArray();
         for (var signatureId : inspection.report().getSignatureIdList()) {
             signatures.add(mapSignature(inspection.report(), signatureId,
-                    inspection.coverage().getOrDefault(signatureId, List.of())));
+                    inspection.coverage().getOrDefault(signatureId, List.of()),
+                    inspection.timestamps().getOrDefault(signatureId, List.of())));
         }
         payload.add("signatures", signatures);
         if (inspection.documents() != null) {
@@ -469,7 +539,8 @@ public final class MachineInspectionService {
         return payload;
     }
 
-    private JsonObject mapSignature(SimpleReport report, String signatureId, List<String> coveredDocuments) {
+    private JsonObject mapSignature(SimpleReport report, String signatureId, List<String> coveredDocuments,
+            List<SignatureTimestamp> signatureTimestamps) {
         var signature = new JsonObject();
         addString(signature, "id", signatureId);
         addEnum(signature, "format", report.getSignatureFormat(signatureId));
@@ -480,12 +551,37 @@ public final class MachineInspectionService {
         addEnum(signature, "indication", report.getIndication(signatureId));
         addEnum(signature, "subIndication", report.getSubIndication(signatureId));
         addString(signature, "validationReason", firstValidationReason(report, signatureId));
+        var known = new LinkedHashMap<String, SignatureTimestamp>();
+        var inSignedData = new java.util.HashSet<String>();
+        for (var timestamp : signatureTimestamps) {
+            known.put(timestamp.token().getDSSIdAsString(), timestamp);
+            if (timestamp.inSignedData()) {
+                inSignedData.add(timestamp.token().getDSSIdAsString());
+            }
+        }
         signature.addProperty("qualifiedTimestampValid",
-                timestampQualificationEvaluator.hasValidQualifiedTimestamp(report, signatureId));
-
-        var timestamps = new com.google.gson.JsonArray();
+                timestampQualificationEvaluator.hasValidQualifiedTimestamp(report, signatureId, inSignedData));
+        var ids = new LinkedHashSet<String>();
+        // A document timestamp of an earlier revision is not one of the signature's own in the
+        // simple report, so it comes first from the validator, in document order.
+        for (var timestamp : signatureTimestamps) {
+            if (timestamp.token().getTimeStampType() == eu.europa.esig.dss.enumerations.TimestampType.DOCUMENT_TIMESTAMP
+                    && timestamp.inSignedData()) {
+                ids.add(timestamp.token().getDSSIdAsString());
+            }
+        }
         for (var timestamp : report.getSignatureTimestamps(signatureId)) {
-            timestamps.add(mapTimestamp(report, timestamp.getId()));
+            ids.add(timestamp.getId());
+        }
+        var timestamps = new com.google.gson.JsonArray();
+        for (var id : ids) {
+            var mapped = mapTimestamp(report, id);
+            var fact = known.get(id);
+            if (fact != null) {
+                addEnum(mapped, "type", fact.token().getTimeStampType());
+                mapped.addProperty("inSignedData", fact.inSignedData());
+            }
+            timestamps.add(mapped);
         }
         signature.add("timestamps", timestamps);
         if (!coveredDocuments.isEmpty()) {
@@ -558,13 +654,15 @@ public final class MachineInspectionService {
     public record EmbeddedDocument(String name, String mediaType, byte[] content) {
     }
 
-    private record AsicInspection(SimpleReport report, List<String> documents, Map<String, List<String>> coverage) {
+    private record AsicInspection(SimpleReport report, List<String> documents, Map<String, List<String>> coverage,
+            Map<String, List<SignatureTimestamp>> timestamps) {
     }
 
     private record StructuralSignature(String id, Enum<?> format, String signerDisplayName, Date signingTime,
             boolean cryptographicIntegrity, List<StructuralTimestamp> timestamps) {
     }
 
-    private record StructuralTimestamp(String id, Date productionTime, String producer, boolean cryptographicIntegrity) {
+    private record StructuralTimestamp(String id, Date productionTime, String producer, boolean cryptographicIntegrity,
+            eu.europa.esig.dss.enumerations.TimestampType type, boolean inSignedData) {
     }
 }

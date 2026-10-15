@@ -23,12 +23,15 @@ enum SignatureTreeDecoder {
         } else {
             state = .invalid
         }
-        let timestamps = array(object["timestamps"])
-        let firstIntact: [String: JSONValue]? = timestamps.lazy.compactMap { timestamp -> [String: JSONValue]? in
+        let intact = array(object["timestamps"]).compactMap { timestamp -> [String: JSONValue]? in
             guard case .object(let fields) = timestamp,
                   bool(fields["cryptographicIntegrity"]) == true || bool(fields["valid"]) == true else { return nil }
             return fields
-        }.first
+        }
+        // A timestamp inside the signed data dates the data, never the signature; an engine
+        // payload without `inSignedData` lists signature timestamps only.
+        let firstIntact = intact.first { bool($0["inSignedData"]) != true }
+        let firstData = intact.first { bool($0["inSignedData"]) == true }
         let intactTimestamp = firstIntact != nil
         return DocumentSignatureInfo(
             id: id,
@@ -43,7 +46,13 @@ enum SignatureTreeDecoder {
             certificateQualification: string(object["signerCertificateQualification"]),
             timestampAuthority: firstIntact.flatMap { string($0["producer"]) },
             timestampTime: firstIntact.flatMap { string($0["productionTime"]) }
-                .flatMap { ISO8601DateFormatter().date(from: $0) })
+                .flatMap { ISO8601DateFormatter().date(from: $0) },
+            dataTimestamp: firstData.map { fields in
+                DocumentSignatureInfo.DataTimestamp(
+                    authority: string(fields["producer"]),
+                    time: string(fields["productionTime"]).flatMap { ISO8601DateFormatter().date(from: $0) },
+                    isQualified: string(fields["qualification"]) == "QTSA" && bool(fields["valid"]) == true)
+            })
     }
 
     private static func dataObject(from value: JSONValue) -> SignedDataObject? {

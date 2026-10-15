@@ -66,6 +66,38 @@ final class SignatureTreeTests: XCTestCase {
         XCTAssertEqual(tree.signatures[0].timestampTime, ISO8601DateFormatter().date(from: "2026-10-06T17:44:58Z"))
     }
 
+    /// The engine marks a content timestamp or a document timestamp before the signature with
+    /// `inSignedData`; it dates the data and never stands in for the signature timestamp.
+    func testATimestampInsideTheSignedDataIsKeptApartFromTheSignatureTimestamp() throws {
+        let tree = SignatureTreeDecoder.tree(from: try payload("""
+        {"signatures":[{"id":"S-1","valid":true,"indication":"TOTAL_PASSED","qualifiedTimestampValid":true,
+          "timestamps":[{"id":"T-0","valid":true,"qualification":"QTSA","type":"DOCUMENT_TIMESTAMP",
+                         "inSignedData":true,"producer":"Data TSA","productionTime":"2026-10-15T10:00:00Z"},
+                        {"id":"T-1","valid":true,"qualification":"QTSA","type":"SIGNATURE_TIMESTAMP",
+                         "inSignedData":false,"producer":"Signature TSA","productionTime":"2026-10-15T10:00:05Z"}]}]}
+        """))
+
+        let signature = tree.signatures[0]
+        XCTAssertEqual(signature.timestampAuthority, "Signature TSA")
+        XCTAssertEqual(signature.timestampTime, ISO8601DateFormatter().date(from: "2026-10-15T10:00:05Z"))
+        XCTAssertEqual(signature.dataTimestamp, DocumentSignatureInfo.DataTimestamp(
+            authority: "Data TSA", time: ISO8601DateFormatter().date(from: "2026-10-15T10:00:00Z"), isQualified: true))
+    }
+
+    func testABaselineBSignatureWithOnlyAContentTimestampHasNoSignatureTimestamp() throws {
+        let tree = SignatureTreeDecoder.tree(from: try payload("""
+        {"signatures":[{"id":"S-1","valid":true,"indication":"TOTAL_PASSED","qualifiedTimestampValid":false,
+          "timestamps":[{"id":"T-0","valid":false,"cryptographicIntegrity":true,"type":"ALL_DATA_OBJECTS_TIMESTAMP",
+                         "inSignedData":true,"producer":"CN=TSA","productionTime":"2026-10-15T10:00:00Z"}]}]}
+        """))
+
+        let signature = tree.signatures[0]
+        XCTAssertFalse(signature.hasTimestamp)
+        XCTAssertNil(signature.timestampAuthority)
+        XCTAssertEqual(signature.dataTimestamp?.authority, "CN=TSA")
+        XCTAssertEqual(signature.dataTimestamp?.isQualified, false)
+    }
+
     func testNoIntactTimestampLeavesAuthorityEmpty() throws {
         let tree = SignatureTreeDecoder.tree(from: try payload("""
         {"signatures":[{"id":"S-1","valid":true,"timestamps":[{"id":"T-1","valid":false,"producer":"Broken TSA"}]}]}

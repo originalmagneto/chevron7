@@ -324,6 +324,11 @@ public struct SigningRequest: Sendable {
     /// EZZK conversion record: sign `pdfData` (the record's XDC bytes) under
     /// `filename`, which must end in `.xdcf`, as a one-file ASiC-E.
     public var signsAsRecordContainer: Bool
+    /// A qualified timestamp included in the signed data (§ 23 ods. 1 písm. b) zákona
+    /// č. 305/2013 Z. z., officially certified signature on the podanie itself), from the same
+    /// authority as the signature timestamp and independent of `includeTimestamp`. Only for a
+    /// provider whose `addsContentTimestamp` is true; never on the web, phone or ZaKo paths.
+    public var includeContentTimestamp: Bool
 
     public init(pdfData: Data, identityID: String,
                 includeTimestamp: Bool, tsaURL: String? = nil,
@@ -336,7 +341,8 @@ public struct SigningRequest: Sendable {
                 filename: String? = nil,
                 signsExtraFilesAsDataObjects: Bool = false,
                 timestampServers: [String]? = nil,
-                signsAsRecordContainer: Bool = false) {
+                signsAsRecordContainer: Bool = false,
+                includeContentTimestamp: Bool = false) {
         self.pdfData = pdfData
         self.identityID = identityID
         self.includeTimestamp = includeTimestamp
@@ -351,6 +357,7 @@ public struct SigningRequest: Sendable {
         self.signsExtraFilesAsDataObjects = signsExtraFilesAsDataObjects
         self.timestampServers = timestampServers
         self.signsAsRecordContainer = signsAsRecordContainer
+        self.includeContentTimestamp = includeContentTimestamp
     }
 }
 
@@ -376,6 +383,23 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
     public var timestampAuthority: String?
     /// When the first intact timestamp was produced.
     public var timestampTime: Date?
+    /// The first intact timestamp inside the signed data (an XAdES AllDataObjectsTimeStamp, a
+    /// CAdES content timestamp, a PDF document timestamp before the signature): the time after
+    /// which the signature was made. The `timestamp*` fields above never describe it.
+    public var dataTimestamp: DataTimestamp?
+
+    public struct DataTimestamp: Sendable, Equatable {
+        public var authority: String?
+        public var time: Date?
+        /// True only when full validation found the timestamp qualified.
+        public var isQualified: Bool
+
+        public init(authority: String? = nil, time: Date? = nil, isQualified: Bool = false) {
+            self.authority = authority
+            self.time = time
+            self.isQualified = isQualified
+        }
+    }
 
     public enum State: String, Sendable, Equatable {
         case valid
@@ -388,7 +412,8 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
                 signingTime: Date? = nil, hasQualifiedTimestamp: Bool = false,
                 hasTimestamp: Bool = false, state: State = .unknown, detail: String? = nil,
                 coveredDocuments: [String] = [], certificateQualification: String? = nil,
-                timestampAuthority: String? = nil, timestampTime: Date? = nil) {
+                timestampAuthority: String? = nil, timestampTime: Date? = nil,
+                dataTimestamp: DataTimestamp? = nil) {
         self.id = id
         self.signerDisplayName = signerDisplayName
         self.format = format
@@ -401,6 +426,7 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
         self.certificateQualification = certificateQualification
         self.timestampAuthority = timestampAuthority
         self.timestampTime = timestampTime
+        self.dataTimestamp = dataTimestamp
     }
 }
 
@@ -424,6 +450,8 @@ public protocol QualifiedSigningProviding: Sendable {
     /// Whether every signature from `sign` carries a qualified timestamp whatever
     /// `includeTimestamp` says, as the engine does for ordinary files.
     var alwaysAddsQualifiedTimestamp: Bool { get }
+    /// Whether `sign` honours `SigningRequest.includeContentTimestamp` for a new signature.
+    var addsContentTimestamp: Bool { get }
 }
 
 extension QualifiedSigningProviding {
@@ -434,6 +462,8 @@ extension QualifiedSigningProviding {
     public var addsSignatureToExistingContainer: Bool { false }
 
     public var alwaysAddsQualifiedTimestamp: Bool { false }
+
+    public var addsContentTimestamp: Bool { false }
 
     public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         let result = await inspectInputSignatures(in: fileURL)

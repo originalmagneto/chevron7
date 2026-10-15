@@ -45,6 +45,16 @@ class TimestampQualificationEvaluatorTest {
         assertFalse(new TimestampQualificationEvaluator().hasValidQualifiedTimestamp(report, "sig-1"));
     }
 
+    /// A qualified content timestamp dates the data; the signature still has no qualified
+    /// timestamp of its own.
+    @Test
+    void aQualifiedContentTimestampIsNoQualifiedSignatureTimestamp() {
+        var report = reportWith(TimestampQualification.QTSA, true);
+
+        assertFalse(new TimestampQualificationEvaluator().hasValidQualifiedTimestamp(report, "sig-1",
+                java.util.Set.of("ts-1")));
+    }
+
     private static SimpleReport reportWith(TimestampQualification qualification, boolean valid) {
         var report = mock(SimpleReport.class);
         when(report.getSignatureTimestamps("sig-1")).thenReturn(List.of(timestamp("ts-1")));
