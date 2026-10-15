@@ -253,6 +253,8 @@ final class ZakoSessionStore {
     var evidenceNumberPool: EvidenceNumberPool { settingsStore.evidenceNumberPool }
 
     private var evidenceRequestID: UUID?
+    /// Moves the keyboard to the eID client's BOK window while the engine waits for it.
+    @ObservationIgnored var middlewareInput: any MiddlewareInputHandoff = EIDKeyboardHandoff.shared
     private var sourceAccessIsActive = false
     private var outputDirectoryOverride: URL?
     private var sourceNameOverride: String?
@@ -1111,7 +1113,9 @@ final class ZakoSessionStore {
         let pin = signingPIN
         isResolvingCertificate = true
         lastCertificateLoadPIN = pin
-        let resolved = await signingProvider.resolveIdentities(pin: pin)
+        let resolved = await middlewareInput.during(asksEIDForBOK) {
+            await signingProvider.resolveIdentities(pin: pin)
+        }
         isResolvingCertificate = false
 
         guard !Task.isCancelled else { return }
@@ -1145,6 +1149,11 @@ final class ZakoSessionStore {
 
     var selectedIdentity: SigningIdentityInfo? {
         identities.first(where: { $0.id == selectedIdentityID })
+    }
+
+    /// Whether the engine asks the eID client for the BOK, in its own window, for the card's identity.
+    private var asksEIDForBOK: Bool {
+        EIDKeyboardHandoff.applies(to: selectedIdentity ?? identities.first)
     }
 
     var mandateRequirementSatisfied: Bool {
@@ -1450,7 +1459,9 @@ final class ZakoSessionStore {
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"
             if !viaMobile, isCertificateTypePending {
                 analysisProgressText = "Overujem certifikát na karte…"
-                let resolved = await signingProvider.resolveIdentities(pin: signingPIN)
+                let resolved = await middlewareInput.during(asksEIDForBOK) {
+                    await signingProvider.resolveIdentities(pin: signingPIN)
+                }
                 guard let resolved, !resolved.isEmpty else {
                     throw SigningError.identityUnavailable
                 }
@@ -1529,16 +1540,18 @@ final class ZakoSessionStore {
                 guard let identityID = selectedIdentityID else {
                     throw SigningError.identityUnavailable
                 }
-                signed = try await signingProvider.sign(SigningRequest(
-                    pdfData: finalPDF,
-                    identityID: identityID,
-                    includeTimestamp: stampsSignatures,
-                    tsaURL: tsaURL,
-                    pin: signingPIN.isEmpty ? nil : signingPIN,
-                    extraFiles: containerFiles,
-                    filename: containerDocumentName,
-                    signsExtraFilesAsDataObjects: true,
-                    timestampServers: timestampServers))
+                signed = try await middlewareInput.during(asksEIDForBOK) {
+                    try await signingProvider.sign(SigningRequest(
+                        pdfData: finalPDF,
+                        identityID: identityID,
+                        includeTimestamp: stampsSignatures,
+                        tsaURL: tsaURL,
+                        pin: signingPIN.isEmpty ? nil : signingPIN,
+                        extraFiles: containerFiles,
+                        filename: containerDocumentName,
+                        signsExtraFilesAsDataObjects: true,
+                        timestampServers: timestampServers))
+                }
             }
 
             if let asic = signed.asicData {
@@ -1620,15 +1633,18 @@ final class ZakoSessionStore {
                 if !viaMobile, let identityID = selectedIdentityID {
                     analysisProgressText = "Podpisujem záznam o konverzii…"
                     do {
-                        let signedRecord = try await signingProvider.sign(SigningRequest(
-                            pdfData: recordDelivery.recordXDCF,
-                            identityID: identityID,
-                            includeTimestamp: stampsSignatures,
-                            tsaURL: tsaURL,
-                            pin: signingPIN.isEmpty ? nil : signingPIN,
-                            filename: recordDelivery.entryName,
-                            timestampServers: timestampServers,
-                            signsAsRecordContainer: true))
+                        // A second BOK window: the record takes its own signature.
+                        let signedRecord = try await middlewareInput.during(asksEIDForBOK) {
+                            try await signingProvider.sign(SigningRequest(
+                                pdfData: recordDelivery.recordXDCF,
+                                identityID: identityID,
+                                includeTimestamp: stampsSignatures,
+                                tsaURL: tsaURL,
+                                pin: signingPIN.isEmpty ? nil : signingPIN,
+                                filename: recordDelivery.entryName,
+                                timestampServers: timestampServers,
+                                signsAsRecordContainer: true))
+                        }
                         guard let asic = signedRecord.asicData else {
                             throw SigningError.signingFailed("Podpis záznamu nevrátil kontajner ASiC-E.")
                         }

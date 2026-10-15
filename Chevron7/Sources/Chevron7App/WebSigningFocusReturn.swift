@@ -14,14 +14,14 @@ enum WebSigningFocusReturn {
     struct App: Equatable {
         let processIdentifier: pid_t
         let bundleIdentifier: String?
-        let executableName: String?
+        let executableURL: URL?
         let isTerminated: Bool
 
-        init(processIdentifier: pid_t, bundleIdentifier: String?, executableName: String? = nil,
+        init(processIdentifier: pid_t, bundleIdentifier: String?, executableURL: URL? = nil,
              isTerminated: Bool = false) {
             self.processIdentifier = processIdentifier
             self.bundleIdentifier = bundleIdentifier
-            self.executableName = executableName
+            self.executableURL = executableURL
             self.isTerminated = isTerminated
         }
     }
@@ -41,14 +41,9 @@ enum WebSigningFocusReturn {
         let alive = running.filter { !$0.isTerminated && $0.processIdentifier != ownProcessIdentifier }
         if let requester,
            let current = alive.first(where: { $0.processIdentifier == requester.processIdentifier }),
-           !isEIDKeyboard(current) {
+           !EIDKeyboardHandoff.isEIDKeyboard(executableURL: current.executableURL) {
             return current.processIdentifier
         }
         return alive.first { $0.bundleIdentifier == browserBundleIdentifier }?.processIdentifier
-    }
-
-    /// The eID client's BOK window, which is frontmost only while it asks for the BOK.
-    private static func isEIDKeyboard(_ app: App) -> Bool {
-        app.executableName == "VirtualKeyboard"
     }
 }

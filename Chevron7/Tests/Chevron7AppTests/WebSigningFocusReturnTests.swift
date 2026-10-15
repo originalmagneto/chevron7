@@ -10,7 +10,8 @@ final class WebSigningFocusReturnTests: XCTestCase {
     private let safari = WebSigningFocusReturn.App(processIdentifier: 200, bundleIdentifier: "com.apple.Safari")
     private let mail = WebSigningFocusReturn.App(processIdentifier: 300, bundleIdentifier: "com.apple.mail")
     private let keyboard = WebSigningFocusReturn.App(processIdentifier: 400, bundleIdentifier: nil,
-                                                     executableName: "VirtualKeyboard")
+                                                     executableURL: URL(fileURLWithPath:
+                                                        "/Applications/eID Klient.app/Contents/MacOS/VirtualKeyboard"))
 
     func testReturnsActivationToTheBrowserThatAsked() {
         let target = WebSigningFocusReturn.target(requester: safari, running: [chevron7, mail, safari],
