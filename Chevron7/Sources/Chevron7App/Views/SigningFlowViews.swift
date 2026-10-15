@@ -408,10 +408,7 @@ struct SigningPrepareView: View {
             }
         }
         .onAppear {
-            if let selected = store.identities.first(where: { $0.id == store.selectedIdentityID }),
-               selected.requiresPIN, store.signingPIN.isEmpty {
-                signingPINFocused = true
-            }
+            focusPINFieldIfNeeded(for: store.selectedIdentityID)
         }
         .onChange(of: store.identities) { _, _ in
             refreshVisualCardContent()
@@ -419,10 +416,7 @@ struct SigningPrepareView: View {
         }
         .onChange(of: store.selectedIdentityID) { _, newID in
             refreshVisualCardContent()
-            if let selected = store.identities.first(where: { $0.id == newID }),
-               selected.requiresPIN, store.signingPIN.isEmpty {
-                signingPINFocused = true
-            }
+            focusPINFieldIfNeeded(for: newID)
         }
         .onChange(of: store.certificateLoadError) { _, _ in
             refreshVisualCardContent()
@@ -591,6 +585,8 @@ struct SigningPrepareView: View {
             .attachedASIC
         }
     }
+    /// The store hands the keyboard to an eID's BOK window itself (`EIDKeyboardHandoff`),
+    /// which works only while this app stays active, so nothing here deactivates it.
     @MainActor
     private func resolveCertificateForPreview(
         force: Bool = false,
@@ -598,12 +594,16 @@ struct SigningPrepareView: View {
     ) async {
         if relinquishApplicationFocus {
             signingPINFocused = false
-            NSApp.deactivate()
         }
         await store.resolveCertificateForPreview(force: force)
-        if relinquishApplicationFocus {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+    }
+
+    /// An eID takes its BOK in the eID client's window, so its PIN field never takes the keyboard by itself.
+    private func focusPINFieldIfNeeded(for identityID: String?) {
+        guard let selected = store.identities.first(where: { $0.id == identityID }),
+              selected.requiresPIN, !EIDKeyboardHandoff.applies(to: selected),
+              store.signingPIN.isEmpty else { return }
+        signingPINFocused = true
     }
 
 
@@ -846,6 +846,7 @@ struct SigningPrepareView: View {
             title: store.existingSignatures.isEmpty ? "Podpísať KEP" : "Pridať podpis",
             loadingText: store.statusText.isEmpty ? nil : store.statusText
         ) {
+            signingPINFocused = false
             Task { await store.sign() }
         }
         // Eligibility stays independent of the visual error phase: an error remains

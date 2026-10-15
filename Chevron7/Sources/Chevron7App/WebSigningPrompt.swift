@@ -47,7 +47,9 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
     private var delegate: WebSigningPanelDelegate?
     private var middlewareInputDepth = 0
     private let log = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "web-signing")
-    private var keyboardHandoff: Task<Void, Never>?
+    /// Its own handoff: the panel orders itself beneath the BOK window and hands
+    /// activation to the browser when it closes, never back to this app.
+    private let keyboardHandoff = EIDKeyboardHandoff(reclaimsActivation: false)
     /// The app in front when the request arrived, normally Safari; it gets the
     /// keyboard back when the panel closes (`WebSigningFocusReturn`).
     private var requester: NSRunningApplication?
@@ -130,59 +132,24 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
 
     /// Steps aside while the eID client asks for the BOK.
     ///
-    /// The eID PKCS#11 module, running inside the signing engine, starts the eID
-    /// client's `VirtualKeyboard` process for the BOK. A process started that way
-    /// is not activated, so the keyboard stayed with this floating panel. The
-    /// panel drops to the normal level so it cannot cover that window, and each
-    /// BOK window that appears is activated from here, which the system allows
-    /// while this app is the active one.
+    /// The panel drops to the normal level so it cannot cover the eID client's BOK
+    /// window, and `EIDKeyboardHandoff` activates that window, keeping the panel
+    /// just beneath it rather than letting it drop behind the browser.
     func beginMiddlewareInput() {
         middlewareInputDepth += 1
         guard middlewareInputDepth == 1 else { return }
         panel?.level = .normal
-        keyboardHandoff?.cancel()
-        log.notice("BOK handoff started, app active: \(NSApp.isActive, privacy: .public)")
-        keyboardHandoff = Task { @MainActor [log, weak self] in
-            var activated = Set<pid_t>()
-            var reported = Set<pid_t>()
-            while !Task.isCancelled {
-                for app in NSWorkspace.shared.runningApplications {
-                    let path = app.executableURL?.path ?? "-"
-                    // Diagnostics: every eID client process seen while the BOK is expected.
-                    if path.contains("eID") || path.contains("VirtualKeyboard"), !reported.contains(app.processIdentifier) {
-                        reported.insert(app.processIdentifier)
-                        log.notice("""
-                            eID process pid=\(app.processIdentifier, privacy: .public) \
-                            bundle=\(app.bundleIdentifier ?? "-", privacy: .public) path=\(path, privacy: .public) \
-                            policy=\(app.activationPolicy.rawValue, privacy: .public) active=\(app.isActive, privacy: .public)
-                            """)
-                    }
-                    guard Self.isEIDKeyboard(app) else { continue }
-                    // Keep the prompt visible just beneath the BOK window rather than
-                    // letting it drop behind the browser while the eID client is active.
-                    if let panel = self?.panel, let bokWindow = Self.frontWindowNumber(of: app.processIdentifier) {
-                        panel.order(.below, relativeTo: bokWindow)
-                    }
-                    guard !activated.contains(app.processIdentifier) else { continue }
-                    activated.insert(app.processIdentifier)
-                    NSApp.yieldActivation(to: app)
-                    let accepted = app.activate(from: .current, options: [])
-                    log.notice("""
-                        BOK window activation pid=\(app.processIdentifier, privacy: .public) \
-                        accepted=\(accepted, privacy: .public) app active=\(NSApp.isActive, privacy: .public)
-                        """)
-                }
-                try? await Task.sleep(for: .milliseconds(250))
-            }
+        keyboardHandoff.onKeyboardWindow = { [weak self] window in
+            self?.panel?.order(.below, relativeTo: window)
         }
+        keyboardHandoff.begin()
     }
 
     func endMiddlewareInput() {
         guard middlewareInputDepth > 0 else { return }
         middlewareInputDepth -= 1
         guard middlewareInputDepth == 0 else { return }
-        keyboardHandoff?.cancel()
-        keyboardHandoff = nil
+        keyboardHandoff.end()
         guard let panel else { return }
         panel.level = .floating
         // Closing the BOK window hands activation back to this app, which raises
@@ -194,22 +161,9 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
         }
     }
 
-    /// Number of the process's front on-screen window, from the window list.
-    private static func frontWindowNumber(of pid: pid_t) -> Int? {
-        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                                       kCGNullWindowID) as? [[String: Any]] else { return nil }
-        return windows.first { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }?[kCGWindowNumber as String] as? Int
-    }
-
-    private static func isEIDKeyboard(_ app: NSRunningApplication) -> Bool {
-        guard let executable = app.executableURL else { return false }
-        return executable.lastPathComponent == "VirtualKeyboard" && executable.path.contains("eID")
-    }
-
     func hide() {
         WebSigningQuickLook.shared.close()
-        keyboardHandoff?.cancel()
-        keyboardHandoff = nil
+        keyboardHandoff.reset()
         middlewareInputDepth = 0
         // Before the panel closes: closing the key panel of the active app would
         // first bring up the main window over the browser.
@@ -244,7 +198,7 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
     private static func snapshot(_ app: NSRunningApplication) -> WebSigningFocusReturn.App {
         WebSigningFocusReturn.App(processIdentifier: app.processIdentifier,
                                   bundleIdentifier: app.bundleIdentifier,
-                                  executableName: app.executableURL?.lastPathComponent,
+                                  executableURL: app.executableURL,
                                   isTerminated: app.isTerminated)
     }
 }

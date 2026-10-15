@@ -59,6 +59,8 @@ final class SigningSessionStore {
     private(set) var lastTimestampQualification: TimestampQualification?
     /// The last verdict per timestamp authority URL in this app run, shown under the pickers.
     private(set) var timestampQualificationByAuthority: [String: TimestampQualification] = [:]
+    /// Moves the keyboard to the eID client's BOK window while the engine waits for it.
+    @ObservationIgnored var middlewareInput: any MiddlewareInputHandoff = EIDKeyboardHandoff.shared
     @ObservationIgnored private(set) lazy var existingTrees = SignatureTreeLoader(provider: signingProvider)
     @ObservationIgnored private(set) lazy var resultTrees = SignatureTreeLoader(provider: signingProvider)
     var existingSignatureState: SignatureTreeState {
@@ -435,7 +437,10 @@ final class SigningSessionStore {
         lastCertificateLoadPIN = signingPIN
         defer { isResolvingCertificate = false }
 
-        if let resolved = await signingProvider.resolveIdentities(pin: signingPIN), !resolved.isEmpty {
+        let resolved = await middlewareInput.during(asksEIDForBOK(selectedIdentityID)) {
+            await signingProvider.resolveIdentities(pin: signingPIN)
+        }
+        if let resolved, !resolved.isEmpty {
             identities = resolved
             selectedIdentityID = resolved.first(where: { $0.isMandateCertificate })?.id
                 ?? resolved.first?.id
@@ -561,6 +566,11 @@ final class SigningSessionStore {
         try AGPClient.configured(userID: settingsStore.settings.agpUserID,
                                  baseURL: settingsStore.settings.agpBaseURLValue,
                                  keyStore: agpKeyStore)
+    }
+
+    /// Whether the engine asks the eID client for the BOK, in its own window, for this identity.
+    private func asksEIDForBOK(_ identityID: String?) -> Bool {
+        EIDKeyboardHandoff.applies(to: identities.first { $0.id == identityID })
     }
 
     /// The selected card takes its PIN from the app (not the eID's BOK window) and none is entered.
@@ -776,16 +786,17 @@ final class SigningSessionStore {
                                    // a container packaged here ended up nested in the signed one.
                                    signsExtraFilesAsDataObjects: true)
                 }
-                do {
-                    signed = try await signingProvider.sign(makeRequest(with: pdfData))
-                } catch {
-                    let text = error.localizedDescription
-                    if convertToPDFA, pdfaPrepared,
-                       text.contains("SIGNING_UNAVAILABLE") || text.contains("SIGNING_FAILED") {
-                        statusText = "PDF/A sa nepodarilo podpísať, skúšam pôvodný dokument…"
-                        pdfaPrepared = false
-                        signed = try await signingProvider.sign(makeRequest(with: originalPdfData))
-                    } else {
+                signed = try await middlewareInput.during(asksEIDForBOK(identityID)) {
+                    do {
+                        return try await signingProvider.sign(makeRequest(with: pdfData))
+                    } catch {
+                        let text = error.localizedDescription
+                        if convertToPDFA, pdfaPrepared,
+                           text.contains("SIGNING_UNAVAILABLE") || text.contains("SIGNING_FAILED") {
+                            statusText = "PDF/A sa nepodarilo podpísať, skúšam pôvodný dokument…"
+                            pdfaPrepared = false
+                            return try await signingProvider.sign(makeRequest(with: originalPdfData))
+                        }
                         throw error
                     }
                 }
@@ -1002,7 +1013,9 @@ final class SigningSessionStore {
             return
         }
         if requiresCertificateResolution {
-            let resolved = await signingProvider.resolveIdentities(pin: pin)
+            let resolved = await middlewareInput.during(EIDKeyboardHandoff.applies(to: identity)) {
+                await signingProvider.resolveIdentities(pin: pin)
+            }
             guard batchGeneration == generation else { return }
             if let resolved, !resolved.isEmpty {
                 identities = resolved
@@ -1415,18 +1428,20 @@ final class SigningSessionStore {
             guard let firstData = entries.first?.data else {
                 throw SigningError.signingFailed("Dávka neobsahuje žiadne PDF dáta.")
             }
-            let signed = try await signingProvider.sign(SigningRequest(
-                pdfData: firstData,
-                identityID: snapshot.selectedIdentityID,
-                includeTimestamp: snapshot.includeQualifiedTimestamp,
-                tsaURL: snapshot.tsaURL,
-                outputFormat: .attachedASIC,
-                pin: pin,
-                extraFiles: entries,
-                filename: entries.first?.path,
-                // One ASiC-E with every PDF as its own data object, not a packaged
-                // container nested inside the signed one.
-                signsExtraFilesAsDataObjects: true))
+            let signed = try await middlewareInput.during(asksEIDForBOK(snapshot.selectedIdentityID)) {
+                try await signingProvider.sign(SigningRequest(
+                    pdfData: firstData,
+                    identityID: snapshot.selectedIdentityID,
+                    includeTimestamp: snapshot.includeQualifiedTimestamp,
+                    tsaURL: snapshot.tsaURL,
+                    outputFormat: .attachedASIC,
+                    pin: pin,
+                    extraFiles: entries,
+                    filename: entries.first?.path,
+                    // One ASiC-E with every PDF as its own data object, not a packaged
+                    // container nested inside the signed one.
+                    signsExtraFilesAsDataObjects: true))
+            }
             guard let asicData = signed.asicData else {
                 throw SigningError.signingFailed("Podpisový provider nevytvoril ASiC-E kontajner.")
             }
@@ -1667,38 +1682,43 @@ final class SigningSessionStore {
             signsExtraFilesAsDataObjects: true)
         var signed: SignedConversionResult
         do {
-            try checkBatchGeneration(generation)
-            signed = try await signingProvider.sign(request)
-            try checkBatchGeneration(generation)
-        } catch {
-            let text = error.localizedDescription
-            if snapshot.convertToPDFA, didPreparePDFA,
-               text.contains("SIGNING_UNAVAILABLE") || text.contains("SIGNING_FAILED") {
-                didFallbackToOriginal = true
-                var fallbackPDFData = originalPDFData
-                if let attachedStamp {
+            let handsKeyboardToEID = asksEIDForBOK(snapshot.selectedIdentityID)
+            if handsKeyboardToEID { middlewareInput.begin() }
+            defer { if handsKeyboardToEID { middlewareInput.end() } }
+            do {
+                try checkBatchGeneration(generation)
+                signed = try await signingProvider.sign(request)
+                try checkBatchGeneration(generation)
+            } catch {
+                let text = error.localizedDescription
+                if snapshot.convertToPDFA, didPreparePDFA,
+                   text.contains("SIGNING_UNAVAILABLE") || text.contains("SIGNING_FAILED") {
+                    didFallbackToOriginal = true
+                    var fallbackPDFData = originalPDFData
+                    if let attachedStamp {
+                        try checkBatchGeneration(generation)
+                        fallbackPDFData = await Self.stampPDFData(
+                            fallbackPDFData, stamp: attachedStamp,
+                            includeTimestamp: snapshot.includeQualifiedTimestamp,
+                            stamper: stamper)
+                    }
                     try checkBatchGeneration(generation)
-                    fallbackPDFData = await Self.stampPDFData(
-                        fallbackPDFData, stamp: attachedStamp,
+                    signed = try await signingProvider.sign(SigningRequest(
+                        pdfData: fallbackPDFData,
+                        identityID: snapshot.selectedIdentityID,
                         includeTimestamp: snapshot.includeQualifiedTimestamp,
-                        stamper: stamper)
+                        tsaURL: snapshot.tsaURL,
+                        outputFormat: snapshot.outputFormat,
+                        pin: pin,
+                        extraFiles: [ASiCEPackager.Entry(
+                            path: item.url.lastPathComponent, data: fallbackPDFData)],
+                        visualStamp: visualStamp,
+                        filename: item.url.lastPathComponent,
+                        signsExtraFilesAsDataObjects: true))
+                    try checkBatchGeneration(generation)
+                } else {
+                    throw error
                 }
-                try checkBatchGeneration(generation)
-                signed = try await signingProvider.sign(SigningRequest(
-                    pdfData: fallbackPDFData,
-                    identityID: snapshot.selectedIdentityID,
-                    includeTimestamp: snapshot.includeQualifiedTimestamp,
-                    tsaURL: snapshot.tsaURL,
-                    outputFormat: snapshot.outputFormat,
-                    pin: pin,
-                    extraFiles: [ASiCEPackager.Entry(
-                        path: item.url.lastPathComponent, data: fallbackPDFData)],
-                    visualStamp: visualStamp,
-                    filename: item.url.lastPathComponent,
-                    signsExtraFilesAsDataObjects: true))
-                try checkBatchGeneration(generation)
-            } else {
-                throw error
             }
         }
 
