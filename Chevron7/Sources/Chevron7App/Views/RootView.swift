@@ -25,6 +25,8 @@ struct RootView: View {
 
     @Bindable var model: Chevron7AppModel
     @State private var selection: SidebarSection = .signing
+    /// Changed only without animation (`Binding.withoutAnimation`).
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var queueItemToDelete: UUID?
     @State private var showQueueDeleteConfirmation = false
     @AppStorage("sidebar.signedDocumentsExpanded") private var signedDocumentsExpanded = true
@@ -220,7 +222,7 @@ struct RootView: View {
     private var zakoStore: ZakoSessionStore { model.zakoStore }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility.withoutAnimation) {
             List(selection: $selection) {
                 Section("Kancelária") {
                     Label(SidebarSection.signing.rawValue, systemImage: SidebarSection.signing.symbol)
@@ -680,8 +682,10 @@ struct RootView: View {
         await signingStore.prepareBatch(ids: ids)
     }
 
+    /// Not `NSSplitViewController.toggleSidebar(_:)`, which animates the collapse
+    /// (`Binding.withoutAnimation`).
     private func toggleSidebar() {
-        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+        $columnVisibility.withoutAnimation.wrappedValue = columnVisibility.togglingSidebar
     }
 }
 

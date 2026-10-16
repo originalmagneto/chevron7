@@ -1,0 +1,1 @@
+- **Skrytie bočného panela už pri zmene veľkosti okna aplikáciu nezhodí.** Keď ste bočný panel skryli tlačidlom v lište alebo skratkou ⌃⌘S a okno sa v tej chvíli zmenšilo (počas posunu panela, alebo keď bol monitor uspaný a okno presunul macOS), Chevron7 sa mohol zatvoriť. Bočný panel sa teraz skryje a zobrazí hneď, bez posúvania, a okno sa môže zmenšiť bezpečne.

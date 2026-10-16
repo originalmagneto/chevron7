@@ -12,6 +12,12 @@ import Chevron7TestSupport
 /// the main window's `.frame(minWidth: 760)` let it shrink below sidebar + content +
 /// inspector, and AppKit threw "more Update Constraints in Window passes than there are
 /// views". These tests host the signing screen in the main window's split view and resize it.
+///
+/// The same loop came back while the sidebar's collapse animation ran: the window's minimum
+/// fell step by step while AppKit still laid the sidebar out, and a frame set below it before
+/// the animation ended (at once, or at any time while the display slept, which stops the
+/// animation) left the columns no room. The main window now hides the sidebar without
+/// animation (`Binding.withoutAnimation`); `docs/WINDOW-RESIZE-LOOP-FINDINGS-2026-10-16.md`.
 @MainActor
 final class SigningWindowResizeTests: XCTestCase {
     private var window: NSWindow?
@@ -43,22 +49,55 @@ final class SigningWindowResizeTests: XCTestCase {
                              "with the sidebar and the inspector the window needs more than the floor")
     }
 
-    /// The sidebar hidden with the toolbar button collapses AppKit's split view item
-    /// (`RootView.toggleSidebar`); the window may then shrink to the floor.
+    /// The sidebar hidden with the toolbar button collapses AppKit's split view item; the
+    /// window may then shrink to the floor, also when the first resize comes at once, while
+    /// an animated collapse would still be running (failed on every run with the display
+    /// asleep, 2026-10-16).
     func testSigningScreenWithSidebarHiddenFromTheToolbarSurvivesShrinkingTheWindow() async throws {
         let store = try await signingStore()
         let window = host(store: store)
         try await settle()
-        let sidebarSplit = try XCTUnwrap(splitViewControllers(in: window.contentView).first {
-            $0.splitViewItems.contains { $0.behavior == .sidebar }
-        })
-        sidebarSplit.toggleSidebar(nil)
-        try await settle()
-        XCTAssertTrue(try XCTUnwrap(sidebarSplit.splitViewItems.first { $0.behavior == .sidebar }).isCollapsed)
+        try await resize(window, to: (1200, 788))
 
-        for size in [(1200, 788), (1000, 700), (900, 680), (800, 650), (760, 640), (600, 500)] {
+        try pressSidebarButton(in: window)
+        window.setFrame(NSRect(x: 100, y: 100, width: 1000, height: 700), display: true)
+        try await settle()
+        assertFits(window)
+        XCTAssertTrue(try sidebarItem(in: window).isCollapsed)
+
+        for size in [(1000, 700), (900, 680), (800, 650), (760, 640), (600, 500)] {
             try await resize(window, to: size)
         }
+    }
+
+    /// Hiding the sidebar drops the window's minimum in one step. An animated collapse steps
+    /// it down over a quarter second (1038, 1030, 788, 760 points), or not at all while the
+    /// display sleeps, and a frame in between looped as in 1.4.3; this holds whatever the
+    /// displays do.
+    func testHidingTheSidebarDropsTheMinimumInOneStep() async throws {
+        let store = try await signingStore()
+        let window = host(store: store)
+        try await settle()
+        let expanded = window.contentMinSize.width
+        XCTAssertGreaterThan(expanded, MacOS27Layout.rootMinimumWidth, "the sidebar needs room of its own")
+
+        try pressSidebarButton(in: window)
+        var widths = [expanded]
+        let end = Date().addingTimeInterval(0.5)
+        while Date() < end {
+            try await Task.sleep(for: .milliseconds(4))
+            widths.append(window.contentMinSize.width)
+        }
+
+        XCTAssertEqual(widths.last, MacOS27Layout.rootMinimumWidth)
+        XCTAssertEqual(Set(widths), [expanded, MacOS27Layout.rootMinimumWidth], "the minimum went \(widths)")
+    }
+
+    func testSidebarCommandHidesAShownSidebarAndShowsAHiddenOne() {
+        XCTAssertEqual(NavigationSplitViewVisibility.all.togglingSidebar, .detailOnly)
+        XCTAssertEqual(NavigationSplitViewVisibility.automatic.togglingSidebar, .detailOnly)
+        XCTAssertEqual(NavigationSplitViewVisibility.doubleColumn.togglingSidebar, .detailOnly)
+        XCTAssertEqual(NavigationSplitViewVisibility.detailOnly.togglingSidebar, .all)
     }
 
     /// A document opened while the window is at the floor brings the inspector: the window
@@ -113,20 +152,29 @@ final class SigningWindowResizeTests: XCTestCase {
     }
 
     /// The main window's composition (`Chevron7App`, `RootView`) around the real signing
-    /// screen, with the toolbar and title bridged into the window as the scene does.
-    private func host(store: SigningSessionStore) -> NSWindow {
-        let root = NavigationSplitView {
-            List { Text("Podpisovanie") }
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
-        } detail: {
-            SigningFlowView(store: store)
-                .navigationTitle("Podpisovanie")
-                .navigationSubtitle("nastavenie podpisu · demo")
-        }
-        .minimumSizeFloor(width: MacOS27Layout.rootMinimumWidth, height: MacOS27Layout.rootMinimumHeight)
-        .frame(idealWidth: 1320, idealHeight: 860)
+    /// screen.
+    private struct MainWindowComposition: View {
+        let store: SigningSessionStore
+        @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-        let controller = NSHostingController(rootView: root)
+        var body: some View {
+            NavigationSplitView(columnVisibility: $columnVisibility.withoutAnimation) {
+                List { Text("Podpisovanie") }
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
+            } detail: {
+                SigningFlowView(store: store)
+                    .navigationTitle("Podpisovanie")
+                    .navigationSubtitle("nastavenie podpisu · demo")
+            }
+            .minimumSizeFloor(width: MacOS27Layout.rootMinimumWidth, height: MacOS27Layout.rootMinimumHeight)
+            .frame(idealWidth: 1320, idealHeight: 860)
+        }
+    }
+
+    /// The composition in a window, with the toolbar and title bridged into it as the
+    /// scene does.
+    private func host(store: SigningSessionStore) -> NSWindow {
+        let controller = NSHostingController(rootView: MainWindowComposition(store: store))
         controller.sceneBridgingOptions = .all
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1835, height: 1082),
                               styleMask: [.titled, .resizable, .closable, .miniaturizable, .fullSizeContentView],
@@ -137,6 +185,22 @@ final class SigningWindowResizeTests: XCTestCase {
         window.orderFront(nil)
         self.window = window
         return window
+    }
+
+    /// The sidebar button SwiftUI puts in the toolbar, pressed through its overflow menu
+    /// item, which runs the button's action.
+    private func pressSidebarButton(in window: NSWindow) throws {
+        let item = try XCTUnwrap(window.toolbar?.items.first {
+            $0.itemIdentifier.rawValue.hasSuffix("toggleSidebar")
+        }, "toolbar: \(window.toolbar?.items.map(\.itemIdentifier.rawValue) ?? [])")
+        let menuItem = try XCTUnwrap(item.menuFormRepresentation)
+        NSApp.sendAction(try XCTUnwrap(menuItem.action), to: menuItem.target, from: menuItem)
+    }
+
+    private func sidebarItem(in window: NSWindow) throws -> NSSplitViewItem {
+        try XCTUnwrap(splitViewControllers(in: window.contentView).flatMap(\.splitViewItems).first {
+            $0.behavior == .sidebar
+        })
     }
 
     private func splitViewControllers(in view: NSView?) -> [NSSplitViewController] {
