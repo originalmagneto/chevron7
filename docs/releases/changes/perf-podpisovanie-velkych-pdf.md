@@ -1,0 +1,1 @@
+- **Podpisovanie veľkých dokumentov je plynulejšie.** Obrazovka s náhľadom dokumentu pred podpisom už pri každom prekreslení, napríklad pri zmene veľkosti okna alebo zadávaní PIN, nespracúva celý dokument odznova. Pri rozsiahlych skenoch preto okno reaguje rýchlejšie. Podpis sa vytvára rovnako ako doteraz.

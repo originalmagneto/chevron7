@@ -14,7 +14,13 @@ final class SigningSessionStore {
     var step: Step = .intake
     var sourceURL: URL?
     var sourceBookmark: Data?
-    var document: PDFDocument?
+    var document: PDFDocument? {
+        didSet { documentGeneration &+= 1 }
+    }
+    /// Changes every time the store opens or clears a document, also when the same file opens
+    /// again. The signing screen keys its per-document setup on it: an id built from
+    /// `document?.dataRepresentation()` serialized the whole PDF on every body evaluation.
+    private(set) var documentGeneration = 0
     var analysis: DocumentAnalysis = .empty()
     var isAnalyzing = false
 
