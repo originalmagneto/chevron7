@@ -201,3 +201,12 @@ No qualified validation provider publishes an API an advocate can use without a 
 - v1 refuses unsigned originals, an ASiC-E whose PDF carries its own signatures, and a PDF changed after its last signature (other than DSS extension data).
 - A trusted list that failed to load always blocks verification instead of producing `nie je možné zistiť`.
 - The record carries per signature a slim ETSI signature report (DSS evidence) or the whole sealed qualified output; the full DSS report stays in `Evidence/validation/`.
+
+## Implementation notes (2026-10-16)
+
+- Built on branch `claude/dazzling-heyrovsky-ce3d64` on top of the 2027 branch (PR #90), following `docs/superpowers/plans/2026-10-16-zako-e2e.md`.
+- Ostrá evidencia is locked for E→E altogether (`E2EProductionPolicy.enabled`, false) until a conversion has been verified end to end in Testovacia evidencia, the brief's condition; the qualified report gate applies after that.
+- Measured while building: `PdfaNormalize` declares PDF/A and adds the OutputIntent but embeds no fonts, so its output from a text PDF with a standard font fails veraPDF ("font programs ... shall be embedded"). The converted path therefore checks with veraPDF and offers the raster PDF/A. The P→E path converts scans, which carry no fonts.
+- Measured while building: DSS 6.4 reports the trusted list service type for a certificate that is itself a `QESValidation/Q` service identity (engine test `validationServiceSealCertificateCarriesItsServiceType`), so the seal check of an imported report works on the trusted lists as loaded.
+- DSS 6.4 writes the ETSI validation report in namespace `http://uri.etsi.org/19102/v1.4.1#`.
+- Live check in Testovacia evidencia: pending (needs the owner's card and EZZK test account).

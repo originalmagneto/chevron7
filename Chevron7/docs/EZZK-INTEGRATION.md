@@ -186,6 +186,18 @@ record is created and sent to EZZK, and the clause is built from what EZZK retur
 - `AppSettings.zakoRecordFirstPreview` runs the new order and record 1.2 before the date in Demo
   and Testovacia evidencia, which is how it is checked on test EZZK.
 
+## Electronic originals (E→E)
+
+A guaranteed conversion of an electronic document to a new electronic document (§ 36 ods. 4 zákona č. 305/2013 Z. z.) uses the same SOAP calls: an evidence number, `ReceiveConversionRecord` with the signed record container as `ATTACHMENT`, the same lookups. EZZK tells the conversion types apart only by the record form inside the container, here `50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk` 1.0 (MIRRI's integration manual v1.4 says only that the record follows the decree's annex for its type). The client's container carries the E→E clause 1.3 beside the new document.
+
+Differences from P→E that matter for EZZK:
+
+- The record's `ValidityVerificationResult` (one per authorization of the original) carries the verification evidence base64: Chevron7's per-signature ETSI report in Demo and Testovacia evidencia, a qualified validation service's sealed report in Ostrá evidencia (vyhláška č. 70/2021 Z. z. § 3 ods. 4). EZZK publishes no size limit; the live check measures the record size.
+- Ostrá evidencia is locked for E→E (`E2EProductionPolicy.enabled`) until a conversion has been processed in Testovacia evidencia, and then still needs the qualified report before a number is allocated.
+- The E→E record-first order of 1. 1. 2027 (record form `_2021.sk` 1.2) is not implemented; such a conversion is refused before a number is allocated.
+
+Spec: `docs/superpowers/specs/2026-10-16-zako-e2e-design.md`.
+
 ## Error mapping
 
 | Situation | `EZZKError` | What the user sees |

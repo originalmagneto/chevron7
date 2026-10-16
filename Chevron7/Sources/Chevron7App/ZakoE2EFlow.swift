@@ -5,6 +5,14 @@ import Foundation
 import PDFKit
 import Chevron7Kit
 
+/// Whether E→E may run in Ostrá evidencia at all. Off until a conversion has been verified end
+/// to end in Testovacia evidencia (owner's condition, 2026-10-16); then it still needs a
+/// qualified validation service's report per conversion.
+enum E2EProductionPolicy {
+    static let enabled = false
+    static let refusalMessage = "Zaručenú konverziu elektronického dokumentu Chevron7 v ostrej evidencii zatiaľ nevykonáva: najprv sa overuje v testovacej evidencii. Použite skúšobný režim alebo testovaciu evidenciu."
+}
+
 /// Guaranteed conversion of an electronic document to a new electronic document (E→E,
 /// § 35 ods. 1 písm. c) and § 36 ods. 4 zákona č. 305/2013 Z. z.). The client's signatures are
 /// verified first, the PDF stays byte for byte when it is PDF/A without attachments (else a new
@@ -143,6 +151,10 @@ extension ZakoSessionStore {
     func authorizeElectronicOriginal(viaMobile: Bool, ezzkMode: AppSettings.EZZKMode) async {
         if viaMobile {
             lastError = Self.e2eMobileMessage
+            return
+        }
+        if ezzkMode == .production, !E2EProductionPolicy.enabled {
+            lastError = E2EProductionPolicy.refusalMessage
             return
         }
         guard let original = electronicOriginal, canContinueFromVerification else {

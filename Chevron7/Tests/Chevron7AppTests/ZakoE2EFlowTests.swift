@@ -165,7 +165,19 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertNotEqual(store.step, .done)
     }
 
+    func testProductionIsLockedUntilTheLiveCheck() async throws {
+        let (store, provider, source) = try makeStore()
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        XCTAssertFalse(E2EProductionPolicy.enabled)
+        await store.authorizeElectronicOriginal(viaMobile: false, ezzkMode: .production)
+        XCTAssertEqual(store.lastError, E2EProductionPolicy.refusalMessage)
+        XCTAssertNil(store.attestation.evidenceNumber)
+        XCTAssertEqual(provider.signedKinds, [])
+    }
+
     func testProductionWithoutQualifiedReportIsRefusedBeforeAnyNumber() async throws {
+        try XCTSkipUnless(E2EProductionPolicy.enabled, "production E→E is locked until the live check")
         let (store, provider, source) = try makeStore()
         await store.loadElectronicOriginal(at: source)
         prepareForAuthorization(store)
