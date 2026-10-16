@@ -21,7 +21,7 @@ enum E2EProductionPolicy {
 extension ZakoSessionStore {
     static let e2eMobileMessage = "Zaručenú konverziu elektronického dokumentu autorizujte kartou s mandátnym certifikátom."
     static let e2eRecordFirstMessage = "Zaručenú konverziu elektronického dokumentu podľa postupu od 1. 1. 2027 Chevron7 zatiaľ nevykonáva."
-    static let e2eNeedsQualifiedValidationMessage = "V ostrej evidencii treba podpisy klienta overiť kvalifikovanou službou validácie (§ 3 ods. 4 vyhlášky č. 70/2021 Z. z.). Pripojte jej výsledok pri overení; službu pridáte v Nastaveniach, EZZK, Kvalifikovaná služba validácie."
+    static let e2eNeedsQualifiedValidationMessage = "V ostrej evidencii treba podpisy klienta overiť kvalifikovanou službou validácie (§ 3 ods. 4 vyhlášky č. 70/2021 Z. z.). Pripojte jej výsledok pri overení; službu pridáte v Nastaveniach, EZZK, Rozšírené nastavenia, Kvalifikovaná služba validácie."
 
     func resetElectronicOriginal() {
         electronicOriginal = nil

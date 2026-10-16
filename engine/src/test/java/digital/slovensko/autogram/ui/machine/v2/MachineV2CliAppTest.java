@@ -200,6 +200,9 @@ class MachineV2CliAppTest {
         assertEquals(1, payload.getAsJsonArray("signatures").size());
         assertEquals(1, payload.getAsJsonObject("evidence").getAsJsonArray("signatures").size());
         assertTrue(payload.getAsJsonObject("evidence").has("pdf"));
+        // The tree and the evidence come from two validators of the same bytes; Swift joins them by id.
+        assertEquals(payload.getAsJsonArray("signatures").get(0).getAsJsonObject().get("id").getAsString(),
+                payload.getAsJsonObject("evidence").getAsJsonArray("signatures").get(0).getAsJsonObject().get("id").getAsString());
     }
 
     private static org.apache.commons.cli.CommandLine commandLine() throws Exception {

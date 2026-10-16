@@ -215,7 +215,7 @@ struct ZakoVerificationView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if services.isEmpty {
-                    Label("Pridajte službu v Nastaveniach, EZZK, Kvalifikovaná služba validácie.", systemImage: "gearshape")
+                    Label("Pridajte službu v Nastaveniach, EZZK, Rozšírené nastavenia, Kvalifikovaná služba validácie.", systemImage: "gearshape")
                         .font(.caption)
                 }
                 ForEach(services) { service in

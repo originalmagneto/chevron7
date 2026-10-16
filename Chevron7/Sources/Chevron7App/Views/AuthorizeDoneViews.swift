@@ -38,6 +38,16 @@ struct AuthorizeView: View {
                             .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     }
 
+                    if store.rasterConversionOffered, !store.rasterConversionApproved {
+                        Button {
+                            store.rasterConversionApproved = true
+                            store.lastError = nil
+                        } label: {
+                            Label("Použiť rastrový PDF/A", systemImage: "photo.on.rectangle")
+                        }
+                        .help("Strany sa uložia ako obrázky v PDF/A-2b; text sa nebude dať označiť. Potom znova autorizujte.")
+                    }
+
                     if !store.validationErrors.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(store.validationErrors.enumerated()), id: \.offset) { _, err in
@@ -330,7 +340,7 @@ struct AuthorizeView: View {
 
     @ViewBuilder
     private var mobileAuthorizeButton: some View {
-        if store.isMobileSigningAvailable {
+        if store.isMobileSigningAvailable, store.direction != .electronicToElectronic {
             Button {
                 Task { await store.authorizeAndSign(viaMobile: true) }
             } label: {
