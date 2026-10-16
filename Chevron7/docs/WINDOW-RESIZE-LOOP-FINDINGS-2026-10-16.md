@@ -35,10 +35,11 @@ Yes, rarely: hiding the sidebar and having the window resized within that quarte
 
 ## Fix
 
-The main window's `NavigationSplitView` takes its column visibility through `Binding.withoutAnimation` (`Theme/UnanimatedColumnVisibility.swift`): every change, including the one the toolbar button makes, runs in a transaction that disables animations, and the ⌃⌘S command sets the same state instead of sending `toggleSidebar(_:)`. The sidebar no longer slides; it hides and shows at once, and the minimum drops in one step. The Settings window removes its sidebar button, so it is not affected.
+The main window's `NavigationSplitView` takes its column visibility through `Binding.sidebarVisibility` (`Theme/UnanimatedColumnVisibility.swift`) over a per-window `@SceneStorage` flag, so a hidden sidebar is still remembered as the split view's own autosave did: every change, including the one the toolbar button makes, runs in a transaction that disables animations, and the ⌃⌘S command sets the same flag instead of sending `toggleSidebar(_:)`. A sidebar dragged shut sets the flag too, so ⌃⌘S brings it back with one press. The sidebar no longer slides; it hides and shows at once, and the minimum drops in one step. The Settings window removes its sidebar button, so it is not affected.
 
 ## Tests
 
 - `testHidingTheSidebarDropsTheMinimumInOneStep` samples the window's minimum every 4 ms for 0.5 s after the toolbar press and accepts only the expanded and the collapsed width. With the animation back it fails with the display awake (intermediate widths), and asleep the minimum stays at the expanded width (measured), so it does not depend on the displays.
 - `testSigningScreenWithSidebarHiddenFromTheToolbarSurvivesShrinkingTheWindow` presses the real toolbar button and resizes at once, then shrinks to the floor. Its previous version (AppKit's `toggleSidebar(_:)`, then 1200 and 1000 points) and the same sequence through the toolbar button failed on every run with the display asleep.
-- Both pass with the fix with the display awake and asleep.
+- `testSidebarCollapsedByTheDividerSetsTheFlag` and `testSidebarFlagMapsToTheColumnsAndBack` cover the flag.
+- The final tests ran with the display awake. With the display asleep, the same composition (the unanimated binding, the toolbar press, the shrink sequence) passed in a probe, where the animated one failed on every run.

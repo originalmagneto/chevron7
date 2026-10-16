@@ -28,10 +28,13 @@ extension Binding where Value == NavigationSplitViewVisibility {
     }
 }
 
-extension NavigationSplitViewVisibility {
-    /// What the sidebar command switches to: hidden while the sidebar shows, shown while
-    /// it is hidden.
-    var togglingSidebar: NavigationSplitViewVisibility {
-        self == .detailOnly ? .all : .detailOnly
+extension Binding where Value == Bool {
+    /// The column visibility of a window whose sidebar this flag hides, changed without
+    /// animation. A flag, so a scene can remember it (`@SceneStorage`).
+    var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding<NavigationSplitViewVisibility>(
+            get: { wrappedValue ? .detailOnly : .all },
+            set: { wrappedValue = $0 == .detailOnly }
+        ).withoutAnimation
     }
 }

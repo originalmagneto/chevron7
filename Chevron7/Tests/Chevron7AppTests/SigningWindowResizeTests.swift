@@ -17,10 +17,11 @@ import Chevron7TestSupport
 /// fell step by step while AppKit still laid the sidebar out, and a frame set below it before
 /// the animation ended (at once, or at any time while the display slept, which stops the
 /// animation) left the columns no room. The main window now hides the sidebar without
-/// animation (`Binding.withoutAnimation`); `docs/WINDOW-RESIZE-LOOP-FINDINGS-2026-10-16.md`.
+/// animation (`Binding.sidebarVisibility`); `docs/WINDOW-RESIZE-LOOP-FINDINGS-2026-10-16.md`.
 @MainActor
 final class SigningWindowResizeTests: XCTestCase {
     private var window: NSWindow?
+    private let sidebarFlag = SidebarFlag()
 
     override func tearDown() async throws {
         window?.orderOut(nil)
@@ -93,11 +94,32 @@ final class SigningWindowResizeTests: XCTestCase {
         XCTAssertEqual(Set(widths), [expanded, MacOS27Layout.rootMinimumWidth], "the minimum went \(widths)")
     }
 
-    func testSidebarCommandHidesAShownSidebarAndShowsAHiddenOne() {
-        XCTAssertEqual(NavigationSplitViewVisibility.all.togglingSidebar, .detailOnly)
-        XCTAssertEqual(NavigationSplitViewVisibility.automatic.togglingSidebar, .detailOnly)
-        XCTAssertEqual(NavigationSplitViewVisibility.doubleColumn.togglingSidebar, .detailOnly)
-        XCTAssertEqual(NavigationSplitViewVisibility.detailOnly.togglingSidebar, .all)
+    /// The sidebar collapsed another way (dragging the divider shut, without animation)
+    /// still sets the flag, so ⌃⌘S brings it back with one press.
+    func testSidebarCollapsedByTheDividerSetsTheFlag() async throws {
+        let store = try await signingStore()
+        let window = host(store: store)
+        try await settle()
+        let item = try sidebarItem(in: window)
+
+        item.isCollapsed = true
+        try await settle()
+        XCTAssertTrue(sidebarFlag.hidden)
+
+        item.isCollapsed = false
+        try await settle()
+        XCTAssertFalse(sidebarFlag.hidden)
+    }
+
+    func testSidebarFlagMapsToTheColumnsAndBack() {
+        var hidden = false
+        let visibility = Binding(get: { hidden }, set: { hidden = $0 }).sidebarVisibility
+        XCTAssertEqual(visibility.wrappedValue, .all)
+        visibility.wrappedValue = .detailOnly
+        XCTAssertTrue(hidden)
+        XCTAssertEqual(visibility.wrappedValue, .detailOnly)
+        visibility.wrappedValue = .doubleColumn
+        XCTAssertFalse(hidden)
     }
 
     /// A document opened while the window is at the floor brings the inspector: the window
@@ -153,12 +175,16 @@ final class SigningWindowResizeTests: XCTestCase {
 
     /// The main window's composition (`Chevron7App`, `RootView`) around the real signing
     /// screen.
+    @Observable final class SidebarFlag {
+        var hidden = false
+    }
+
     private struct MainWindowComposition: View {
         let store: SigningSessionStore
-        @State private var columnVisibility: NavigationSplitViewVisibility = .all
+        @Bindable var sidebar: SidebarFlag
 
         var body: some View {
-            NavigationSplitView(columnVisibility: $columnVisibility.withoutAnimation) {
+            NavigationSplitView(columnVisibility: $sidebar.hidden.sidebarVisibility) {
                 List { Text("Podpisovanie") }
                     .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
             } detail: {
@@ -174,7 +200,7 @@ final class SigningWindowResizeTests: XCTestCase {
     /// The composition in a window, with the toolbar and title bridged into it as the
     /// scene does.
     private func host(store: SigningSessionStore) -> NSWindow {
-        let controller = NSHostingController(rootView: MainWindowComposition(store: store))
+        let controller = NSHostingController(rootView: MainWindowComposition(store: store, sidebar: sidebarFlag))
         controller.sceneBridgingOptions = .all
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 1835, height: 1082),
                               styleMask: [.titled, .resizable, .closable, .miniaturizable, .fullSizeContentView],
