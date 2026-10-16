@@ -20,8 +20,8 @@ struct ZakoFlowView: View {
             .overlay {
                 if isTargeted { targetedOverlay }
             }
-            .onDrop(of: [UTType.pdf, .jpeg, .png, .tiff], isTargeted: $isTargeted) { providers in
-                handleDrop(providers)
+            .onDrop(of: [UTType.pdf, .jpeg, .png, .tiff] + ContainerFileTypes.asice, isTargeted: $isTargeted) { providers in
+                store.direction == .electronicToElectronic ? handleElectronicDrop(providers) : handleDrop(providers)
             }
             .sheet(item: $store.cardPrompt) { prompt in
                 ZakoCardPromptSheet(store: store, prompt: prompt)
@@ -58,16 +58,46 @@ struct ZakoFlowView: View {
             IntakeView(store: store, showOpenPanel: $showOpenPanel)
         case .analysis:
             AnalysisCanvasView(store: store)
+        case .verification:
+            ZakoVerificationView(store: store)
         case .attestation:
-            AttestationFormView(store: store)
-                .task(id: store.currentRecordID) {
-                    store.preparePreflight()
-                }
+            if store.direction == .electronicToElectronic {
+                E2EAttestationFormView(store: store)
+            } else {
+                AttestationFormView(store: store)
+                    .task(id: store.currentRecordID) {
+                        store.preparePreflight()
+                    }
+            }
         case .authorize:
             AuthorizeView(store: store)
         case .done:
             DoneView(store: store)
         }
+    }
+
+    /// E→E: a signed PDF or an ASiC-E, always the original file itself (its bytes are the
+    /// original's fingerprint), never a converted image.
+    private func handleElectronicDrop(_ providers: [NSItemProvider]) -> Bool {
+        let types = ContainerFileTypes.documents
+        guard let (provider, type) = providers.lazy.compactMap({ provider in
+            types.first { provider.hasItemConformingToTypeIdentifier($0.identifier) }.map { (provider, $0) }
+        }).first else {
+            store.lastError = "Zaručená konverzia elektronického dokumentu prijíma PDF alebo kontajner ASiC-E."
+            return false
+        }
+        DroppedFileURL.load(from: provider, typeIdentifier: type.identifier) { sourceURL in
+            guard let sourceURL else {
+                Task { @MainActor in store.lastError = "Súbor sa nepodarilo otvoriť." }
+                return
+            }
+            Task { @MainActor in
+                await store.loadElectronicOriginal(at: sourceURL,
+                                                   outputDirectory: sourceURL.deletingLastPathComponent(),
+                                                   sourceName: sourceURL.deletingPathExtension().lastPathComponent)
+            }
+        }
+        return true
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -139,33 +169,41 @@ struct ZakoFlowView: View {
 
 // MARK: - Intake View for ZaKo
 struct IntakeView: View {
-    let store: ZakoSessionStore
+    @Bindable var store: ZakoSessionStore
     @Binding var showOpenPanel: Bool
 
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
 
-            DropzoneArtwork(icon: "arrow.down.doc.fill", tint: .indigo)
+            Picker("Pôvodný dokument", selection: $store.direction) {
+                Text("V listinnej podobe").tag(ConversionDirection.paperToElectronic)
+                Text("V elektronickej podobe").tag(ConversionDirection.electronicToElectronic)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+
+            DropzoneArtwork(icon: isElectronic ? "signature" : "arrow.down.doc.fill", tint: .indigo)
 
             VStack(spacing: 8) {
-                Text("Pretiahnite naskenovaný papierový dokument")
+                Text(isElectronic ? "Pretiahnite dokument podpísaný klientom" : "Pretiahnite naskenovaný papierový dokument")
                     .font(.title2.weight(.bold))
 
-                Text("Originál alebo úradne osvedčená kópia vo formáte PDF. Chevron7 automaticky analyzuje strany, listy a bezpečnostné prvky podľa § 35-39 zákona č. 305/2013 Z. z.")
+                Text(isElectronic
+                     ? "PDF s podpisom PAdES alebo kontajner ASiC-E s jedným PDF. Chevron7 overí podpisy a časové pečiatky klienta podľa § 36 ods. 4 zákona č. 305/2013 Z. z. a pripojí osvedčovaciu doložku."
+                     : "Originál alebo úradne osvedčená kópia vo formáte PDF. Chevron7 automaticky analyzuje strany, listy a bezpečnostné prvky podľa § 35-39 zákona č. 305/2013 Z. z.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 500)
 
-                // Scope: paper to electronic only. An electronic original would need its
-                // qualified signatures checked by a qualified validation service.
-                Text("Chevron7 robí zaručenú konverziu len z listinnej do elektronickej podoby. Konverziu elektronického dokumentu nepodporuje.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 500)
-                    .help("Konverzia elektronického originálu by podľa § 3 ods. 4 vyhlášky č. 70/2021 Z. z. vyžadovala overenie jeho kvalifikovaných podpisov kvalifikovanou službou validácie.")
+                if isElectronic {
+                    Text("V ostrej evidencii treba podpisy klienta overiť aj kvalifikovanou službou validácie (§ 3 ods. 4 vyhlášky č. 70/2021 Z. z.).")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 500)
+                }
             }
 
             HStack(spacing: 12) {
@@ -184,7 +222,11 @@ struct IntakeView: View {
             }
 
             HStack(spacing: 16) {
-                Label("Automatická AI detekcia", systemImage: "brain.head.profile")
+                if isElectronic {
+                    Label("Overenie podpisov", systemImage: "checkmark.seal")
+                } else {
+                    Label("Automatická AI detekcia", systemImage: "brain.head.profile")
+                }
                 Label("Výpočet SHA-256 odtlačku", systemImage: "number.square")
                 Label("Osvedčovacia doložka", systemImage: "building.columns")
             }
@@ -205,16 +247,25 @@ struct IntakeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var isElectronic: Bool { store.direction == .electronicToElectronic }
+
     private func openPanel() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
+        panel.allowedContentTypes = isElectronic ? ContainerFileTypes.documents : [.pdf]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "Vyberte naskenovaný dokument na zaručenú konverziu."
+        panel.message = isElectronic
+            ? "Vyberte dokument podpísaný klientom (PDF alebo ASiC-E)."
+            : "Vyberte naskenovaný dokument na zaručenú konverziu."
+        let electronic = isElectronic
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task { @MainActor in
-                await store.loadDocument(at: url)
+                if electronic {
+                    await store.loadElectronicOriginal(at: url)
+                } else {
+                    await store.loadDocument(at: url)
+                }
             }
         }
     }

@@ -112,7 +112,29 @@ struct AuthorizeView: View {
         }
     }
 
+    private var e2eChecklistItems: [(Bool, String, String)] {
+        let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
+        return [
+            (store.canContinueFromVerification, "Podpisy a časové pečiatky klienta overené", "signature.badge.checkmark"),
+            (!store.e2eNeedsQualifiedReport || store.qualifiedReport != nil,
+             store.e2eNeedsQualifiedReport ? "Výsledok kvalifikovanej služby validácie pripojený"
+                : "Overenie aplikáciou Chevron7 (testovacia evidencia)", "checkmark.seal"),
+            (!store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
+             "Druh dokumentu vyplnený", "text.badge.checkmark"),
+            (!store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
+             "Názov nového dokumentu vyplnený", "doc.badge.gearshape"),
+            (true, store.attestation.evidenceNumber.map { "Evidenčné číslo z EZZK: \($0)" }
+                ?? "Evidenčné číslo pridelí EZZK pri autorizácii", "number.square.fill"),
+            (!store.attestation.performingPerson.fullName.trimmingCharacters(in: .whitespaces).isEmpty,
+             "Osoba vykonávajúca konverziu vyplnená", "person.crop.circle"),
+            (identitySelected, "Identita pre podpis vybraná", "person.badge.key"),
+            (store.mandateRequirementSatisfied, "Mandátny certifikát SAK pripravený", "checkmark.seal"),
+            (true, "QTS z kvalifikovaných autorít časových pečiatok", "clock.badge.checkmark")
+        ]
+    }
+
     private var checklistItems: [(Bool, String, String)] {
+        if store.direction == .electronicToElectronic { return e2eChecklistItems }
         let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
         // Outside Demo the switch is hidden and the qualified built-in authorities always stamp.
         let qtsReady = store.showsQualifiedTimestampToggle
@@ -179,7 +201,9 @@ struct AuthorizeView: View {
                         .font(.callout)
                 }
             }
-            if let banner = SignatureBannerModel.make(from: store.inputSignatureInspection) {
+            if store.direction == .electronicToElectronic {
+                EmptyView()
+            } else if let banner = SignatureBannerModel.make(from: store.inputSignatureInspection) {
                 SignatureBanner(model: banner)
             } else {
                 Text(store.inputSignatureInspection.detail)

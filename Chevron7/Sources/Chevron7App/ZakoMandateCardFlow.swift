@@ -90,6 +90,7 @@ extension ZakoSessionStore {
     /// The authorize button is live before a card is in: the card is a step of the flow.
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
+        if direction == .electronicToElectronic { return e2eReadyToAuthorize }
         let result = AttestationPreflight.evaluate(
             attestation,
             securityElements: securityElements,
