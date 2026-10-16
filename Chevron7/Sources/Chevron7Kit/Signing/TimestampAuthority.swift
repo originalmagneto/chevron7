@@ -81,11 +81,20 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
     }
 
     /// Qualified authorities for XAdES, in the order tried: Sectigo first, never one
-    /// slovensko.sk cannot see. ZaKo hands exactly these to the engine.
+    /// slovensko.sk cannot see. ZaKo adds BOSA after them as its last resort (`zakoQualifiedURLs`).
     public static var xadesQualifiedURLs: [URL] {
         let usable = builtIn.filter { $0.isQualified && !isUnseenInXAdES($0.url) }
         let ordered = usable.filter { $0.url == sectigoQualifiedURL } + usable.filter { $0.url != sectigoQualifiedURL }
         return ordered.compactMap { URL(string: $0.url) }
+    }
+
+    /// ZaKo's authorities outside Demo, in the order tried: those slovensko.sk sees in XAdES
+    /// first, then BOSA as the last resort, so an outage of Sectigo (and CA Disig without a
+    /// contract) never stops a conversion. A BOSA timestamp is still qualified; slovensko.sk
+    /// only does not show it in XAdES (owner's decision of 2026-10-16).
+    public static var zakoQualifiedURLs: [URL] {
+        let lastResort = builtIn.filter { $0.isQualified && isUnseenInXAdES($0.url) }
+        return xadesQualifiedURLs + lastResort.compactMap { URL(string: $0.url) }
     }
 
     /// Shown under the pickers while BOSA is chosen for (or could reach) an ASiC-E signature.
