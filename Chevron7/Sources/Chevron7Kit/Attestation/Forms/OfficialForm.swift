@@ -47,6 +47,31 @@ public struct OfficialForm: Sendable, Equatable {
         schemaDigestBase64: OfficialFormFiles.record12SchemaDigest,
         presentationDigestBase64: OfficialFormFiles.record12PresentationDigest)
 
+    /// E→E record 1.0, the record form EZZK receives for a conversion of an electronic document
+    /// to a new electronic document. Validated against the libxml2-compatible derived copy.
+    public static let recordE2E_1_0 = OfficialForm(
+        identifier: "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0",
+        namespace: "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0",
+        version: "1.0",
+        schema: OfficialFormFiles.recordE2ESchema,
+        validationSchema: OfficialFormFiles.recordE2EValidationSchema,
+        presentation: OfficialFormFiles.recordE2EPresentation,
+        presentationMediaDestination: "TXT",
+        schemaDigestBase64: OfficialFormFiles.recordE2ESchemaDigest,
+        presentationDigestBase64: OfficialFormFiles.recordE2EPresentationDigest)
+
+    /// E→E clause 1.3; its HTML signer presentation is the one with the attestation sentence.
+    public static let clauseE2E_1_3 = OfficialForm(
+        identifier: "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3",
+        namespace: "http://schemas.gov.sk/form/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3",
+        version: "1.3",
+        schema: OfficialFormFiles.clauseE2ESchema,
+        validationSchema: OfficialFormFiles.clauseE2ESchema,
+        presentation: OfficialFormFiles.clauseE2EPresentation,
+        presentationMediaDestination: "HTML",
+        schemaDigestBase64: OfficialFormFiles.clauseE2ESchemaDigest,
+        presentationDigestBase64: OfficialFormFiles.clauseE2EPresentationDigest)
+
     /// Osvedčovacia doložka 1.3, attached to the converted document.
     public static let clause_1_3 = OfficialForm(
         identifier: "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfPaperToElectronicDocument.sk/1.3",

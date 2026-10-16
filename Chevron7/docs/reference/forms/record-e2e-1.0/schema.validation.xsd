@@ -1,0 +1,595 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns="https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <xs:element name="ConversionRecord" type="ConversionRecordOfElectronicDocumentToElectronicDocumentCType">
+		<xs:annotation>
+			<xs:documentation xml:lang="sk">D.6.3 Zlozeny datovy prvok pre zaznam o zaručenej konverzii.</xs:documentation>
+		</xs:annotation>
+	</xs:element>
+	<xs:complexType name="ConversionRecordOfElectronicDocumentToElectronicDocumentCType">
+		<xs:sequence>
+			<xs:element name="OriginalDocumentInfo" type="OriginalDocumentInfoCType" minOccurs="1" maxOccurs="unbounded">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Sekcia popisuje kazdy povodny elektronicky dokument, ktory bol vstupom zarucenej konverzie. V pripade pouzitia viacerych podpisov vo formate PAdES sa pre kazdy takyto podpis vytvara novy elektronicky dokument obsahujuci autorizovanu cast povodneho dokumentu.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="OriginalDocumentAuthorization" type="OriginalDocumentAuthorizationCType">
+				<xs:annotation>
+<xs:documentation xml:lang="sk">Tato  sekcia  opisuje  informacie  o  vsetkych  autorizaciach,  ktore  su  k  povodnemu  elektronickemu dokumentu alebok viacerym elektronickym dokumentom spolocne autorizovanym pripojene.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="NewDocumentInfo" type="NewDocumentInfoCType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Sekcia popisuje kazdy novovzniknuty elektronicky dokument, ktory je  vystupom zarucenej konverzie. V pripade ze niektore z povodnych elektronickych dokumentov neboli v procese transformovane do noveho formatu, popisuju sa v tejto sekcii identicke hodnoty ako v pripade povodneho elektronickeho dokumentu.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ConversionRecordEvidenceNumber" type="StringMax90ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Evidencne cislo zaznamu o zarucenej konverzii</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+      <xs:element name="UsedDevice" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+        <xs:annotation>
+          <xs:documentation xml:lang="sk">
+            Uvadza sa udaj o pouzitom technickom alebo programovom prostriedku, ktoreho pouzitim je zarucena konverzia vykonana.
+            Udaj sa uvadza vo forme identifikacie pouziteho prostriedku a vecneho opisu jeho pouzitia. Pri pouziti viacerych prostriedkov sa uvadzaju v poradi, v akom su pri konverzii pouzite.
+            Pouziva sa obchodny nazov prostriedku. Ak je pouzity manualny prepis, toto sa uvadza na prislusnom mieste namiesto identifikacie pouziteho softveru.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+
+      <xs:element name="ConversionExecutionDateTime" type="dateTimeCetOrCest" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Datum a cas vykonania zarucenej konverzie vo formate podla ISO8601 s casovou zonou UTC+01:00 a +02:00 pre CEST.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="PersonPerformingConversion" type="PersonPerformingConversionCType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Udaje o osobe, ktora zarucenu konverziu vykonala.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="OriginalDocumentInfoCType">
+		<xs:sequence>
+			<xs:element name="OriginalDocumentName" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Nazov povodneho elektronickeho dokumentu podla nasledujucich pravidiel:1.v pripade ze sa jedna o zarucenu konverziu jedineho elektronickeho dokumentu, ktory nie je v explicitne oznaceny, uvadza sa ako nazov hodnota „Dokument“, 2.v pripade viacerych povodnych elektronickych dokumentov sa uvadza nazov dokumentu tak, ako je pouzity pri oznaceni dokumentu v elektronickej podobe (nazov povodneho suboru) za ucelom jeho identifikacie pri popise vazby autorizacie k autorizovanym dokumentom, 3.v pripade elektronickeho dokumentu vo formate PDF obsahujuceho viacnasobne podpisy vo formate PAdES, ktore sa  viazu sa na rozne casti dokumentu vznika nazov odvodenim z nazvu povodneho suboru a pripony poradia (napr. zmluva-1, zmluva-2, atd.)</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+      <xs:element name="OriginalDocumentType" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+        <xs:annotation>
+          <xs:documentation xml:lang="sk">
+            D.6.3.3 Obsahuje strucny vecny opis druhu povodneho dokumentu.
+            [Hodnoty: Nema predpisany obsah.
+            Priklady pouzitia: kupna zmluva, rozhodnutie, uznesenie vlady Slovenskej republiky, ziadost, ohlasenie.]
+            [Poznamky: Pouziva sa opis, ktory najvystiznejsie popisuje prislusny druh povodneho dokumentu.]
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+			<xs:element name="OriginalDocumentFormat" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Format povodneho elektronickeho dokumentu podla nasledujucich pravidiel: 1.„PDF“ – elektronicky dokument vo formate Portable Document Format, 2.„TXT“ – pre elektronicky dokument vo formate Plain Text Format (.txt),3.„PNG“ – pre elektronicky dokument vo formate Portable Network Grapgics (.png), 4.„XMLDataContainer“ – pre elektronicky dokument vo formate (XML) v strukture „kontajnera XML udajov“ podla vynosu Ministerstva financii Slovenskej republiky c. 55/2014 Z. z. o standardoch pre informacne systemy verejnej spravy, 5.pre ostatne formaty – hodnota pola sa tvori z obvyklej pripony pouziteho formatu alebo z obvyklej skratky nazvu pouziteho formatu tak, aby bola identifikacia jednoznacna a nekonfliktna s inymi formatmi v sulade s § 57d ods. 1 vynosu Ministerstva financii Slovenskej republiky c. 55/2014 o standardoch pre informacne systemy verejnej spravy</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ElectronicFingerprintValue" type="Base64BinaryRequired" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Hodnota elektronickeho odtlacku (hash) povodneho elektronickeho dokumentu, ktora je zapisana v kodovani BASE64.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ElectronicFingerprintCalculationMethod" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Nazov kryptografickej funkcie, ktorou bol odtlacok povodneho elektronickeho dokumentu vypocitany. Identifikacia pouzitej kryptografickej funkcie pre vypocet elektronickeho odtlacku sa vykona v sulade s  § 11 ods. 1 pism. m) zakona c. 272/2016 Z. z. o doveryhodnych sluzbach pre elektronicke transakcie na vnutornom trhu a o zmene a doplneni niektorych zakonov (zakon o doveryhodnych sluzbach) (napr. „sha-256“).</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="OriginalDocumentAuthorizationCType">
+		<xs:sequence>
+			<xs:element name="OriginalDocumentAuthorizationOccurance" type="xs:boolean">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Vyskyt autorizacnych prvkov. Dokument obsahuje prostriedky autorizacie alebo casovu peciatku (hodnota True alebo 1). Dokument neobsahuje prostriedky autorizacie ani casovu peciatku (hodnota False alebo 0). Ak dokument neobsahuje prostriedky autorizacie ani casovu peciatku, udaje o autorizaciach povodneho dokumentu nie su vyplnene.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="OriginalDocumentAuthorization" type="DocumentAuthorizationCType" minOccurs="0" maxOccurs="unbounded">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Tato sekcia popisuje informacie o vsetkych autorizaciach, ktore su k povodnemu elektronickemu dokumentu, resp. viacerym elektronickym dokumentom spolocne autorizovanym, pripojene.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="DocumentAuthorizationCType">
+		<xs:sequence>
+			<xs:element name="AuthorizationType" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Typ pouzitej autorizacie (kvalifikovany elektronicky podpis, zdokonaleny elektronicky podpis, elektronicky podpis, kvalifikovana elektronicka pecat, zdokonalena elektronicka pecat, elektronicka pecat, pripadne iny uznany sposob autorizacie v buducnosti)..</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="AuthorizedDocument" minOccurs="1" maxOccurs="unbounded">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Sekcia opisuje elektronicke dokumenty, ktore su viazane na danu autorizaciu –to znamena, ktore dany autorizacny  prvok  autorizuje.</xs:documentation>
+				</xs:annotation>
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element name="AuthorizedDocumentName" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Nazov elektronickeho dokumentu, ktory je k danej autorizacii viazany. Nazov sa uvadza podla pola „Nazov dokumentu“ v sekcii „Udaje o povodnych elektronickych dokumentoch)</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="AuthorizationState" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Vysledok overenia platnosti autorizacie (platny, neplatny, nie je mozne zistit)</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="AuthorizationTime" type="dateTimeCetOrCest" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Cas vykonania autorizacie povodneho elektronickeho dokumentu, ak je ho z prostriedku autorizacie mozne zistit (t.j. ked je v nom cas autorizacie uvedeny), cas sa uvadza vo formate podla  ISO8601 s casovou zonou UTC+01:00 CET a +02:00 pre CEST</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+      <xs:element name="ElectronicSignature" type="MandatoryStringType" minOccurs="0" maxOccurs="1">
+        <xs:annotation>
+          <xs:documentation xml:lang="sk">
+            Elektronický podpis/pecat
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <!-- Vysledok overenia podpisu -->
+      <xs:element name="ValidityVerificationResult" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+        <xs:annotation>
+          <xs:documentation xml:lang="sk">
+            Obsahuje vysledok overenia elektronickeho podpisu alebo elektronickej pecate - validacna sprava splnenia poziadaviek cl. 32 nariadenia (EU) c.910/2014
+            a v sulade so „Schemou dohladu kvalifikovanych doveryhodnych sluzieb definovanou organom dohladu“, bod 5.3, ak aplikacia pouzivana na overovanie takuto spravu poskytuje,
+            alebo vysledok procesu validacie podpisany alebo zapecateny kvalifikovanou doveryhodnou sluzbou validacie kvalifikovanych elektronickych podpisov alebo pecati.
+          </xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="AuthorizationValidationTime" type="dateTimeCetOrCest" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Cas kedy bolo overenie platnosti autorizacie pri vykonavani zarucenej konverzii realizovane, cas sa uvadza vo formate podla ISO8601 s casovou zonou UTC+01:00 CET a +02:00 pre CEST</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="AuthorizationLocation" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Miesto vykonania autorizacie povodneho elektronickeho dokumentu, ak je ho z prostriedku autorizacie mozne zistit (t.j. ked je v nom uvedene). Inak sa zadava retazes „Neuvedene“</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="AuthorizationPerson" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Udaje o osobe, ktora autorizaciu vykonala</xs:documentation>
+				</xs:annotation>
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element name="PersonID" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Identifikator fyzickej alebo pravnickej osoby, ktora vykonala autorizaciu</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="Mandant" type="StringMax255OptType" minOccurs="0" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">
+                                                Identifikacne udaje fyzickej alebo pravnickej osoby, v mene ktorej autorizujuca osoba konala. Identifikator sa uvadzaju identicky ako v pripade identifikatora autorizujucej osoby, pricom v kazdej polozke mandanta v certifikate je pred udajmi uvedeny velkymi pismenami text „MANDANT“ oddeleny medzerou.
+                                            </xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="Mandate" type="StringMax255OptType" minOccurs="0" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">
+                                                Oznacenie opravnenia uvedene ako posledne cislo OID certifikacnej politiky v rozsireni certifikatu (napr. 1.3.158.36061701.1.1.xyz).  Identifikator „xyz“ predstavuje cislo opravnenia v zozname opravneni, nie oznacenie (text) opravnenia. Sucasne sa pripoji aj text opravnenia uvedeny v atribute certifikatu „userNotice-explicitText“, ktory sa MOZE nachadzat v tomto atribute.
+                                            </xs:documentation>
+							</xs:annotation>
+						</xs:element>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="TimeStamp" minOccurs="0" maxOccurs="unbounded">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Udaje o casovej peciatke, ktora je pripojena k autorizacii/povodnemu dokumentu, inak sa neuvadza. Casova peciatka potvrdzuje cas existencie vykonania autorizacie elektronickeho dokumentu. Preto v pripade, ak je k prostriedku autorizacie pripojenych viacero casovych peciatok, uvadzaju sa udaje o najstarsej platnej</xs:documentation>
+				</xs:annotation>
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element name="TimeStampType" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Typ casovej peciatky – „Kvalifikovana“, „Nekvalifikovana“</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="TimeStampState" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Vysledok overenia platnosti casovej peciatky (platny, neplatny, nie je mozne zistit).</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="TimeStampCreated" type="dateTimeCetOrCest" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Cas vydania casovej peciatky, uvedeny v casovej peciatke. Cas sa uvadza vo formate podla ISO8601 s casovou zonou UTC+01:00 CET a +02:00 pre CEST.</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="TimeStampPublisher" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Identifikator poskytovatela sluzby casovej peciatky tak, ako je uvedeny v atribute „Common-name“ v certifikate vydavatela casovej peciatky.</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+						<xs:element name="TimeStampValidationTime" type="dateTimeCetOrCest" minOccurs="1" maxOccurs="1">
+							<xs:annotation>
+								<xs:documentation xml:lang="sk">Cas kedy bolo overenie platnosti casovej peciatky pri zarucenej konverzii realizovane. Cas sa uvadza vo formate podla ISO8601 s casovou zonou UTC+01:00 CET a +02:00 pre CEST.</xs:documentation>
+							</xs:annotation>
+						</xs:element>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="OtherAuthorizationInfo" type="StringMax1023OptType" minOccurs="0" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">
+                                    Dalsie udaje o autorizacii, ktore su pre dany typ autorizacie dolezite a nemozno ich uviest v ziadnej z vyssie uvedenych charakteristik autorizacie. V pripade pouzitia elektronickeho podpisu alebo elektronickej pecate ako prostriedku autorizacie sa uvadza informacia, ci pouzity certifikat bol kvalifikovany. Ak je certifikat vydany ako kvalifikovany certifikat, je to mozne identifikovat podla nasledujucich znakov: 1.certifikat musi obsahovat polozku QcCompliance OID (0.4.0.1862.1.1), 2.certifikat vydany podla legislativy SR musi obsahovat rozsirenie certifikatu certificatePolicies OID (2.5.29.32), ktore musi minimalne obsahovat OID certifikacnej politiky NBU OID (1.3.158.36061701.0.0.0.1.2.2), 3.vydavatel certifikatu je uvedeny v zozname v doveryhodnom zozname podla vykonavacieho rozhodnutia Komisie c. 2015/1505
+                                </xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="NewDocumentInfoCType">
+		<xs:sequence>
+			<xs:element name="NewDocumentName" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Nazov novovzniknuteho elektronickeho dokumentu.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="NewDocumentFormat" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Format dokumentu. Identifikacia formatu dokumentu sa vykona v sulade s §57d ods. 1 vynosu Ministerstva financii Slovenskej republiky c. 55/2014 o standardoch pre informacne systemy verejnej spravy.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ElectronicFingerprintValue" type="Base64BinaryRequired" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Hodnota elektronickeho odtlacku (hash) novovzniknuteho elektronickeho dokumentu, ktora je zapisana v kodovani BASE64.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ElectronicFingerprintCalculationMethod" type="MandatoryStringType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Nazov kryptografickej funkcie, ktorou bol odtlacok novovzniknuteho elektronickeho dokumentu vypocitany. Identifikacia pouzitej kryptografickej funkcie pre vypocet elektronickeho odtlacku sa vykona v sulade s  § 11 ods. 1 pism. m) zakona c. 272/2016 Z. z. o doveryhodnych sluzbach pre elektronicke transakcie na vnutornom trhu a o zmene a doplneni niektorych zakonov (zakon o doveryhodnych sluzbach) (napr. „sha-256“).</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="PersonPerformingConversionCType">
+		<xs:sequence>
+			<xs:element name="PersonData" type="PersonDataCType"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="PersonDataCType">
+		<xs:sequence>
+			<xs:element name="PhysicalPerson" type="PhysicalPersonCType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Oznacenie fyzickej osoby ktora vykonala zarucenu konverziu.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/PhysicalPerson"
+            "@type": "pper:PhysicalPerson",
+            "dct:references": "pper:PhysicalPerson"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="LegalSubject" type="LegalSubjectCType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Oznacenie osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/LegalSubject"
+            "@type": "lsub:LegalSubject",
+            "dct:references": "lsub:LegalSubject"
+            }
+        </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ID" type="IDCType" minOccurs="0" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Oznacenie identifikatora osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="PhysicalPersonCType">
+		<xs:sequence>
+			<xs:element name="PersonName" type="PersonNameCType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Meno a priezvisko osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/PhysicalPerson/PersonName"
+            "@type": "pper:PhysicalPerson",
+            "dct:references": "pper:PersonName"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="Position" type="StringMax1023ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Funkcia alebo pracovne zaradenie osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="PersonNameCType">
+		<xs:sequence>
+			<xs:element name="GivenName" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Meno osoby vykonavajucej zarucenu konverziu. Obsahuje rodne meno, ktorym je nededena cast mena osoby.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/PhysicalPerson/PersonName/GivenName"
+            "@type": "pper:PersonName",
+            "dct:references": "pper:givenName"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="FamilyName" type="StringMax255ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Priezvisko osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/PhysicalPerson/PersonName/FamilyName"
+            "@type": "pper:PersonName",
+            "dct:references": "pper:familyName"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="LegalSubjectCType">
+		<xs:sequence>
+			<xs:element name="Name" type="StringMax1023ReqType" minOccurs="1" maxOccurs="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Uplny nazov pravnickej osoby vykonavajucej zarucenu konverziu.</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/LegalSubject/Name"
+            "@type": "lsub:LegalSubject",
+            "dct:references": "lsub:name"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="IDCType">
+		<xs:sequence>
+			<xs:element name="IdentifierType" type="CodelistDataElementCType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Zlozeny datovy prvok pre udaje zo zakladneho ciselnika obsahujuceho udaje o type pouziteho identifikatora osoby (ICO) vykonavajucej zarucenu konverziu. Pouziva sa ciselnik CL004001</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="IdentifierValue" type="IdentifierValueType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Hodnota pouziteho identifikatora (ICO).</xs:documentation>
+					<xs:appinfo>
+            {
+            "@context": {
+            "dct": "http://purl.org/dc/terms/",
+            "lsub": "https://data.gov.sk/def/ontology/legal-subject/",
+            "pper": "https://data.gov.sk/def/ontology/physical-person/",
+            "foaf": "http://xmlns.com/foaf/0.1/",
+            "owl": "http://www.w3.org/2002/07/owl#",
+            "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+            "skos": "http://www.w3.org/2004/02/skos/core#"
+            },
+            "@id": "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/ConversionRecordOfElectronicDocumentToElectronicDocument/PersonPerformingConversion/PersonData/ID/IdentifierValue"
+            "@type": "lsub:LegalID",
+            "dct:type": "https://data.gov.sk/def/identifier-type/7"
+            "dct:references": "skos:notation"
+            }
+          </xs:appinfo>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="CodelistDataElementCType">
+		<xs:sequence>
+			<xs:element name="Codelist" type="CodelistCType">
+				<xs:annotation>
+					<xs:documentation>D.5 Zlozeny datovy prvok, ktory obsahuje polozku zo zakladneho ciselnika. Pravidla pouzitia: Pri prenose  nepodpisanych udajov vychadzajucich z udajov zakladneho cislenika je pouzitie tohto datoveho prvku povinne.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="CodelistCType">
+		<xs:sequence>
+			<xs:element name="CodelistCode" type="CodelistCodeType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Jedinecny kod zakladneho ciselnika.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="CodelistItem" type="CodelistItemCType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Zlozeny datovy prvok na popis datovej struktury polozky ciselnika.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="CodelistItemCType">
+		<xs:sequence>
+			<xs:element name="ItemCode" type="ItemCodeStringRequired">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Jedinecny kod polozky ciselnika.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="ItemName" type="ItemNameSCType">
+				<xs:annotation>
+					<xs:documentation xml:lang="sk">Uplny nazov polozky ciselnika.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ItemNameSCType">
+		<xs:simpleContent>
+			<xs:extension base="ItemNameStringRequired">
+				<xs:attribute name="Language"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:simpleType name="NonCodelistDataType">
+		<xs:annotation>
+			<xs:documentation>D.3.4.1 Obsahuje volnu neciselnikovu hodnotu.</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="2047"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="CodelistCodeString">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="100"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="CodelistCodeType">
+		<xs:restriction base="CodelistCodeString">
+			<xs:minLength value="1"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="ItemCodeStringRequired">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="255"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="ItemNameStringRequired">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="2047"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+  <xs:simpleType name="MandatoryStringType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="NaturalNumberType">
+    <xs:restriction base="xs:positiveInteger"/>
+  </xs:simpleType>
+	<xs:simpleType name="StringMax10OptType">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="10"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax20ReqType">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="20"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax30OptType">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="30"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax90ReqType">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="90"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax130ReqType">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="130"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax255ReqType">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="255"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax255OptType">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="255"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax1023ReqType">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="1023"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="StringMax1023OptType">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="1023"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="IdentifierValueType">
+		<xs:restriction base="xs:string">
+			<xs:pattern value="https://data\.gov\.sk/id/legal-subject/([0-9]{8}|[0-9]{12})"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="IntMax5ReqType">
+		<xs:restriction base="xs:int">
+			<xs:pattern value="\d{1,5}"/>
+		</xs:restriction>
+	</xs:simpleType>
+  <xs:simpleType name="Base64BinaryRequired">
+    <xs:restriction base="xs:base64Binary">
+      <xs:minLength value="1"></xs:minLength>
+      <xs:maxLength value="1023"></xs:maxLength>
+    </xs:restriction>
+  </xs:simpleType>  
+  <xs:simpleType name="dateTimeCetOrCest">
+    <xs:restriction base="xs:dateTime">
+      <xs:pattern value="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\+01:00|\+02:00)"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
