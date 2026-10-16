@@ -373,7 +373,7 @@ struct SigningPrepareView: View {
                     .interactiveDismissDisabled()
             }
         }
-        .task(id: store.document?.dataRepresentation()?.count ?? 0) {
+        .task(id: store.documentGeneration) {
             setupVisualComposition()
         }
         .task(id: "\(store.signingPIN)|\(store.includeVisibleSignature)") {
