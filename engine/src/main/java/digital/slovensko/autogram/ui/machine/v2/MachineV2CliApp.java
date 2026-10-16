@@ -93,6 +93,7 @@ public final class MachineV2CliApp {
             case CERTIFICATES -> certificates(request, writer, driverService);
             case SIGN -> sign(request, writer);
             case VALIDATE -> validate(request, writer, validationSession);
+            case EVIDENCE -> evidence(request, writer, validationSession);
             case TIMESTAMP -> throw new MachineProtocolException("OPERATION_UNAVAILABLE");
         }
     }
@@ -158,6 +159,23 @@ public final class MachineV2CliApp {
             } catch (Exception exception) {
                 var payload = new JsonObject();
                 payload.addProperty("code", "VALIDATION_FAILED");
+                writer.write("file.failed", request.requestId(), file.id(), payload);
+            }
+        }
+        writer.completed(request.requestId(), new JsonObject());
+    }
+
+    /// Guaranteed conversion (E→E): the trusted validation plus what the clause and record
+    /// carry about the original's signatures, on the validation session.
+    private static void evidence(MachineV2Request request, EventWriter writer, ValidationSession validationSession) {
+        validationSession.initialize();
+        for (var file : requiredFiles(request.payload())) {
+            try {
+                writer.write("evidence.completed", request.requestId(), file.id(),
+                        validationSession.evidence().evidence(java.nio.file.Path.of(file.source())));
+            } catch (Exception exception) {
+                var payload = new JsonObject();
+                payload.addProperty("code", "EVIDENCE_FAILED");
                 writer.write("file.failed", request.requestId(), file.id(), payload);
             }
         }
@@ -257,6 +275,10 @@ public final class MachineV2CliApp {
 
         private MachineInspectionService trustedInspection() {
             return trustedInspection;
+        }
+
+        private digital.slovensko.autogram.ui.machine.ConversionEvidenceService evidence() {
+            return new digital.slovensko.autogram.ui.machine.ConversionEvidenceService();
         }
     }
 
