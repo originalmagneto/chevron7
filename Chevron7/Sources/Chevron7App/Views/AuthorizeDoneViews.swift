@@ -62,6 +62,11 @@ struct AuthorizeView: View {
 
                 Spacer()
 
+                if store.isWaitingForEZZK {
+                    Button("Zastaviť čakanie") { store.stopWaitingForEZZK() }
+                        .controlSize(.large)
+                        .help("Záznam zostane odoslaný. Konverziu dokončíte neskôr tlačidlom Dokončiť konverziu.")
+                }
                 mobileAuthorizeButton
                 authorizeButton
             }
@@ -270,7 +275,12 @@ struct AuthorizeView: View {
     }
 
     private var authorizationCardHint: String {
-        switch store.mandateGate {
+        if let pending = store.recordFirstPending {
+            return pending.stage == .awaitingEZZK
+                ? "Záznam o konverzii č. \(pending.evidenceNumber) je podpísaný a odoslaný do EZZK. Keď ho EZZK spracuje, podpíše sa doložka s dokumentom."
+                : "EZZK spracovalo záznam č. \(pending.evidenceNumber). Podržte Dokončiť konverziu: podpíše sa doložka s dokumentom pre klienta."
+        }
+        return switch store.mandateGate {
         case .ready(let label) where store.hasResolvedCertificate:
             "Podpíše sa mandátnym certifikátom \(label)."
         case .noMandate:
@@ -283,7 +293,7 @@ struct AuthorizeView: View {
     @ViewBuilder
     private var authorizeButton: some View {
         HoldToConfirmButton(
-            title: "Autorizovať konverziu",
+            title: store.recordFirstPending == nil ? "Autorizovať konverziu" : "Dokončiť konverziu",
             systemImage: "signature.badge.checkmark",
             workingText: store.analysisProgressText,
             disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
@@ -313,7 +323,7 @@ struct AuthorizeView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete)
+            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil)
             .help("Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
         }
     }

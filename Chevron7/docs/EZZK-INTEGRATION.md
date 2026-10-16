@@ -163,6 +163,29 @@ Verified live on test EZZK, 2026-09-23 (`P2E-EZZK-FINDINGS.md`, "Part B2"):
 - **Evidence number and row lifetime in ZaKo:** the number leaves `EvidenceNumberPool` as soon as the signed client container passes `ASiCEContainerVerifier` (the client documents carry it, whatever happens to the record). The `.signed` row is written before the record is signed, and `EZZKStatusChecker.hold` keeps every path off it until that signature succeeds or fails; after a crash during the record signature the next check marks the orphan `.recordUnsigned` like any row without a signed record. Deleting a row in the Register (`EZZKStatusChecker.delete(id:) -> Bool`) also drops its number from the pool, but refuses (returns `false`, with `EZZKStatusChecker.busyDeleteMessage`) while the row is still held or in flight, so a signature or a send in progress cannot write a deleted row back into existence.
 - `EZZKStatusChecker` runs this every five minutes, but only in a regular launch of Chevron7 (`shouldRun`, never in the `--web-signing` accessory mode), one row at a time (`inFlight`), capped at three automatic sends per row per Bratislava day, and sends only rows whose stored `ezzkMode` matches the mode currently selected. Accepted and unknown rows are looked up in the EZZK of their own stored mode whatever mode is selected, by the periodic check and by "Overiť v EZZK" alike: a lookup only reads, so a record accepted in Production still turns processed while the advocate works in Demo. A row without a stored mode was written before part B2 (no signed record) and no path ever sends or looks it up.
 
+## From 1. 1. 2027: record first
+
+Zákon č. 305/2013 Z. z. § 36 ods. 3 from 1. 1. 2027 puts the record before the clause: the
+record is created and sent to EZZK, and the clause is built from what EZZK returns. Findings:
+`docs/ZAKO-2027-FINDINGS-2026-10-16.md`; design:
+`docs/superpowers/specs/2026-10-16-zako-2027-record-first-design.md`.
+
+- The order is chosen per conversion by `ZakoRegime.resolve` from EZZK's server time
+  (`ZakoRegime.recordFirstFrom`, 1. 1. 2027 00:00 Bratislava). Rows signed before it keep record
+  1.0 and the order above.
+- Record-first conversions send record 1.2 through the same `ReceiveConversionRecord` (the
+  operation is form-agnostic) and the same `EZZKSubmissionCoordinator` rules, but inside the ZaKo
+  flow: ZaKo polls `EZZKStatusChecker.verify(id:)` every 30 s until the row is `.processed`, and
+  only then signs the client container. A record EZZK refuses ends the conversion with nothing
+  delivered.
+- The SOAP contract has no operation that returns "údaje na vytvorenie osvedčovacej doložky";
+  the clause is built from the app's own data plus the evidence number EZZK processed. EZZK 2.0
+  (isvs_14693) is meant to provide that data through a new API, not published on 2026-10-16.
+  `ZakoRecordFirstPolicy.refusesOutsideDemo` stops record-first conversions outside Demo if
+  today's EZZK stops accepting this.
+- `AppSettings.zakoRecordFirstPreview` runs the new order and record 1.2 before the date in Demo
+  and Testovacia evidencia, which is how it is checked on test EZZK.
+
 ## Error mapping
 
 | Situation | `EZZKError` | What the user sees |

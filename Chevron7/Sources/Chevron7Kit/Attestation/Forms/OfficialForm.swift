@@ -34,6 +34,19 @@ public struct OfficialForm: Sendable, Equatable {
         schemaDigestBase64: OfficialFormFiles.recordSchemaDigest,
         presentationDigestBase64: OfficialFormFiles.recordPresentationDigest)
 
+    /// Záznam o konverzii 1.2 (`_2021.sk`), the record form from 1. 1. 2027 (MIRRI's CEZZK
+    /// page). libxml2 compiles its official schema, so validation uses it as is.
+    public static let record_1_2 = OfficialForm(
+        identifier: "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfPaperToElectronicDocument_2021.sk/1.2",
+        namespace: "http://schemas.gov.sk/form/50349287.ConversionRecordOfPaperToElectronicDocument_2021.sk/1.2",
+        version: "1.2",
+        schema: OfficialFormFiles.record12Schema,
+        validationSchema: OfficialFormFiles.record12Schema,
+        presentation: OfficialFormFiles.record12Presentation,
+        presentationMediaDestination: "TXT",
+        schemaDigestBase64: OfficialFormFiles.record12SchemaDigest,
+        presentationDigestBase64: OfficialFormFiles.record12PresentationDigest)
+
     /// Osvedčovacia doložka 1.3, attached to the converted document.
     public static let clause_1_3 = OfficialForm(
         identifier: "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfPaperToElectronicDocument.sk/1.3",

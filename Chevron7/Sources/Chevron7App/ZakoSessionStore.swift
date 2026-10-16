@@ -120,6 +120,17 @@ final class ZakoSessionStore {
     var lastError: String?
     let mobileSigning: MobileSigningCoordinator
     private(set) var isAuthorizingViaMobile = false
+    /// A conversion under the order of 1. 1. 2027 whose record is signed but whose client
+    /// container is not (`ZakoRecordFirstFlow.swift`). "Autorizovať konverziu" resumes it; a
+    /// new document drops it.
+    var recordFirstPending: RecordFirstPending?
+    /// While the record-first flow waits for EZZK to process the record.
+    var isWaitingForEZZK = false
+    @ObservationIgnored var stopWaitingRequested = false
+    @ObservationIgnored var recordFirstPollInterval: Duration = .seconds(30)
+    @ObservationIgnored var recordFirstWaitLimit: TimeInterval = 30 * 60
+    /// Tests script the lookup; the app asks the status checker (`verify(id:)`).
+    @ObservationIgnored var recordFirstLookup: ((UUID) async -> EZZKStatusChecker.RowResult)?
 
     static let mobileMandateRefusalMessage =
         "Podpis z mobilu nebol vytvorený mandátnym certifikátom. Zaručená konverzia vyžaduje mandátny certifikát advokáta, konverzia nebola autorizovaná a do evidencie sa nič nezapísalo."
@@ -1152,7 +1163,7 @@ final class ZakoSessionStore {
     }
 
     /// Whether the engine asks the eID client for the BOK, in its own window, for the card's identity.
-    private var asksEIDForBOK: Bool {
+    var asksEIDForBOK: Bool {
         EIDKeyboardHandoff.applies(to: selectedIdentity ?? identities.first)
     }
 
@@ -1371,6 +1382,25 @@ final class ZakoSessionStore {
             lastError = Self.noMandateMessage
             return
         }
+        // A conversion under the order of 1. 1. 2027 whose record is already signed goes on
+        // from where it stopped: no new number, time or record.
+        if recordFirstPending != nil {
+            await resumeRecordFirst(viaMobile: viaMobile)
+            return
+        }
+        let ezzkMode = settingsStore.ezzkAccountController.mode
+        // A first look by the Mac's clock, before a number is allocated; the conversion time
+        // from EZZK decides below.
+        let expectedRegime = ZakoRegime.resolve(conversionTime: Date(), mode: ezzkMode,
+                                                preview: settings.zakoRecordFirstPreview)
+        if let refusal = expectedRegime.refusal {
+            lastError = refusal
+            return
+        }
+        if viaMobile, expectedRegime.regime == .recordFirst {
+            lastError = Self.recordFirstMobileMessage
+            return
+        }
         // The number is allocated here, after the card and its MQC, right before the
         // signature: never for a conversion that is not signed, so none lapses at midnight.
         if needsFreshEvidenceNumber {
@@ -1398,11 +1428,23 @@ final class ZakoSessionStore {
                 recomputePreflight()
                 throw EZZKError.evidenceNumberExpired
             }
+            // The conversion time decides the order (§ 36 ods. 3 zákona č. 305/2013 Z. z. until
+            // and from 1. 1. 2027) and the form pack.
+            let regime = ZakoRegime.resolve(conversionTime: conversionTime, mode: ezzkMode,
+                                            preview: settings.zakoRecordFirstPreview)
+            if let refusal = regime.refusal {
+                lastError = refusal
+                return
+            }
+            if viaMobile, regime.regime == .recordFirst {
+                lastError = Self.recordFirstMobileMessage
+                return
+            }
             serverTimeUsed = conversionTime
             attestation.conversionExecutionDateTime = conversionTime
             selectedFormPack = try formPackRepository.pack(
                 for: .paperToElectronic,
-                at: conversionTime,
+                at: regime.formPackDate,
                 policy: .allowUnverifiedPilot)
 
             // § 3 vyhlášky č. 70/2021 Z. z.: formát listiny je povinnou náležitosťou doložky.
@@ -1454,7 +1496,8 @@ final class ZakoSessionStore {
 
             // The record EZZK receives, validated before anything is signed: an invalid record
             // stops the conversion before the client container exists.
-            let recordDelivery = try ZakoRecordDeliveryBuilder().build(model: clause.model)
+            let recordDelivery = try ZakoRecordDeliveryBuilder().build(
+                model: clause.model, form: FormPackRepository.recordForm(of: selectedFormPack))
 
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"
             if !viaMobile, isCertificateTypePending {
@@ -1517,6 +1560,32 @@ final class ZakoSessionStore {
                     originalDocumentName: attestation.originalDocumentName,
                     pdfFileName: docFileName,
                     evidenceNumber: attestation.evidenceNumber))
+            if regime.regime == .recordFirst {
+                guard let identityID = selectedIdentityID, let number = attestation.evidenceNumber else {
+                    throw SigningError.identityUnavailable
+                }
+                let pending = RecordFirstPending(
+                    recordID: currentRecordID,
+                    stage: .awaitingEZZK,
+                    // The row is looked up in the EZZK that allocated the number.
+                    mode: attestation.evidenceNumberMode ?? ezzkMode,
+                    evidenceNumber: number,
+                    conversionTime: conversionTime,
+                    finalPDF: finalPDF,
+                    fingerprint: fingerprint,
+                    containerDocumentName: containerDocumentName,
+                    containerFiles: containerFiles,
+                    directory: directory,
+                    stampsSignatures: stampsSignatures,
+                    timestampServers: timestampServers,
+                    tsaURL: tsaURL,
+                    attestation: attestation)
+                try await startRecordFirst(pending, recordDelivery: recordDelivery,
+                                           formPack: selectedFormPack, identityID: identityID,
+                                           securityReview: securityReviewSnapshot,
+                                           securityElementCount: confirmedElementsSnapshot.count)
+                return
+            }
             let signed: SignedConversionResult
             if viaMobile {
                 // avm-server rejects unsigned ASiC-E input (422 "Level can't be empty if document
@@ -1757,6 +1826,17 @@ final class ZakoSessionStore {
         preflightErrors = []
     }
 
+    /// After EZZK refused a record-first record, or its row or signature is gone, the next
+    /// attempt is a new conversion record: a new register row (the refused one stays in the
+    /// Register as it is) and a new evidence number, since EZZK may have consumed the old one.
+    func startNewRecordAttempt() {
+        recordFirstPending = nil
+        attestation.evidenceNumber = nil
+        attestation.evidenceNumberAllocatedAt = nil
+        attestation.evidenceNumberMode = nil
+        currentRecordID = UUID()
+    }
+
     func saveProfileFromForm() {
         let profile = attestation.performingPerson
         profilePersister?(profile)
@@ -1824,6 +1904,7 @@ func resetSession(keepingProfile: Bool) {
         inputSignatureInspection = .unavailable(
             detail: "Kontrola podpisov ešte neprebehla.")
         reviewUpdatedAt = nil
+        recordFirstPending = nil
         currentRecordID = UUID()
     }
 

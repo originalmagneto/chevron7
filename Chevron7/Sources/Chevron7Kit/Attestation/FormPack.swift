@@ -167,7 +167,8 @@ public struct FormPackStamp: Codable, Hashable, Sendable {
 public struct FormPackRepository: Sendable {
     public let packs: [ConversionFormPack]
 
-    public init(packs: [ConversionFormPack] = [FormPackRepository.currentLegacyUnverified]) {
+    public init(packs: [ConversionFormPack] = [FormPackRepository.currentLegacyUnverified,
+                                               FormPackRepository.record12Unverified]) {
         self.packs = packs
     }
 
@@ -213,10 +214,33 @@ public struct FormPackRepository: Sendable {
         namespace: AttestationXMLConstants.namespaceP2E,
         eFormIdentifier: AttestationXMLConstants.eFormIdentifier,
         effectiveFrom: Date(timeIntervalSince1970: 0),
+        effectiveUntil: ZakoRegime.recordFirstFrom,
         verificationState: .unverified,
         acceptanceState: .unknown,
         renderer: .legacySwift,
         outputProfile: .pilotPDFA2b,
         newDocumentFormatItem: ZakoCodelists.pdfa2FormatItem,
         fingerprintMethodItem: ZakoCodelists.sha256Item)
+
+    /// From 1. 1. 2027: record 1.2 (`_2021.sk`), sent before the clause (`ZakoRegime.recordFirst`).
+    /// The clause stays 1.3, the only P→E clause form in force (no 2027 clause is published).
+    public static let record12Unverified = ConversionFormPack(
+        id: "chevron7-p2e-record-1.2",
+        direction: .paperToElectronic,
+        recordVersion: OfficialForm.record_1_2.version,
+        clauseVersion: OfficialForm.clause_1_3.version,
+        namespace: OfficialForm.record_1_2.namespace,
+        eFormIdentifier: OfficialForm.record_1_2.identifier,
+        effectiveFrom: ZakoRegime.recordFirstFrom,
+        verificationState: .unverified,
+        acceptanceState: .unknown,
+        renderer: .legacySwift,
+        outputProfile: .pilotPDFA2b,
+        newDocumentFormatItem: ZakoCodelists.pdfa2FormatItem,
+        fingerprintMethodItem: ZakoCodelists.sha256Item)
+
+    /// The record form a pack's records are written in.
+    public static func recordForm(of pack: ConversionFormPack) -> OfficialForm {
+        pack.recordVersion == OfficialForm.record_1_2.version ? .record_1_2 : .record_1_0
+    }
 }

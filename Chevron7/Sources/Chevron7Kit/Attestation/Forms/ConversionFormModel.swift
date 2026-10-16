@@ -37,7 +37,11 @@ public struct ConversionFormModel: Sendable, Equatable {
     public var paperSizes: [PaperSize]
     public var securityElements: [SecurityElementEntry]
     public var newDocumentName: String
+    /// Record 1.2 `NewDocumentType`: the converted document is the same kind of document.
+    public var newDocumentType: String
     public var newDocumentFormat: ZakoCodelistItem
+    /// SHA-256 of the delivered PDF/A in lower-case hex (record 1.2) and base64 (clause 1.3, record 1.0).
+    public var fingerprintHex: String
     public var fingerprintBase64: String
     public var fingerprintMethod: ZakoCodelistItem
     public var evidenceNumber: String
@@ -96,16 +100,19 @@ public struct ConversionFormModel: Sendable, Equatable {
         }
         let office = d.performingPerson.officeName.trimmingCharacters(in: .whitespacesAndNewlines)
         let typeLabel = d.originalDocumentTypeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let documentType = typeLabel.isEmpty ? d.originalDocumentName : typeLabel
         return ConversionFormModel(
             originalDocumentName: d.originalDocumentName,
             originalDocumentOrder: d.originalDocumentOrder,
-            originalDocumentType: typeLabel.isEmpty ? d.originalDocumentName : typeLabel,
+            originalDocumentType: documentType,
             numberOfSheets: d.numberOfSheets,
             nonEmptyPageCount: d.nonEmptyPageCount,
             paperSizes: paperSizes,
             securityElements: entries,
             newDocumentName: d.newDocumentName,
+            newDocumentType: documentType,
             newDocumentFormat: ZakoCodelists.pdfa2FormatItem,
+            fingerprintHex: newDocumentSHA256Hex.lowercased(),
             fingerprintBase64: AttestationClauseGenerator.fingerprintBase64(hex: newDocumentSHA256Hex),
             fingerprintMethod: ZakoCodelists.sha256Item,
             evidenceNumber: evidenceNumber,
