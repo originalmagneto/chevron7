@@ -192,6 +192,19 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(provider.signedKinds, [])
     }
 
+    func testRecordFirstPreviewRefusesBeforeAnyNumber() async throws {
+        let (store, provider, source) = try makeStore()
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        store.settingsStore.settings.zakoRecordFirstPreview = true
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.lastError, ZakoSessionStore.e2eRecordFirstMessage)
+        XCTAssertNil(store.attestation.evidenceNumber, "no number is spent on a refusal")
+        XCTAssertEqual(provider.signedKinds, [])
+    }
+
     func testP2EFlowStillStartsWithAnalysis() async throws {
         let (store, _, source) = try makeStore()
         store.direction = .paperToElectronic

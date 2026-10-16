@@ -1419,6 +1419,11 @@ final class ZakoSessionStore {
             return
         }
         if direction == .electronicToElectronic {
+            // E→E has no record-first path yet: refused before an evidence number is spent.
+            if expectedRegime.regime == .recordFirst {
+                lastError = Self.e2eRecordFirstMessage
+                return
+            }
             await authorizeElectronicOriginal(viaMobile: viaMobile, ezzkMode: ezzkMode)
             return
         }
