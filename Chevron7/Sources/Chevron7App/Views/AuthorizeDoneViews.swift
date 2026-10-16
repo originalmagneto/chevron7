@@ -18,6 +18,10 @@ struct AuthorizeView: View {
 
                     tokenStatusRow
 
+                    if let error = store.lastError {
+                        ZakoNotice(title: "Konverziu sa nepodarilo autorizovať", message: error, tone: .failure)
+                    }
+
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 14) {
                             checklistCard
@@ -27,15 +31,6 @@ struct AuthorizeView: View {
                             checklistCard
                             certificateCard
                         }
-                    }
-
-                    if let error = store.lastError {
-                        Text(error)
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     }
 
                     if store.rasterConversionOffered, !store.rasterConversionApproved {
@@ -224,8 +219,9 @@ struct AuthorizeView: View {
                     .accessibilityValue(store.inputSignatureInspection.detail)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard(padding: 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var certificateCard: some View {
@@ -304,8 +300,9 @@ struct AuthorizeView: View {
                 .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard(padding: 14)
-        .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var authorizationCardHint: String {

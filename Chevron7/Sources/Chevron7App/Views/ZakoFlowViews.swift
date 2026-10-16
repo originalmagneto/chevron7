@@ -176,12 +176,20 @@ struct IntakeView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            Picker("Pôvodný dokument", selection: $store.direction) {
-                Text("V listinnej podobe").tag(ConversionDirection.paperToElectronic)
-                Text("V elektronickej podobe").tag(ConversionDirection.electronicToElectronic)
+            VStack(spacing: 8) {
+                Text("Pôvodný dokument je")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Picker("Pôvodný dokument", selection: $store.direction) {
+                    Label("Listinný", systemImage: "doc.text").tag(ConversionDirection.paperToElectronic)
+                    Label("Elektronický", systemImage: "signature").tag(ConversionDirection.electronicToElectronic)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.large)
+                .fixedSize()
+                .help("Listinný originál sa naskenuje a analyzuje; elektronický, ktorý klient podpísal, sa overí.")
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 420)
 
             DropzoneArtwork(icon: isElectronic ? "signature" : "arrow.down.doc.fill", tint: .indigo)
 
@@ -190,7 +198,7 @@ struct IntakeView: View {
                     .font(.title2.weight(.bold))
 
                 Text(isElectronic
-                     ? "PDF s podpisom PAdES alebo kontajner ASiC-E s jedným PDF. Chevron7 overí podpisy a časové pečiatky klienta podľa § 36 ods. 4 zákona č. 305/2013 Z. z. a pripojí osvedčovaciu doložku."
+                     ? "PDF alebo kontajner .asice, ktorý klient podpísal. Chevron7 overí jeho podpisy a časové pečiatky (§ 36 ods. 4 zákona č. 305/2013 Z. z.) a pripojí osvedčovaciu doložku."
                      : "Originál alebo úradne osvedčená kópia vo formáte PDF. Chevron7 automaticky analyzuje strany, listy a bezpečnostné prvky podľa § 35-39 zákona č. 305/2013 Z. z.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
