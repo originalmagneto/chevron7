@@ -15,6 +15,11 @@ enum SettingsAdvancedState {
         settings.zakoRecordFirstPreview
     }
 
+    /// A qualified validation service the advocate added for E→E in Ostrá evidencia.
+    static func qualifiedValidationIsActive(_ settings: AppSettings) -> Bool {
+        !settings.qualifiedValidationServices.isEmpty
+    }
+
     static func customTSAIsActive(_ settings: AppSettings) -> Bool {
         settings.customTSAServers.contains(settings.selectedTSAURL)
     }
