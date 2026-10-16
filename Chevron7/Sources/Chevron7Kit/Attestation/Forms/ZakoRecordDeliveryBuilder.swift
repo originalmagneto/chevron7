@@ -26,16 +26,19 @@ public struct ZakoRecordDeliveryBuilder: Sendable {
         self.validator = validator
     }
 
-    public func build(model: ConversionFormModel) throws -> ZakoRecordDelivery {
+    /// `form` is the record form of the conversion's form pack: 1.0 until 1. 1. 2027, 1.2 after.
+    public func build(model: ConversionFormModel, form: OfficialForm = .record_1_0) throws -> ZakoRecordDelivery {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
         guard !model.evidenceNumber.isEmpty,
               model.evidenceNumber.unicodeScalars.allSatisfy({ allowed.contains($0) && $0.isASCII }) else {
             throw Failure.unusableEvidenceNumber
         }
-        let xml = ConversionRecordRenderer().render(model)
-        try validator.validate(Data(xml.utf8), against: .record_1_0)
+        let xml = form.identifier == OfficialForm.record_1_2.identifier
+            ? ConversionRecord12Renderer().render(model)
+            : ConversionRecordRenderer().render(model)
+        try validator.validate(Data(xml.utf8), against: form)
         return ZakoRecordDelivery(recordXML: xml,
-                                  recordXDCF: XMLDataContainerBuilder.build(formXML: xml, form: .record_1_0),
+                                  recordXDCF: XMLDataContainerBuilder.build(formXML: xml, form: form),
                                   entryName: "\(model.evidenceNumber).record.xml.xdcf",
                                   containerName: Self.containerName(evidenceNumber: model.evidenceNumber))
     }

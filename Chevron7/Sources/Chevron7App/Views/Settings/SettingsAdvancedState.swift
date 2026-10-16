@@ -11,6 +11,10 @@ enum SettingsAdvancedState {
         settings.ezzkMode == .test
     }
 
+    static func zakoRecordFirstPreviewIsActive(_ settings: AppSettings) -> Bool {
+        settings.zakoRecordFirstPreview
+    }
+
     static func customTSAIsActive(_ settings: AppSettings) -> Bool {
         settings.customTSAServers.contains(settings.selectedTSAURL)
     }

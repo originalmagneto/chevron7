@@ -143,6 +143,9 @@ public struct AppSettings: Codable, Sendable {
     public var webSigningRetentionDays: Int
     /// The last packaging chosen for an ASiC-E batch.
     public var batchASiCPackaging: BatchASiCPackaging
+    /// Runs ZaKo in the order and with the record form of 1. 1. 2027 before that date, in Demo
+    /// and Testovacia evidencia only (`ZakoRegime.resolve`); production ignores it.
+    public var zakoRecordFirstPreview: Bool
 
     public var avmBaseURLValue: URL {
         let trimmed = avmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -175,6 +178,7 @@ public struct AppSettings: Codable, Sendable {
         case agpBaseURL, agpUserID
         case webSigningSavesLocally, webSigningOutputPath, webSigningRetentionDays
         case batchASiCPackaging
+        case zakoRecordFirstPreview
     }
 
     public init(aiMode: AIMode = .builtInOnDevice,
@@ -207,7 +211,8 @@ public struct AppSettings: Codable, Sendable {
                 webSigningSavesLocally: Bool = true,
                 webSigningOutputPath: String = "",
                 webSigningRetentionDays: Int = 0,
-                batchASiCPackaging: BatchASiCPackaging = .perDocument) {
+                batchASiCPackaging: BatchASiCPackaging = .perDocument,
+                zakoRecordFirstPreview: Bool = false) {
         self.aiMode = aiMode
         self.aiPrompt = aiPrompt
         self.omlxURL = omlxURL
@@ -239,6 +244,7 @@ public struct AppSettings: Codable, Sendable {
         self.webSigningOutputPath = webSigningOutputPath
         self.webSigningRetentionDays = webSigningRetentionDays
         self.batchASiCPackaging = batchASiCPackaging
+        self.zakoRecordFirstPreview = zakoRecordFirstPreview
     }
 
     public init(from decoder: Decoder) throws {
@@ -297,6 +303,7 @@ public struct AppSettings: Codable, Sendable {
         self.webSigningRetentionDays = try container.decodeIfPresent(Int.self, forKey: .webSigningRetentionDays) ?? 0
         self.batchASiCPackaging = (try? container.decodeIfPresent(
             BatchASiCPackaging.self, forKey: .batchASiCPackaging)) ?? .perDocument
+        self.zakoRecordFirstPreview = try container.decodeIfPresent(Bool.self, forKey: .zakoRecordFirstPreview) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -332,6 +339,7 @@ public struct AppSettings: Codable, Sendable {
         try container.encode(webSigningOutputPath, forKey: .webSigningOutputPath)
         try container.encode(webSigningRetentionDays, forKey: .webSigningRetentionDays)
         try container.encode(batchASiCPackaging, forKey: .batchASiCPackaging)
+        try container.encode(zakoRecordFirstPreview, forKey: .zakoRecordFirstPreview)
     }
 
     public var availableTSAServers: [TimestampAuthority] {
