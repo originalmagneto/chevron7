@@ -129,7 +129,30 @@ public final class ConversionEvidenceService {
                 simple.getIndication(id) == Indication.INDETERMINATE
                         && anchorCountry(signature).map(unavailable::contains).orElse(false));
         facts.addProperty("etsiSignatureReportBase64", slimReport(etsi, id));
+        facts.add("timestamps", timestamps(signature, simple));
         return facts;
+    }
+
+    /// Timestamps that prove the signature existed (DSS: produced after its creation), with
+    /// what the clause's TimeStamp block needs: issuer CN, time, state and qualification.
+    private static JsonArray timestamps(SignatureWrapper signature, SimpleReport simple) {
+        var timestamps = new JsonArray();
+        for (var timestamp : signature.getAllTimestampsProducedAfterSignatureCreation()) {
+            var entry = new JsonObject();
+            entry.addProperty("id", timestamp.getId());
+            if (timestamp.getType() != null) entry.addProperty("type", timestamp.getType().name());
+            if (timestamp.getProductionTime() != null) {
+                entry.addProperty("productionTime", timestamp.getProductionTime().toInstant().toString());
+            }
+            var certificate = timestamp.getSigningCertificate();
+            if (certificate != null) entry.addProperty("producerCommonName", certificate.getCommonName());
+            var indication = simple.getIndication(timestamp.getId());
+            if (indication != null) entry.addProperty("indication", indication.name());
+            var qualification = simple.getTimestampQualification(timestamp.getId());
+            if (qualification != null) entry.addProperty("qualification", qualification.name());
+            timestamps.add(entry);
+        }
+        return timestamps;
     }
 
     static void addCertificateFacts(JsonObject facts, CertificateWrapper certificate) {
