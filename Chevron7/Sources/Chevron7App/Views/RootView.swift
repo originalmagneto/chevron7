@@ -25,6 +25,9 @@ struct RootView: View {
 
     @Bindable var model: Chevron7AppModel
     @State private var selection: SidebarSection = .signing
+    /// Remembered per window, as the split view's own autosave did; changed only without
+    /// animation (`Binding.sidebarVisibility`).
+    @SceneStorage("main.sidebarHidden") private var sidebarHidden = false
     @State private var queueItemToDelete: UUID?
     @State private var showQueueDeleteConfirmation = false
     @AppStorage("sidebar.signedDocumentsExpanded") private var signedDocumentsExpanded = true
@@ -220,7 +223,7 @@ struct RootView: View {
     private var zakoStore: ZakoSessionStore { model.zakoStore }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarHidden.sidebarVisibility) {
             List(selection: $selection) {
                 Section("Kancelária") {
                     Label(SidebarSection.signing.rawValue, systemImage: SidebarSection.signing.symbol)
@@ -680,8 +683,10 @@ struct RootView: View {
         await signingStore.prepareBatch(ids: ids)
     }
 
+    /// Not `NSSplitViewController.toggleSidebar(_:)`, which animates the collapse
+    /// (`Binding.sidebarVisibility`).
     private func toggleSidebar() {
-        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+        $sidebarHidden.sidebarVisibility.wrappedValue = sidebarHidden ? .all : .detailOnly
     }
 }
 
