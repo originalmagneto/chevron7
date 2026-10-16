@@ -210,7 +210,15 @@ final class TimestampClientTests: XCTestCase {
         XCTAssertFalse(TimestampAuthority.xadesSubstitutionNote.contains("\u{2014}"))
     }
 
-    /// ZaKo's list for its XAdES containers: Sectigo first, never BOSA, every one qualified.
+    /// ZaKo's list: the XAdES list in its order, then BOSA alone as the last resort.
+    func testZaKoTriesBOSAOnlyAfterEveryOtherAuthority() {
+        let xades = TimestampAuthority.xadesQualifiedURLs.map(\.absoluteString)
+        let zako = TimestampAuthority.zakoQualifiedURLs.map(\.absoluteString)
+        XCTAssertEqual(zako, xades + [TimestampAuthority.bosaURL])
+        XCTAssertTrue(Set(zako).isSubset(of: Set(TimestampAuthority.qualifiedURLs.map(\.absoluteString))))
+    }
+
+    /// The XAdES list for the main window and the local signer: Sectigo first, never BOSA, every one qualified.
     func testTheXAdESListStartsWithSectigoAndLeavesOutBOSA() {
         let urls = TimestampAuthority.xadesQualifiedURLs.map(\.absoluteString)
         XCTAssertEqual(urls.first, TimestampAuthority.sectigoQualifiedURL)

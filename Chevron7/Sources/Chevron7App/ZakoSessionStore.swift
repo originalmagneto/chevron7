@@ -1486,8 +1486,9 @@ final class ZakoSessionStore {
                 timestampServers = nil
                 tsaURL = stampsSignatures ? settings.timestampAuthority(signsXAdES: true).url : nil
             } else {
-                // Sectigo first and never BOSA: slovensko.sk does not see a BOSA timestamp in XAdES.
-                let qualified = TimestampAuthority.xadesQualifiedURLs.map(\.absoluteString)
+                // Sectigo first, BOSA only when every other authority fails: slovensko.sk does not
+                // see a BOSA timestamp in XAdES, but a conversion must not stop for an outage.
+                let qualified = TimestampAuthority.zakoQualifiedURLs.map(\.absoluteString)
                 guard let first = qualified.first else { throw SigningError.timestampFailed }
                 timestampServers = qualified
                 tsaURL = first
