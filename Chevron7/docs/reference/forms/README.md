@@ -2,7 +2,9 @@
 
 Verbatim files from the slovensko.sk form packages that Chevron7 references in every
 XMLDataContainer it builds: record 1.0 (`ConversionRecordOfPaperToElectronicDocument`) and
-clause 1.3 (`ConversionCertificateOfPaperToElectronicDocument`). Sources, hashes and the digest
+clause 1.3 (`ConversionCertificateOfPaperToElectronicDocument`), plus record 1.2
+(`ConversionRecordOfPaperToElectronicDocument_2021.sk`), the record form from 1. 1. 2027, whose
+official schema libxml2 compiles as is (no validation copy). Sources, hashes and the digest
 rule are in `provenance.json`. The presentation file is the package manifest's
 `media-destination="sign"` entry (record: TXT; clause: the HTML one).
 

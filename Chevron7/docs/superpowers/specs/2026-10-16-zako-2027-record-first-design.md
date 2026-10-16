@@ -25,9 +25,9 @@ clause 1.3; build the clause only after EZZK reports the record processed.
   the preview and the mode.
 - Refusal switch: `ZakoRecordFirstPolicy.refusesOutsideDemo` (owner constant, `false`). When true,
   a record-first conversion outside Demo stops before a number is allocated, with
-  `ZakoRecordFirstPolicy.refusalMessage`. Checked on a preliminary server time before the number,
-  and again on the conversion time (a conversion crossing midnight is already stopped by the
-  same-day evidence number rule).
+  `ZakoRecordFirstPolicy.refusalMessage`. Checked by the Mac's clock before the number is
+  allocated, and again on the conversion time from EZZK, which decides (a conversion crossing
+  midnight is already stopped by the same-day evidence number rule).
 
 ## Record form 1.2
 
@@ -69,7 +69,7 @@ clause 1.3; build the clause only after EZZK reports the record processed.
    the number in the pool for the next attempt. The row is held through the **send**
    (`EZZKStatusChecker.submit(id:)` right after release).
 7. **Wait** until EZZK reports the row processed: `EZZKStatusChecker.verify(id:)` every 30 s
-   (`ZakoSessionStore.recordFirstPollInterval`), up to 30 minutes, showing
+   (`ZakoSessionStore.recordFirstPollInterval`), up to 30 minutes (`recordFirstWaitLimit`), showing
    "Čakám, kým EZZK spracuje záznam…" with a "Zastaviť čakanie" button (the wait otherwise holds
    the window, since authorizing disables reset). A busy row (the periodic check has it) is
    retried; `.queuedForSubmission` (EZZK did not know the number) is sent again; `.outcomeUnknown`
@@ -84,6 +84,15 @@ EZZK, or the client signature. A new document drops it. The record and its numbe
 signed or allocated twice for one conversion. If the app quits while waiting, the row stays in
 the register (`EZZKStatusChecker` keeps checking it) but no client container exists; the Done
 screen and the register say so (`EvidenceRecord.deliveredFileName` is nil).
+
+After EZZK refuses the record, or its row or signature is gone, `startNewRecordAttempt` gives the
+next attempt a new register row and a new evidence number (EZZK may have consumed the old one);
+the refused row stays in the Register. The client signature holds the row
+(`EZZKStatusChecker.hold`), so it cannot be deleted while the conversion is completed.
+
+Known limit: `RecordFirstPending` lives in memory. If Chevron7 quits after EZZK processed the
+record and before the client signature, the row stays `.processed` without a delivered file and
+the conversion cannot be resumed; the advocate converts again with a new number.
 
 Not offered under record-first: the phone (it cannot sign the record), and a row whose record
 signature failed (`.recordUnsigned`) cannot continue; the advocate starts again.

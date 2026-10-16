@@ -58,8 +58,8 @@ public struct P2EConformanceProfile: Sendable, Equatable {
         self.evidenceURIBase = evidenceURIBase
     }
 
-    /// Official current P2E clause target. The published CEZZK record remains
-    /// v1.0 until the official v1.2 record form takes effect on 2027-01-01.
+    /// Official current P2E clause target. The CEZZK record is v1.0 until 2027-01-01 and
+    /// v1.2 from then (`FormPackRepository.record12Unverified`, `OfficialForm.record_1_2`).
     public static let targetV1_3 = P2EConformanceProfile(
         xdcfNamespace: "http://data.gov.sk/def/container/xmldatacontainer+xml/1.1",
         clauseNamespace: "http://schemas.gov.sk/form/50349287.ConversionCertificateOfPaperToElectronicDocument.sk/1.3",

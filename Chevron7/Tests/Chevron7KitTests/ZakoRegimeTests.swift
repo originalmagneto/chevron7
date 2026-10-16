@@ -49,6 +49,18 @@ final class ZakoRegimeTests: XCTestCase {
         XCTAssertFalse(ZakoRecordFirstPolicy.refusesOutsideDemo)
     }
 
+    func testPreviewSettingIsOffByDefaultAndRoundTrips() throws {
+        XCTAssertFalse(AppSettings().zakoRecordFirstPreview)
+        var settings = AppSettings()
+        settings.zakoRecordFirstPreview = true
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertTrue(decoded.zakoRecordFirstPreview)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(AppSettings())) as? [String: Any])
+        json.removeValue(forKey: "zakoRecordFirstPreview")
+        let older = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertFalse(older.zakoRecordFirstPreview, "settings saved by an older build keep the preview off")
+    }
+
     func testFormPacksSplitAtTheSwitch() throws {
         let repository = FormPackRepository()
         let old = try repository.pack(for: .paperToElectronic, at: before)
