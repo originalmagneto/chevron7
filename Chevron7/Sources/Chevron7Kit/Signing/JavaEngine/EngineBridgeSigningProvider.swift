@@ -230,6 +230,21 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         }
     }
 
+    public func conversionEvidence(for fileURL: URL) async throws -> ConversionEvidence {
+        let canonical = EnginePaths.canonical(fileURL)
+        guard FileManager.default.fileExists(atPath: canonical.path) else {
+            throw SigningFailure.engine("Dokument nie je dostupný.")
+        }
+        do {
+            return try await Self.withTimeLimit(validationTimeout) { [engine] in
+                try await engine.conversionEvidence(file: PDFItemDescriptor(id: "evidence", sourceURL: canonical))
+            }
+        } catch CLIProcessFailure.timedOut {
+            await engine.stopValidation()
+            throw SigningFailure.engine("Overenie podpisov trvalo príliš dlho. Skúste overenie znova.")
+        }
+    }
+
     private func signatureTree(
         in fileURL: URL,
         run: @Sendable ([PDFItemDescriptor]) async throws -> [PDFInspection]
