@@ -84,7 +84,8 @@ struct EvidenceDashboardView: View {
                     }
 
                     TableColumn("Strany / Listy") { record in
-                        Text("\(record.totalPages) / \(record.totalSheets)")
+                        Text(record.direction == .electronicToElectronic
+                             ? "E→E" : "\(record.totalPages) / \(record.totalSheets)")
                             .font(.caption.monospacedDigit())
                             .contextMenu { recordContextMenu(for: record) }
                     }
@@ -415,6 +416,30 @@ enum RecordContainerExport {
     }
 }
 
+/// "Uložiť správu o overení…" in the Register: the E→E validation evidence kept in
+/// `Evidence/validation/`, unchanged (a qualified service's report keeps its seal).
+@MainActor
+enum ValidationEvidenceExport {
+    static func save(_ record: EvidenceRecord, from store: LocalEvidenceStore,
+                     onError: @escaping (String) -> Void) {
+        guard let data = store.validationEvidenceData(for: record), let path = record.validationEvidencePath else {
+            onError("Správa o overení sa v registri nenašla.")
+            return
+        }
+        let stem = (record.originalName as NSString).deletingPathExtension
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(stem).overenie.\((path as NSString).pathExtension)"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url, options: [.atomic])
+            } catch {
+                onError("Správu o overení sa nepodarilo uložiť: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 struct OverdueDot: View {
     var body: some View {
         Circle()
@@ -551,6 +576,16 @@ struct RecordDetailView: View {
                         Label("Uložiť záznam…", systemImage: "square.and.arrow.down")
                     }
                     .help("Uložiť podpísaný záznam o konverzii (ASiC-E), ktorý sa odosiela do EZZK")
+                }
+
+                if record.validationEvidencePath != nil {
+                    Button {
+                        actionMessage = nil
+                        ValidationEvidenceExport.save(record, from: settingsStore.evidenceStore) { actionMessage = $0 }
+                    } label: {
+                        Label("Uložiť správu o overení…", systemImage: "checkmark.seal")
+                    }
+                    .help("Uložiť výsledok overenia podpisov pôvodného dokumentu (E→E)")
                 }
 
                 Button(role: .destructive) {
@@ -694,8 +729,13 @@ struct RecordDetailView: View {
             row("Evidenčné číslo", record.evidenceNumber ?? "nezískané")
             row("Osvedčujúca osoba", record.performingPersonName.isEmpty ? "neurčená" : record.performingPersonName)
             row("Nový dokument", record.newDocumentName)
-            row("Strany / listy / prvky",
-                "\(record.totalPages) strán / \(record.totalSheets) listov / \(record.securityElementCount) prvkov")
+            if record.direction == .electronicToElectronic {
+                row("Druh konverzie", "Z elektronickej do elektronickej podoby")
+                row("Overenie podpisov", record.validationEvidenceSource ?? "neuložené")
+            } else {
+                row("Strany / listy / prvky",
+                    "\(record.totalPages) strán / \(record.totalSheets) listov / \(record.securityElementCount) prvkov")
+            }
             fingerprintRow(record)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

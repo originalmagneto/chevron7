@@ -202,6 +202,24 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         })]
     }
 
+    /// Guaranteed conversion (E→E): the trusted validation plus the evidence the clause and
+    /// record carry, on the validation session like VALIDATE.
+    func conversionEvidence(file: PDFItemDescriptor) async throws -> ConversionEvidence {
+        let requestID = UUID().uuidString
+        let request = MachineV2Request(protocolVersion: 2, requestID: requestID, operation: .evidence, payload: [
+            "files": .array([machineFile(id: file.id, sourceURL: file.sourceURL,
+                                         targetURL: Self.unusedTarget(for: file.sourceURL))])
+        ])
+        let events = try await validationSession.send(SecureMachineV2Request(envelope: request),
+                                                      configuration: configuration)
+        guard let event = events.last(where: {
+            $0.type == .evidenceCompleted && $0.requestID == requestID && $0.fileID == file.id
+        }) else {
+            throw SigningFailure.engine("Overenie podpisov pre zaručenú konverziu sa nepodarilo.")
+        }
+        return try ConversionEvidence.decode(payload: event.payload)
+    }
+
     /// The helper keeps running a validation the app gave up on and answers the session's
     /// requests one after another, so the timed-out helper is ended and the next validation
     /// starts a fresh one. Other validations still waiting on it fail as cancelled.
@@ -422,7 +440,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                     continuation.yield(.failed(fileID, .engine(message)))
                 }
             case .requestStarted, .certificatesAvailable, .inspectionCompleted, .previewCompleted,
-                    .validationCompleted, .requestCompleted, .requestFailed:
+                    .validationCompleted, .evidenceCompleted, .requestCompleted, .requestFailed:
                 break
             }
         }

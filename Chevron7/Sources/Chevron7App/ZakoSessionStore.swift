@@ -9,9 +9,26 @@ import Chevron7Kit
 @MainActor
 @Observable
 final class ZakoSessionStore {
-    enum Step: Int, CaseIterable { case intake = 0, analysis = 1, attestation = 2, authorize = 3, done = 4 }
+    enum Step: Int, CaseIterable { case intake = 0, analysis = 1, attestation = 2, authorize = 3, done = 4, verification = 5 }
 
     var step: Step = .intake
+    /// Paper to electronic (scan, analysis) or electronic to electronic (verification of the
+    /// client's signatures); chosen at intake and kept for the app run.
+    var direction: ConversionDirection = .paperToElectronic
+    /// E→E: the original read from its bytes and the engine's evidence (`ZakoE2EFlow.swift`).
+    var electronicOriginal: ElectronicOriginal?
+    var e2eDecision: E2EVerificationGate.Decision?
+    var isVerifying = false
+    var verificationError: String?
+    var undeterminedConfirmed = false
+    var qualifiedReport: QualifiedValidationReport?
+    var qualifiedReportConfirmed = false
+    var qualifiedReportError: String?
+    /// E→E: veraPDF refused the vector conversion; the advocate may approve the raster one.
+    var rasterConversionOffered = false
+    var rasterConversionApproved = false
+    /// E→E conversion of a PDF that may not stay byte for byte; tests replace the engine.
+    @ObservationIgnored var pdfaFromSignedRunner = PdfaFromSignedRunner()
     var sourceURL: URL?
     var document: PDFDocument?
     var documentData: Data?
@@ -266,9 +283,9 @@ final class ZakoSessionStore {
     private var evidenceRequestID: UUID?
     /// Moves the keyboard to the eID client's BOK window while the engine waits for it.
     @ObservationIgnored var middlewareInput: any MiddlewareInputHandoff = EIDKeyboardHandoff.shared
-    private var sourceAccessIsActive = false
-    private var outputDirectoryOverride: URL?
-    private var sourceNameOverride: String?
+    var sourceAccessIsActive = false
+    var outputDirectoryOverride: URL?
+    var sourceNameOverride: String?
     var profilePersister: ((AdvocateProfile) -> Void)?
     private(set) var currentRecordID = UUID()
 
@@ -1401,6 +1418,15 @@ final class ZakoSessionStore {
             lastError = Self.recordFirstMobileMessage
             return
         }
+        if direction == .electronicToElectronic {
+            // E→E has no record-first path yet: refused before an evidence number is spent.
+            if expectedRegime.regime == .recordFirst {
+                lastError = Self.e2eRecordFirstMessage
+                return
+            }
+            await authorizeElectronicOriginal(viaMobile: viaMobile, ezzkMode: ezzkMode)
+            return
+        }
         // The number is allocated here, after the card and its MQC, right before the
         // signature: never for a conversion that is not signed, so none lapses at midnight.
         if needsFreshEvidenceNumber {
@@ -1771,7 +1797,7 @@ final class ZakoSessionStore {
     /// submission coordinator's rules (late rows marked, unknown outcomes looked up first,
     /// a row only ever sent to the EZZK that allocated its number) and keeps the Register
     /// and the periodic check off the row meanwhile.
-    private func sendRecord(_ id: UUID) async {
+    func sendRecord(_ id: UUID) async {
         apply(await settingsStore.statusChecker.submit(id: id))
     }
 
@@ -1905,6 +1931,7 @@ func resetSession(keepingProfile: Bool) {
             detail: "Kontrola podpisov ešte neprebehla.")
         reviewUpdatedAt = nil
         recordFirstPending = nil
+        resetElectronicOriginal()
         currentRecordID = UUID()
     }
 

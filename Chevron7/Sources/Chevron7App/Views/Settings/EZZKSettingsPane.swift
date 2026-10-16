@@ -45,6 +45,10 @@ struct EZZKSettingsPane: View {
             if showAdvanced || previewActive {
                 recordFirstPreviewSection(showsBadge: !showAdvanced)
             }
+            let validationActive = SettingsAdvancedState.qualifiedValidationIsActive(settingsStore.settings)
+            if showAdvanced || validationActive {
+                QualifiedValidationSection(settingsStore: settingsStore, showsBadge: !showAdvanced)
+            }
             if showAdvanced {
                 if !controller.isDemoMode {
                     lookupSection

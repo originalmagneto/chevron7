@@ -2065,6 +2065,61 @@ class MachineSigningServiceTest {
         assertTrue(referencesFile(Objects.requireNonNull(signature), "dokument.pdf"), signature);
     }
 
+    /// ZaKo E→E keeps a client's signed PDF byte for byte as the new document and signs it
+    /// together with the clause XDC: two data objects, the client's PAdES untouched inside the
+    /// PDF, one new container signature referencing both.
+    @Test
+    void signsAnAlreadySignedPdfWithAClauseAsTwoDataObjectsThroughTheService() throws Exception {
+        var writer = new RecordingWriter();
+        var source = Files.copy(Path.of(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/sample_signed.pdf").getFile()),
+                temporaryDirectory.resolve("zmluva.pdf")).toRealPath();
+        var sourceBytes = Files.readAllBytes(source);
+        var attachment = Files.writeString(temporaryDirectory.resolve("260923-TEST.xml.xdcf"),
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><XMLDataContainer xmlns=\"http://data.gov.sk/def/container/xmldatacontainer+xml/1.1\"/>")
+                .toRealPath();
+        var target = target("zmluva.asice");
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(MachineSigningServiceTest.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+        var key = new SigningKey(token, token.getKeys().get(0));
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) ->
+                MachineSigningService.DefaultSigningSession.signingJob(input.sourceContent(), input.file().source(),
+                        new MachineFileResponder(input.staging(), completed), settings, null, input.attachments())
+                        .signWithKeyAndRespond(key)),
+                new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+        service.sign("request-1", new SignRequest("fake", "123", "1234".toCharArray(), "XAdES_BASELINE_B",
+                new QualifiedTimestampRequest(false, List.of()),
+                List.of(new MachineFile("one", source.toString(), target.toString(), null, List.of(attachment.toString())))));
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes(), writer.serialized());
+        byte[] embedded = null;
+        var signatureFiles = new ArrayList<String>();
+        try (var zip = new ZipInputStream(Files.newInputStream(target))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                var content = zip.readAllBytes();
+                if (entry.getName().equals("zmluva.pdf")) embedded = content;
+                if (entry.getName().startsWith("META-INF/signatures")) {
+                    signatureFiles.add(new String(content, java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+        }
+        assertArrayEquals(sourceBytes, embedded);
+        assertEquals(1, signatureFiles.size());
+        assertTrue(referencesFile(signatureFiles.getFirst(), "zmluva.pdf"), signatureFiles.getFirst());
+        assertTrue(referencesFile(signatureFiles.getFirst(), "260923-TEST.xml.xdcf"), signatureFiles.getFirst());
+        assertTrue(MachineInspectionService.signaturesCoverDocument(Files.readAllBytes(target), sourceBytes));
+        var inner = eu.europa.esig.dss.validation.SignedDocumentValidator.fromDocument(
+                new eu.europa.esig.dss.model.InMemoryDocument(embedded));
+        inner.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
+        assertEquals(1, inner.getSignatures().size());
+    }
+
     /// The relaxed previous-signature check never lets a container around another document
     /// through: the signed source must be the signed data object, byte for byte.
     @Test

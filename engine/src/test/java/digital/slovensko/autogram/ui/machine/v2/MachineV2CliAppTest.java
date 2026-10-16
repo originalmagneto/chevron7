@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -177,6 +178,31 @@ class MachineV2CliAppTest {
         var nested = validation.getAsJsonArray("documents").get(0).getAsJsonObject().getAsJsonObject("nested");
         assertEquals("PDF", nested.get("kind").getAsString());
         assertEquals(1, nested.getAsJsonArray("signatures").size());
+    }
+
+    @Test
+    void evidenceReturnsTheTreeAndTheConversionEvidence() throws Exception {
+        var source = Files.write(temporaryDirectory.resolve("zmluva.pdf"),
+                digital.slovensko.autogram.ui.machine.TestContainers.resource("sample_signed.pdf"));
+        var input = "{\"protocolVersion\":2,\"requestId\":\"evidence\",\"operation\":\"EVIDENCE\",\"payload\":{\"files\":[{\"id\":\"original\",\"source\":\""
+                + source + "\",\"target\":\"/selected/zmluva.pdf\"}]}}\n";
+        var output = new StringWriter();
+
+        var code = MachineV2CliApp.start(commandLine(), new StringReader(input), new PrintWriter(output),
+                new PrintWriter(new StringWriter()), new MachineDriverService(), new MachineInspectionService(),
+                MachineInspectionService.forTrustedValidation(), () -> { });
+
+        assertEquals(0, code, output.toString());
+        var payload = Arrays.stream(output.toString().strip().split("\\n"))
+                .map(JsonParser::parseString).map(element -> element.getAsJsonObject())
+                .filter(event -> "evidence.completed".equals(event.get("type").getAsString()))
+                .findFirst().orElseThrow().getAsJsonObject("payload");
+        assertEquals(1, payload.getAsJsonArray("signatures").size());
+        assertEquals(1, payload.getAsJsonObject("evidence").getAsJsonArray("signatures").size());
+        assertTrue(payload.getAsJsonObject("evidence").has("pdf"));
+        // The tree and the evidence come from two validators of the same bytes; Swift joins them by id.
+        assertEquals(payload.getAsJsonArray("signatures").get(0).getAsJsonObject().get("id").getAsString(),
+                payload.getAsJsonObject("evidence").getAsJsonArray("signatures").get(0).getAsJsonObject().get("id").getAsString());
     }
 
     private static org.apache.commons.cli.CommandLine commandLine() throws Exception {

@@ -11,6 +11,7 @@ enum MachineV2Operation: String, Codable, Sendable, Equatable {
     case sign = "SIGN"
     case timestamp = "TIMESTAMP"
     case validate = "VALIDATE"
+    case evidence = "EVIDENCE"
 
     var requiresToken: Bool {
         self == .certificates || self == .sign
@@ -66,6 +67,7 @@ enum MachineV2EventType: String, Codable, Sendable, Equatable {
     case inspectionCompleted = "inspection.completed"
     case previewCompleted = "preview.completed"
     case validationCompleted = "validation.completed"
+    case evidenceCompleted = "evidence.completed"
     case fileSigningStarted = "file.signingStarted"
     case fileProgress = "file.progress"
     case fileCompleted = "file.completed"

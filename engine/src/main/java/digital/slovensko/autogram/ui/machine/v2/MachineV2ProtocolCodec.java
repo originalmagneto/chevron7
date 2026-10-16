@@ -108,7 +108,8 @@ enum MachineV2Operation {
     CERTIFICATES,
     SIGN,
     TIMESTAMP,
-    VALIDATE;
+    VALIDATE,
+    EVIDENCE;
 
     static MachineV2Operation parse(String value) {
         try {

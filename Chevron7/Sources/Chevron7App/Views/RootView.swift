@@ -560,6 +560,8 @@ struct RootView: View {
                 return "vstupný dokument"
             case .analysis:
                 return "krok 2 z 5: overenie originálu"
+            case .verification:
+                return "krok 2 z 5: overenie podpisov"
             case .attestation:
                 return "krok 3 z 5: osvedčovacia doložka"
             case .authorize:

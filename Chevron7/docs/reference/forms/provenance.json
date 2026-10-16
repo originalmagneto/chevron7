@@ -15,19 +15,68 @@
     "clause-1.3": {
       "url": "https://www.slovensko.sk/static/eform/dataset/50349287.ConversionCertificateOfPaperToElectronicDocument.sk/1.3.zip",
       "sha256": "5bc8c120c1970c623ddaf6d7e289a192879664586cf7a445d0d6f2a5257eb6ab"
+    },
+    "record-e2e-1.0": {
+      "url": "https://www.slovensko.sk/static/eform/dataset/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0.zip",
+      "sha256": "c5d5650b75127dac7af0fcae78164bb44058600efb497dabf29a1a0ab84773bb",
+      "retrieved_at": "2026-10-16"
+    },
+    "clause-e2e-1.3": {
+      "url": "https://www.slovensko.sk/static/eform/dataset/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3.zip",
+      "sha256": "d2da1181950ee4047c3ea0c59507db646974bcfd91ab2ec60dd09e2c61fcbcd1",
+      "retrieved_at": "2026-10-16"
     }
   },
   "files": {
-    "record-1.0/schema.xsd": { "package_path": "schema.xsd", "sha256": "7b00f00c0e910dccc61f447681ba5b3e6a719650c49f400ba2b7cc8ace582e0e" },
+    "record-1.0/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "7b00f00c0e910dccc61f447681ba5b3e6a719650c49f400ba2b7cc8ace582e0e"
+    },
     "record-1.0/schema.validation.xsd": {
       "derived_from": "record-1.0/schema.xsd",
       "sha256": "f8984ce550ee15e64c9a628deafe069be0a6c4bea23a2d9527a0b9e03195a825",
       "derivation": "Only the IdentifierValueType pattern rewritten from https:\\/\\/data\\.gov\\.sk\\/id\\/legal-subject\\/([0-9]{8}|[0-9]{12}) to https://data\\.gov\\.sk/id/legal-subject/([0-9]{8}|[0-9]{12}) because libxml2 rejects the escaped slashes. Used only for local validation; XMLDataContainer references and digests stay on schema.xsd."
     },
-    "record-1.0/form103.sb.xslt": { "package_path": "Content/form103.sb.xslt", "sha256": "38b980025dee6c2e176e0ca6415b242355be3d3425ded521902e34b7dd76391d" },
-    "record-1.2/schema.xsd": { "package_path": "schema.xsd", "sha256": "83db7cf4c90221ceb478c402c37d42b79c75262d8594416baee408a79aa4bfaf" },
-    "record-1.2/form103.sb.xslt": { "package_path": "Content/form103.sb.xslt", "sha256": "ecbebb7d8d81588f75a95fb0fee11e964df6acedbf33fe829274458d69c73a38" },
-    "clause-1.3/schema.xsd": { "package_path": "schema.xsd", "sha256": "5c4de06e0a115943cc3ef3a01cbd1388e495acfb2c66c7e7fe4c5769f383be8e" },
-    "clause-1.3/form.2.html2.xslt": { "package_path": "Content/form.2.html2.xslt", "sha256": "86d745d7b4b1cdd1d8cb172270d8efc1cb91e0917a1419c878d783deb2b5078f" }
+    "record-1.0/form103.sb.xslt": {
+      "package_path": "Content/form103.sb.xslt",
+      "sha256": "38b980025dee6c2e176e0ca6415b242355be3d3425ded521902e34b7dd76391d"
+    },
+    "record-1.2/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "83db7cf4c90221ceb478c402c37d42b79c75262d8594416baee408a79aa4bfaf"
+    },
+    "record-1.2/form103.sb.xslt": {
+      "package_path": "Content/form103.sb.xslt",
+      "sha256": "ecbebb7d8d81588f75a95fb0fee11e964df6acedbf33fe829274458d69c73a38"
+    },
+    "clause-1.3/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "5c4de06e0a115943cc3ef3a01cbd1388e495acfb2c66c7e7fe4c5769f383be8e"
+    },
+    "clause-1.3/form.2.html2.xslt": {
+      "package_path": "Content/form.2.html2.xslt",
+      "sha256": "86d745d7b4b1cdd1d8cb172270d8efc1cb91e0917a1419c878d783deb2b5078f"
+    },
+    "record-e2e-1.0/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "6dea06ea52b81eb8d7309c336fd4695ec40cdc992572a3594a840f6a79bb3816"
+    },
+    "record-e2e-1.0/schema.validation.xsd": {
+      "derived_from": "record-e2e-1.0/schema.xsd",
+      "sha256": "17f741456c77414c48c30d06f8c4d34b7164d512924d2778361f3cd897c2e3fc",
+      "derivation": "The same IdentifierValueType rewrite as record-1.0/schema.validation.xsd, for libxml2. Used only for local validation; XMLDataContainer references and digests stay on schema.xsd."
+    },
+    "record-e2e-1.0/form101.sb.xslt": {
+      "package_path": "Content/form101.sb.xslt",
+      "sha256": "9c6665ab54709ab1a712133de259f2defa442a4336d2b90aa0e59035b22147cb"
+    },
+    "clause-e2e-1.3/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "ff94c8acf92c3e39dca00bbf7fe79369f4820c961e29ad39e2b82f4373458331"
+    },
+    "clause-e2e-1.3/form.19.html2.xslt": {
+      "package_path": "Content/form.19.html2.xslt",
+      "sha256": "33fff925a885a34a2c22df0669041e1809f32b675e38418c3790806802c3363e"
+    }
   }
 }

@@ -443,6 +443,9 @@ public protocol QualifiedSigningProviding: Sendable {
     func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult
     /// The same tree validated against the EU trusted lists (informative validation).
     func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult
+    /// Guaranteed conversion (E→E): the validated tree plus the evidence the clause and the
+    /// record carry about the original's signatures.
+    func conversionEvidence(for fileURL: URL) async throws -> ConversionEvidence
     /// Ends a `sign` still in progress, so a signature the person gave up on stops holding
     /// the card; that `sign` then throws.
     func cancelSigning() async
@@ -483,6 +486,10 @@ extension QualifiedSigningProviding {
 
     public func validateSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         .failed("Plné overenie vyžaduje podpisový engine.")
+    }
+
+    public func conversionEvidence(for fileURL: URL) async throws -> ConversionEvidence {
+        throw SigningFailure.engine("Overenie pre zaručenú konverziu vyžaduje podpisový engine.")
     }
 
     public func inspectInputSignatures(in fileURL: URL) async -> InputSignatureInspectionResult {

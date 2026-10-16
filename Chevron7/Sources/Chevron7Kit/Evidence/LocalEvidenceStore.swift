@@ -94,6 +94,11 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var ezzkResultCode: Int?
     public var ezzkResultDescription: String?
     public var lastLookupAt: Date?
+    /// E→E: the validation evidence of the original's signatures, relative to the register
+    /// folder (`validation/<uuid>.<ext>`), read with `LocalEvidenceStore.validationEvidenceData(for:)`.
+    public var validationEvidencePath: String?
+    /// E→E: who produced that evidence, e.g. "Chevron7 (DSS 6.4)" or a qualified service's name.
+    public var validationEvidenceSource: String?
 
     public var evidenceURI: String? {
         guard let evidenceNumber, !evidenceNumber.isEmpty else { return nil }
@@ -295,6 +300,27 @@ public final class LocalEvidenceStore: @unchecked Sendable {
         let recordsFolder = folderURL.appendingPathComponent("records", isDirectory: true).standardizedFileURL
         let candidate = folderURL.appendingPathComponent(path).standardizedFileURL
         guard candidate.path.hasPrefix(recordsFolder.path + "/") else { return nil }
+        return try? Data(contentsOf: candidate)
+    }
+
+    /// Keeps the E→E validation evidence (the ETSI report of Chevron7's validation, or a
+    /// qualified validation service's sealed output) unchanged beside the records.
+    public func storeValidationEvidence(_ data: Data, fileExtension: String, for id: UUID) throws -> String {
+        let folder = folderURL.appendingPathComponent("validation", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let safeExtension = fileExtension.lowercased().filter { $0.isLetter || $0.isNumber }
+        let relativePath = "validation/\(id.uuidString).\(safeExtension.isEmpty ? "bin" : safeExtension)"
+        try data.write(to: folderURL.appendingPathComponent(relativePath), options: [.atomic])
+        return relativePath
+    }
+
+    /// Reads back the evidence stored by `storeValidationEvidence`; refuses any path outside
+    /// `<folder>/validation/`, as `recordContainerData(for:)` does for records.
+    public func validationEvidenceData(for record: EvidenceRecord) -> Data? {
+        guard let path = record.validationEvidencePath else { return nil }
+        let folder = folderURL.appendingPathComponent("validation", isDirectory: true).standardizedFileURL
+        let candidate = folderURL.appendingPathComponent(path).standardizedFileURL
+        guard candidate.path.hasPrefix(folder.path + "/") else { return nil }
         return try? Data(contentsOf: candidate)
     }
 

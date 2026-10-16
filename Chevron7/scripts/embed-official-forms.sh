@@ -17,6 +17,11 @@ files = [
     ("record12Presentation", forms / "record-1.2/form103.sb.xslt"),
     ("clauseSchema", forms / "clause-1.3/schema.xsd"),
     ("clausePresentation", forms / "clause-1.3/form.2.html2.xslt"),
+    ("recordE2ESchema", forms / "record-e2e-1.0/schema.xsd"),
+    ("recordE2EValidationSchema", forms / "record-e2e-1.0/schema.validation.xsd"),
+    ("recordE2EPresentation", forms / "record-e2e-1.0/form101.sb.xslt"),
+    ("clauseE2ESchema", forms / "clause-e2e-1.3/schema.xsd"),
+    ("clauseE2EPresentation", forms / "clause-e2e-1.3/form.19.html2.xslt"),
 ]
 def digest(path):
     stripped = re.sub(rb"<!--.*?-->", b"", path.read_bytes(), flags=re.S)
@@ -36,7 +41,7 @@ out = [
 ]
 for name, path in files:
     out.append(f'    static let {name} = Data(base64Encoded: "{base64.b64encode(path.read_bytes()).decode()}")!')
-    if name != "recordValidationSchema":
+    if not name.endswith("ValidationSchema"):
         out.append(f'    static let {name}Digest = "{digest(path)}"')
 out.append("}")
 target = root / "Sources/Chevron7Kit/Attestation/Forms/OfficialFormFiles.swift"

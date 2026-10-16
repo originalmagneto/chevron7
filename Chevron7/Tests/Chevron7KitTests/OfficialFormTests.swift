@@ -36,6 +36,31 @@ final class OfficialFormTests: XCTestCase {
         XCTAssertEqual(clause.presentationMediaDestination, "HTML")
     }
 
+    func testE2EIdentifiers() {
+        let clause = OfficialForm.clauseE2E_1_3
+        XCTAssertEqual(clause.identifier,
+                       "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3")
+        XCTAssertEqual(clause.schemaURI,
+                       "http://schemas.gov.sk/form/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3/form.xsd")
+        XCTAssertEqual(clause.presentationMediaDestination, "HTML")
+        XCTAssertTrue(String(decoding: clause.presentation, as: UTF8.self).contains("Osvedčujem, že tento elektronický dokument"))
+        let record = OfficialForm.recordE2E_1_0
+        XCTAssertEqual(record.identifier,
+                       "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0")
+        XCTAssertEqual(record.schemaURI,
+                       "https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument.sk/1.0/form.xsd")
+        XCTAssertEqual(record.presentationMediaDestination, "TXT")
+    }
+
+    func testE2ERecordValidationSchemaDiffersOnlyInTheIdentifierPattern() {
+        let official = String(decoding: OfficialForm.recordE2E_1_0.schema, as: UTF8.self).components(separatedBy: "\n")
+        let validation = String(decoding: OfficialForm.recordE2E_1_0.validationSchema, as: UTF8.self).components(separatedBy: "\n")
+        XCTAssertEqual(official.count, validation.count)
+        let changed = zip(official, validation).filter { $0 != $1 }
+        XCTAssertEqual(changed.count, 1)
+        XCTAssertTrue(changed.first?.1.contains("https://data\\.gov\\.sk/id/legal-subject/([0-9]{8}|[0-9]{12})") == true)
+    }
+
     func testRecordValidationSchemaDiffersOnlyInTheIdentifierPattern() throws {
         let official = String(decoding: OfficialForm.record_1_0.schema, as: UTF8.self).components(separatedBy: "\n")
         let validation = String(decoding: OfficialForm.record_1_0.validationSchema, as: UTF8.self).components(separatedBy: "\n")
@@ -58,6 +83,11 @@ final class OfficialFormTests: XCTestCase {
             ("record-1.2/form103.sb.xslt", OfficialForm.record_1_2.presentation),
             ("clause-1.3/schema.xsd", OfficialForm.clause_1_3.schema),
             ("clause-1.3/form.2.html2.xslt", OfficialForm.clause_1_3.presentation),
+            ("record-e2e-1.0/schema.xsd", OfficialForm.recordE2E_1_0.schema),
+            ("record-e2e-1.0/schema.validation.xsd", OfficialForm.recordE2E_1_0.validationSchema),
+            ("record-e2e-1.0/form101.sb.xslt", OfficialForm.recordE2E_1_0.presentation),
+            ("clause-e2e-1.3/schema.xsd", OfficialForm.clauseE2E_1_3.schema),
+            ("clause-e2e-1.3/form.19.html2.xslt", OfficialForm.clauseE2E_1_3.presentation),
         ]
         for (path, data) in embedded {
             let reference = try Data(contentsOf: formsDirectory.appendingPathComponent(path))
@@ -68,7 +98,7 @@ final class OfficialFormTests: XCTestCase {
     }
 
     func testStoredDigestsRecomputeFromTheEmbeddedFiles() throws {
-        for form in [OfficialForm.record_1_0, .record_1_2, .clause_1_3] {
+        for form in [OfficialForm.record_1_0, .record_1_2, .clause_1_3, .recordE2E_1_0, .clauseE2E_1_3] {
             XCTAssertEqual(try Self.canonicalDigest(form.schema), form.schemaDigestBase64, form.identifier)
             XCTAssertEqual(try Self.canonicalDigest(form.presentation), form.presentationDigestBase64, form.identifier)
         }

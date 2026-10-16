@@ -146,6 +146,9 @@ public struct AppSettings: Codable, Sendable {
     /// Runs ZaKo in the order and with the record form of 1. 1. 2027 before that date, in Demo
     /// and Testovacia evidencia only (`ZakoRegime.resolve`); production ignores it.
     public var zakoRecordFirstPreview: Bool
+    /// Qualified validation services the advocate contracted (vyhláška 70/2021 § 3 ods. 4);
+    /// an E→E conversion in Ostrá evidencia needs a sealed report from one of them.
+    public var qualifiedValidationServices: [QualifiedValidationService] = []
 
     public var avmBaseURLValue: URL {
         let trimmed = avmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -179,6 +182,7 @@ public struct AppSettings: Codable, Sendable {
         case webSigningSavesLocally, webSigningOutputPath, webSigningRetentionDays
         case batchASiCPackaging
         case zakoRecordFirstPreview
+        case qualifiedValidationServices
     }
 
     public init(aiMode: AIMode = .builtInOnDevice,
@@ -304,6 +308,8 @@ public struct AppSettings: Codable, Sendable {
         self.batchASiCPackaging = (try? container.decodeIfPresent(
             BatchASiCPackaging.self, forKey: .batchASiCPackaging)) ?? .perDocument
         self.zakoRecordFirstPreview = try container.decodeIfPresent(Bool.self, forKey: .zakoRecordFirstPreview) ?? false
+        self.qualifiedValidationServices = (try? container.decodeIfPresent(
+            [QualifiedValidationService].self, forKey: .qualifiedValidationServices)) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -340,6 +346,7 @@ public struct AppSettings: Codable, Sendable {
         try container.encode(webSigningRetentionDays, forKey: .webSigningRetentionDays)
         try container.encode(batchASiCPackaging, forKey: .batchASiCPackaging)
         try container.encode(zakoRecordFirstPreview, forKey: .zakoRecordFirstPreview)
+        try container.encode(qualifiedValidationServices, forKey: .qualifiedValidationServices)
     }
 
     public var availableTSAServers: [TimestampAuthority] {
