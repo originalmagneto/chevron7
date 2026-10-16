@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 import Foundation
+import OSLog
 import PDFKit
 import Chevron7Kit
 
@@ -82,6 +83,9 @@ extension ZakoSessionStore {
         let stem = sourceName ?? url.deletingPathExtension().lastPathComponent
         attestation.originalDocumentName = url.lastPathComponent
         attestation.newDocumentName = stem
+        // The clause and the record name the advocate from the active profile, as P→E does.
+        attestation.performingPerson = activeProfile()
+        attestation.usedDeviceDescription = E2EFormModel.defaultUsedDevice
         step = .verification
         await verifyElectronicOriginal()
     }
@@ -172,6 +176,40 @@ extension ZakoSessionStore {
             lastError = Self.e2eNeedsQualifiedValidationMessage
             return
         }
+        // § 36 ods. 4 písm. c): the new document, made before an evidence number is allocated so
+        // a failed conversion never costs one. A PDF/A without attachments stays byte for byte
+        // with the client's signatures; anything else becomes a new PDF/A-2b.
+        let newDocument: Data
+        switch original.plan {
+        case .keep:
+            newDocument = original.pdfData
+        case .convert:
+            analysisProgressText = "Konvertujem do PDF/A…"
+            do {
+                newDocument = try pdfaFromSignedRunner.convert(original.pdfData, title: attestation.newDocumentName,
+                                                                 raster: rasterConversionApproved)
+            } catch PdfaFromSignedRunner.Failure.notCompliant {
+                rasterConversionOffered = true
+                lastError = Self.rasterOfferMessage
+                return
+            } catch {
+                lastError = error.localizedDescription
+                return
+            }
+        }
+        let containerDocumentName = ConversionOutputNaming.containerDocumentName(
+            newDocumentName: attestation.newDocumentName,
+            fallback: attestation.originalDocumentName)
+        // Both forms are rendered and checked against the official schemas with a placeholder
+        // number before EZZK is asked for a real one, so a form error never costs a number.
+        if let issue = dryRunE2EForms(original: original, newDocument: newDocument,
+                                      containerDocumentName: containerDocumentName) {
+            lastError = issue.advice
+            if let detail = issue.technicalDetail {
+                Self.e2eLogger.error("E→E form dry run failed: \(detail, privacy: .public)")
+            }
+            return
+        }
         if needsFreshEvidenceNumber {
             analysisProgressText = "Získavam evidenčné číslo z EZZK…"
             attestation.evidenceNumber = nil
@@ -202,35 +240,23 @@ extension ZakoSessionStore {
             serverTimeUsed = conversionTime
             attestation.conversionExecutionDateTime = conversionTime
 
-            // § 36 ods. 4 písm. c): the new document. A PDF/A without attachments stays byte for
-            // byte with the client's signatures; anything else becomes a new PDF/A-2b.
-            let newDocument: Data
-            switch original.plan {
-            case .keep:
-                newDocument = original.pdfData
-            case .convert:
-                analysisProgressText = "Konvertujem do PDF/A…"
-                do {
-                    newDocument = try pdfaFromSignedRunner.convert(original.pdfData, title: attestation.newDocumentName,
-                                                                     raster: rasterConversionApproved)
-                } catch PdfaFromSignedRunner.Failure.notCompliant {
-                    rasterConversionOffered = true
-                    lastError = "Prevod do PDF/A nevytvoril platné PDF/A (zvyčajne pre písma, ktoré dokument nevkladá). Môžete použiť rastrový PDF/A: strany sa uložia ako obrázky a text sa nebude dať označiť."
-                    return
-                }
-            }
-
             analysisProgressText = "Vytváram osvedčovaciu doložku…"
-            let containerDocumentName = ConversionOutputNaming.containerDocumentName(
-                newDocumentName: attestation.newDocumentName,
-                fallback: attestation.originalDocumentName)
             let model = try E2EFormModel.make(original: original, attestation: attestation,
                                               newDocumentName: containerDocumentName, newDocumentData: newDocument,
                                               usedDevice: attestation.usedDeviceDescription,
                                               qualifiedReport: qualifiedReport?.data)
             let builder = E2EDeliveryBuilder()
-            let clause = try builder.clause(model)
-            let recordDelivery = try builder.record(model)
+            let clause: E2EDeliveryBuilder.Clause
+            let recordDelivery: ZakoRecordDelivery
+            do {
+                clause = try builder.clause(model)
+                recordDelivery = try builder.record(model)
+            } catch {
+                // Passed with the placeholder; the number stays in the pool for the next try.
+                let issue = E2EFormIssue.from(error)
+                lastError = issue.advice
+                return
+            }
 
             analysisProgressText = "Autorizujem kvalifikovaným podpisom…"
             if isCertificateTypePending {
@@ -363,6 +389,30 @@ extension ZakoSessionStore {
             step = .done
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    static let rasterOfferMessage = "Prevod do PDF/A nevytvoril platné PDF/A (zvyčajne pre písma, ktoré dokument nevkladá). Môžete použiť rastrový PDF/A: strany sa uložia ako obrázky a text sa nebude dať označiť."
+    static let e2eLogger = Logger(subsystem: "app.slovensko.chevron7", category: "ZaKo")
+
+    /// The clause and the record rendered and schema-validated with a placeholder number and
+    /// the Mac's clock: nil when both pass, else the advice for the advocate.
+    func dryRunE2EForms(original: ElectronicOriginal, newDocument: Data,
+                        containerDocumentName: String) -> E2EFormIssue? {
+        var draft = attestation
+        draft.evidenceNumber = "0000-000000-0"
+        draft.conversionExecutionDateTime = Date()
+        do {
+            let model = try E2EFormModel.make(original: original, attestation: draft,
+                                              newDocumentName: containerDocumentName, newDocumentData: newDocument,
+                                              usedDevice: draft.usedDeviceDescription,
+                                              qualifiedReport: qualifiedReport?.data)
+            let builder = E2EDeliveryBuilder()
+            _ = try builder.clause(model)
+            _ = try builder.record(model)
+            return nil
+        } catch {
+            return E2EFormIssue.from(error)
         }
     }
 

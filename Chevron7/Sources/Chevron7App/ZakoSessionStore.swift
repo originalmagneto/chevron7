@@ -1210,6 +1210,13 @@ final class ZakoSessionStore {
     }
 
     func recomputePreflight() {
+        // The P→E checks (sheets, security elements, the scan's input signatures) do not apply to
+        // an electronic original, whose own gate is `E2EVerificationGate` and `e2eReadyToAuthorize`.
+        guard direction == .paperToElectronic else {
+            preflightErrors = []
+            validationErrors = []
+            return
+        }
         let result = AttestationPreflight.evaluate(
             attestation,
             securityElements: securityElements,
