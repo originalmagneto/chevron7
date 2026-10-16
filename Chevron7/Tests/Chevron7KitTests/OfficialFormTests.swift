@@ -18,6 +18,15 @@ final class OfficialFormTests: XCTestCase {
         XCTAssertEqual(OfficialForm.record_1_0.presentationMediaDestination, "TXT")
     }
 
+    func testRecord12Identifiers() {
+        let record = OfficialForm.record_1_2
+        XCTAssertEqual(record.identifier, "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfPaperToElectronicDocument_2021.sk/1.2")
+        XCTAssertEqual(record.namespace, "http://schemas.gov.sk/form/50349287.ConversionRecordOfPaperToElectronicDocument_2021.sk/1.2")
+        XCTAssertEqual(record.version, "1.2")
+        XCTAssertEqual(record.presentationMediaDestination, "TXT")
+        XCTAssertEqual(record.validationSchema, record.schema)
+    }
+
     func testClauseIdentifiers() {
         let clause = OfficialForm.clause_1_3
         XCTAssertEqual(clause.identifier, "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfPaperToElectronicDocument.sk/1.3")
@@ -45,6 +54,8 @@ final class OfficialFormTests: XCTestCase {
             ("record-1.0/schema.xsd", OfficialForm.record_1_0.schema),
             ("record-1.0/schema.validation.xsd", OfficialForm.record_1_0.validationSchema),
             ("record-1.0/form103.sb.xslt", OfficialForm.record_1_0.presentation),
+            ("record-1.2/schema.xsd", OfficialForm.record_1_2.schema),
+            ("record-1.2/form103.sb.xslt", OfficialForm.record_1_2.presentation),
             ("clause-1.3/schema.xsd", OfficialForm.clause_1_3.schema),
             ("clause-1.3/form.2.html2.xslt", OfficialForm.clause_1_3.presentation),
         ]
@@ -57,7 +68,7 @@ final class OfficialFormTests: XCTestCase {
     }
 
     func testStoredDigestsRecomputeFromTheEmbeddedFiles() throws {
-        for form in [OfficialForm.record_1_0, .clause_1_3] {
+        for form in [OfficialForm.record_1_0, .record_1_2, .clause_1_3] {
             XCTAssertEqual(try Self.canonicalDigest(form.schema), form.schemaDigestBase64, form.identifier)
             XCTAssertEqual(try Self.canonicalDigest(form.presentation), form.presentationDigestBase64, form.identifier)
         }

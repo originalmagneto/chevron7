@@ -13,6 +13,8 @@ files = [
     ("recordSchema", forms / "record-1.0/schema.xsd"),
     ("recordValidationSchema", forms / "record-1.0/schema.validation.xsd"),
     ("recordPresentation", forms / "record-1.0/form103.sb.xslt"),
+    ("record12Schema", forms / "record-1.2/schema.xsd"),
+    ("record12Presentation", forms / "record-1.2/form103.sb.xslt"),
     ("clauseSchema", forms / "clause-1.3/schema.xsd"),
     ("clausePresentation", forms / "clause-1.3/form.2.html2.xslt"),
 ]

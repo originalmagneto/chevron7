@@ -320,7 +320,7 @@ On 2026-09-17 the podpisuj.sk team confirmed that EZZK is not maintained, MIRRI 
 
 1. ~~Build the record (`50349287.ConversionRecordOfPaperToElectronicDocument.sk` v1.0) in an `XMLDataContainer`, sign it with the mandate certificate and a qualified timestamp into its own ASiC.~~ Done in part B2: `ConversionRecordRenderer`, `ZakoRecordDeliveryBuilder`, engine local XDC route, qualified TSA endpoints outside Demo. See "Part B2" below.
 2. ~~Send it with `ReceiveConversionRecord`~~, then open production allocation. Sending is done in part B2; production allocation and submission stay refused until part B3.
-3. Switch to record form v1.2 from 2027-01-01. Still open, out of scope for B2.
+3. Switch to record form v1.2 from 2027-01-01. Done on 2026-10-16 together with the record-first order (`ZakoRegime`, `docs/ZAKO-2027-FINDINGS-2026-10-16.md`).
 
 ### Known gaps left open in part A
 

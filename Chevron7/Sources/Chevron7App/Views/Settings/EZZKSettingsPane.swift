@@ -41,6 +41,10 @@ struct EZZKSettingsPane: View {
             if controller.mode == .test || isConnected {
                 submissionSection
             }
+            let previewActive = SettingsAdvancedState.zakoRecordFirstPreviewIsActive(settingsStore.settings)
+            if showAdvanced || previewActive {
+                recordFirstPreviewSection(showsBadge: !showAdvanced)
+            }
             if showAdvanced {
                 if !controller.isDemoMode {
                     lookupSection
@@ -226,6 +230,20 @@ struct EZZKSettingsPane: View {
             }
         } footer: {
             Text(modeExplanation)
+        }
+    }
+
+    /// The 1. 1. 2027 order before that date, for trying it on test EZZK (`ZakoRegime.resolve`).
+    private func recordFirstPreviewSection(showsBadge: Bool) -> some View {
+        Section {
+            Toggle("Postup od 1. 1. 2027 vopred", isOn: $settingsStore.settings.zakoRecordFirstPreview)
+        } header: {
+            HStack {
+                AdvancedSectionHeader(title: "Zaručená konverzia od 1. 1. 2027")
+                if showsBadge { AdvancedBadge() }
+            }
+        } footer: {
+            Text("Od 1. 1. 2027 Chevron7 najprv podpíše a odošle záznam o konverzii (formulár 1.2), počká, kým ho EZZK spracuje, a až potom podpíše doložku s dokumentom. Tento prepínač tento postup zapne už teraz, iba v skúšobnom režime a v testovacej evidencii; v ostrej evidencii sa neuplatní.")
         }
     }
 
