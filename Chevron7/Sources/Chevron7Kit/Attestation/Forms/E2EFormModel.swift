@@ -51,7 +51,8 @@ public struct E2EFormModel: Sendable, Equatable {
             newDocument: NewDocument(name: newDocumentName, format: format.0, formatOther: format.1,
                                      sha256: Data(SHA256.hash(data: newDocumentData))),
             evidenceNumber: evidenceNumber,
-            usedDevice: usedDevice,
+            usedDevice: usedDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? defaultUsedDevice : usedDevice,
             conversionTime: d.conversionExecutionDateTime,
             person: ConversionFormModel.Person(
                 givenName: names.given, familyName: names.family,

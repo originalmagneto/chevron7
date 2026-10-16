@@ -205,6 +205,84 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(provider.signedKinds, [])
     }
 
+    /// The owner's first live test (1.10.0): UsedDevice was empty and the profile missing,
+    /// so the record failed its schema after a number had been allocated.
+    func testOpeningFillsProfileAndUsedDevice() async throws {
+        let (store, _, source) = try makeStore()
+        let profile = AdvocateProfile(fullName: "Mgr. Ján Advokát", position: "advokát", registrationNumber: "1042",
+                                      ico: "42249180", officeName: "Advokátska kancelária")
+        store.settingsStore.settings.profiles = [profile]
+        store.settingsStore.settings.activeProfileID = profile.id
+
+        await store.loadElectronicOriginal(at: source)
+
+        XCTAssertEqual(store.attestation.performingPerson.fullName, "Mgr. Ján Advokát")
+        XCTAssertEqual(store.attestation.performingPerson.ico, "42249180")
+        XCTAssertTrue(store.attestation.usedDeviceDescription.hasPrefix("Chevron7"))
+    }
+
+    func testEndToEndRecordCarriesEveryRequiredElement() async throws {
+        try requireXMLLint()
+        let (store, _, source) = try makeStore()
+        let profile = AdvocateProfile(fullName: "Mgr. Ján Advokát", position: "advokát", registrationNumber: "1042",
+                                      ico: "42249180", officeName: "Advokátska kancelária")
+        store.settingsStore.settings.profiles = [profile]
+        store.settingsStore.settings.activeProfileID = profile.id
+        store.pdfaFromSignedRunner = PdfaFromSignedRunner(launch: { arguments in
+            try Data("%PDF-1.7 converted".utf8).write(to: URL(fileURLWithPath: arguments[2]))
+            return (0, "")
+        })
+        await store.loadElectronicOriginal(at: source)
+        store.attestation.originalDocumentTypeLabel = "zmluva"
+        store.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát", issuerSummary: "Test CA",
+                                                isMandateCertificate: true, isQualified: true)]
+        store.selectedIdentityID = "demo"
+        store.includeQualifiedTimestamp = false
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertTrue(store.validationErrors.isEmpty, "no P→E rule reaches E→E: \(store.validationErrors)")
+        let row = try XCTUnwrap(store.evidenceStore.record(id: store.currentRecordID))
+        for element in ["UsedDevice", "OriginalDocumentType", "GivenName", "FamilyName", "Position", "ValidityVerificationResult",
+                        "AuthorizationLocation", "PersonID", "ConversionExecutionDateTime"] {
+            let value = row.attestationXML.components(separatedBy: "<\(element)>").dropFirst().first?
+                .components(separatedBy: "</").first ?? ""
+            XCTAssertFalse(value.isEmpty, "\(element) is empty in the record")
+        }
+        XCTAssertNoThrow(try FormSchemaValidator().validate(Data(row.attestationXML.utf8), against: .recordE2E_1_0))
+    }
+
+    func testFormErrorSpendsNoNumber() async throws {
+        try requireXMLLint()
+        let (store, provider, source) = try makeStore()
+        store.pdfaFromSignedRunner = PdfaFromSignedRunner(launch: { arguments in
+            try Data("%PDF-1.7 converted".utf8).write(to: URL(fileURLWithPath: arguments[2]))
+            return (0, "")
+        })
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        store.attestation.performingPerson.fullName = "Novák"
+
+        await store.authorizeAndSign()
+
+        XCTAssertNil(store.attestation.evidenceNumber, "a form error must not cost an evidence number")
+        XCTAssertEqual(provider.signedKinds, [])
+        XCTAssertNotNil(store.lastError)
+        XCTAssertFalse(store.lastError?.contains("Schemas validity error") == true, "no libxml text for the advocate")
+    }
+
+    func testVerificationStaysThroughAuthorizationAndNoP2EWarnings() async throws {
+        let (store, _, source) = try makeStore()
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        store.preparePreflight()
+        XCTAssertTrue(store.validationErrors.isEmpty)
+        XCTAssertTrue(store.preflightErrors.isEmpty)
+        XCTAssertTrue(store.canContinueFromVerification)
+        XCTAssertTrue(store.canBeginAuthorization)
+    }
+
     func testP2EFlowStillStartsWithAnalysis() async throws {
         let (store, _, source) = try makeStore()
         store.direction = .paperToElectronic
