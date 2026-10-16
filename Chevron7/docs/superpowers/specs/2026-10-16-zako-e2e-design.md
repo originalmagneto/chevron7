@@ -1,6 +1,6 @@
 # ZaKo E→E: guaranteed conversion of an electronic document to a new electronic document
 
-Date: 2026-10-16. Status: draft for the owner's review (revision 2, after the builder check).
+Date: 2026-10-16. Status: approved by the owner on 2026-10-16 (revision 3: owner's answers to the two questions applied).
 Builds on: `2026-09-23-ezzk-part-b-design.md` (P→E clause, record, submission), `2026-10-01-nested-signature-tree-design.md` (validation in the engine), `Chevron7/docs/EZZK-INTEGRATION.md`.
 
 ## Intent
@@ -27,11 +27,12 @@ An advocate's client brings a document they authorized electronically (a PDF wit
 3. The free qualified timestamp authorities stay as in P→E (`TimestampAuthority.zakoQualifiedURLs`: Sectigo Qualified first, BOSA last resort). No paid timestamp authority.
 4. The 1. 1. 2027 change is a separate project.
 
-Open questions for the owner are at the end (section "Questions").
+5. **The new document (2026-10-16):** a client PDF that already is acceptable stays byte for byte as the new document, keeping the client's signatures, and the advocate's clause and mandate signature are added around it in the ASiC-E. Only a PDF that is not acceptable is converted to PDF/A-2b. Owner's words: "ak niekto už pošle správne PDF, tak len doplniť autorizačnú doložku a spraviť z toho nový dokument už s oboma podpismi, takže uchovať aj to čo bolo a pridať naše podpisy a autorizačnú doložku". Section 4 states the legal check of this choice.
+6. **A signature whose validity cannot be determined (2026-10-16):** allowed after an explicit confirmation and written as "nie je možné zistiť" in the clause and the record; a trusted list that did not load always blocks.
 
 ## Goals
 
-- An advocate converts a signed PDF (PAdES) or an ASiC-E holding one PDF (XAdES or CAdES) into a new PDF/A-2b with the E→E clause, signed together with the mandate certificate and a qualified timestamp, records it in Register konverzií and sends the E→E record to EZZK.
+- An advocate converts a signed PDF (PAdES) or an ASiC-E holding one PDF (XAdES or CAdES) into a new electronic document (the PDF itself when it already is PDF/A without attachments, else a new PDF/A-2b) with the E→E clause, signed together with the mandate certificate and a qualified timestamp, records it in Register konverzií and sends the E→E record to EZZK.
 - The clause and record carry, for every signature and seal of the original, the data annex 1 g) and annex 2 c) ask for: type, covered documents, validation state, signing time, validation time, place, signer identifier, mandant, mandate, oldest valid timestamp.
 - The validation report is kept with the record and in the register, and the advocate can save it.
 - Production E→E only with a qualified validation service's sealed output attached.
@@ -105,21 +106,37 @@ All times are written in Europe/Bratislava with `+01:00` / `+02:00` and no fract
 
 - any signature or timestamp `neplatná`: refused, the conversion cannot continue;
 - `nie je možné zistiť` because a trusted list did not load (`TrustedListAvailability`, the engine's `unverified` country): always blocked with "Skúste overenie znova", never written into a legal record, since it says nothing about the signature;
-- any other `nie je možné zistiť`: see question 2 (default: allowed only after the advocate confirms in a sheet that names the signature and DSS's reason, and the state is written as is).
+- any other `nie je možné zistiť`: allowed (decision 6) only after the advocate confirms in a sheet that names the signature and DSS's reason, and the state is written as is.
 
 The verification step shows the existing `SignatureBanner` and the rows of `SignatureTreeView`, plus the original documents with their hashes, and a "Uložiť správu o overení…" button.
 
-### 4. Transformation (engine, new)
+### 4. Transformation
 
-The new document is always a fresh PDF/A-2b (question 1). A new engine entry point `PdfaFromSigned` (beside `PdfaNormalize`, PDFBox):
+**Acceptable as it is.** The PDF (the file, or the ASiC-E's PDF data object) becomes the new document unchanged when all of these hold:
+
+- veraPDF (bundled in the engine) validates it as PDF/A-1, PDF/A-2 or PDF/A-3 against the part and conformance its XMP declares;
+- it has no embedded files (`/EmbeddedFiles`, file attachment annotations), because § 46 ods. 2 písm. h) vyhlášky 78/2020 accepts signed documents only "ak neobsahujú vnorené súbory", and a PDF/A-3 may carry them.
+
+Then `NewDocumentInfo` repeats the original's values (name, format, SHA-256), the client's PAdES signatures stay intact inside it, and the advocate's XAdES signature covers it and the clause as two data objects of the ASiC-E. The engine already supports this shape: a signed source wrapped into a new ASiC-E goes through `MachineSigningService.wrapsSignedSource`, and `PdfOutputValidator.wrappedSourceValidationFailure` requires exactly one new signature that covers the source byte-identical (`MachineInspectionService.signaturesCoverDocument`); the ZaKo client container adds the clause as a second data object, which the engine test for this path must cover.
+
+**Legal check of keeping it byte for byte (owner asked "nie?").** Nothing found forbids it, and the official form expects it:
+
+- the clause's and record's `NewDocumentInfo` documentation says that when an original "neboli v procese transformované do nového formátu, popisujú sa v tejto sekcii identické hodnoty ako v prípade pôvodného elektronického dokumentu", so an identical new document with the original's fingerprint is a case the form was written for;
+- § 36 ods. 4 písm. c) zákona asks to "transformovať" the original into the new document, and § 36 ods. 1 asks that the information content be kept, that transformed and added data be distinguishable and that security elements be kept or replaced by equal or stronger ones: a byte-identical PDF keeps everything, the clause is a separate data object, and the client's signatures (the original's security elements, § 3 ods. 1 písm. b) vyhlášky 70/2021) are kept rather than replaced;
+- § 2 ods. 2 vyhlášky 70/2021 with § 46 ods. 2 vyhlášky 78/2020 require PDF/A for the new PDF and no nested files, which the two conditions above check;
+- remaining risks, none blocking: some validators (slovensko.sk among them) list only the container's signatures and not the PAdES signatures inside the PDF data object, so a recipient may see only the advocate's signature there (the clause lists the client's); and the record's `NewDocumentFormat` for PDF/A-3 has no codelist 53 item, so the clause uses `Iny` with `NewDocumentFormatOther` "PDF/A-3" and the record the string "PDF/A-3".
+
+**Converted.** Otherwise the new document is a fresh PDF/A-2b. A new engine entry point `PdfaFromSigned` (beside `PdfaNormalize`, PDFBox):
 
 1. remove every signature field's `/V` signature dictionary, `/Perms` (DocMDP) and the AcroForm `SigFlags`;
 2. flatten the AcroForm: every widget's normal appearance, including visible signature stamps, becomes page content, so the visible information content (§ 1 písm. c) vyhlášky: "podpis a odtlačok úradnej pečiatky") stays;
 3. drop embedded files and JavaScript;
 4. hand the result to the existing `PdfaNormalize` path (vector-preserving rewrite with sRGB OutputIntent and XMP);
-5. check the output with veraPDF (bundled in the engine, PDF/A-2b profile), because `PdfaNormalize` only adds the identification and the OutputIntent and `PDFAValidator` only looks for those markers: a client PDF with unembedded fonts or transparency would otherwise be labelled PDF/A without being one. On a veraPDF failure the advocate is offered the rasterized PDF/A (`PDFAConversionMode.rasterGuaranteed`, text no longer selectable) or to stop.
+5. check the output with veraPDF (PDF/A-2b profile), because `PdfaNormalize` only adds the identification and the OutputIntent and `PDFAValidator` only looks for those markers: a client PDF with unembedded fonts or transparency would otherwise be labelled PDF/A without being one. On a veraPDF failure the advocate is offered the rasterized PDF/A (`PDFAConversionMode.rasterGuaranteed`, text no longer selectable) or to stop.
 
-The output is the `NewDocumentInfo`: name `ConversionOutputNaming.containerDocumentName`, format `PDFA2` / "PDF/A-2", SHA-256 of the delivered bytes. For an ASiC-E the input is the extracted PDF data object. Engine tests: a PAdES PDF with a visible signature, a two-signature PDF, an AcroForm with filled fields, a PDF/A-1b input; the output has no `/Sig`, passes `PDFAValidator`, and its page rendering equals the input's.
+The converted output is the `NewDocumentInfo`: name `ConversionOutputNaming.containerDocumentName`, format `PDFA2` / "PDF/A-2", SHA-256 of the delivered bytes. The verification step tells the advocate which of the two happens and why ("PDF je PDF/A-2b bez príloh: zostáva nezmenený, s podpismi klienta" or "PDF nie je PDF/A: vznikne nový PDF/A-2b, podpisy klienta zostanú v doložke").
+
+Engine tests: veraPDF acceptance of a signed PDF/A-2b and refusal of a plain PDF and of a PDF/A-3 with an attachment; `PdfaFromSigned` on a PAdES PDF with a visible signature, a two-signature PDF and an AcroForm with filled fields (no `/Sig` left, veraPDF passes, page rendering equals the input's); the ZaKo container around a signed PDF/A (two data objects, client signatures intact, one new signature covering both).
 
 ### 5. Clause, record, delivery
 
@@ -128,7 +145,7 @@ The output is the `NewDocumentInfo`: name `ConversionOutputNaming.containerDocum
 - New renderers `ConversionCertificateE2ERenderer` and `ConversionRecordE2ERenderer`, validated by `FormSchemaValidator` against the official schema (clause) and the derived validation schema (record), wrapped by `XMLDataContainerBuilder` with the E→E form.
 - `ZakoClauseDeliveryBuilder` and `ZakoRecordDeliveryBuilder` take the form pair from the direction; names stay `<number>.xml.xdcf`, `<number>.record.xml.xdcf`, `<stem>.asice`.
 - Signing at authorization is the P→E sequence unchanged: the client ASiC-E (new PDF/A + E→E clause XDCF as two data objects, `signsExtraFilesAsDataObjects`, `timestampServers` = `zakoQualifiedURLs` outside Demo) and then the E→E record XDC alone (`signsAsRecordContainer`), one PIN, mandate certificate required (`MandateCertificate`, `ZakoMandateCardFlow`), evidence number allocated right before signing (`needsFreshEvidenceNumber`), same Bratislava day and mode rules (`EZZKEvidenceNumberPolicy`).
-- Because the new document is a fresh unsigned PDF/A, the engine never takes the `wrapsSignedSource` path.
+- A byte-identical signed PDF goes through the engine's `wrapsSignedSource` path (section 4); a converted one is a fresh unsigned PDF/A and does not.
 
 ### 6. Validation evidence
 
@@ -184,8 +201,3 @@ No qualified validation provider publishes an API an advocate can use without a 
 - v1 refuses unsigned originals, an ASiC-E whose PDF carries its own signatures, and a PDF changed after its last signature (other than DSS extension data).
 - A trusted list that failed to load always blocks verification instead of producing `nie je možné zistiť`.
 - The record carries per signature a slim ETSI signature report (DSS evidence) or the whole sealed qualified output; the full DSS report stays in `Evidence/validation/`.
-
-## Questions for the owner
-
-1. **The new document when the client's PDF is signed.** Default (above): always a fresh PDF/A-2b with the client's signatures flattened to their visible appearance; the clause and record carry the signature data, and the client's original stays with the client. Alternative: when the client's PDF already passes veraPDF as PDF/A-1, A-2 or A-3, keep it byte-identical as the new document (the form allows it: an untransformed original is described "identickými hodnotami"), so the recipient can still check the client's own signature inside it, and convert only the other files. The alternative brings the engine's wrapped-signed-source path into the client container and makes two kinds of output.
-2. **A signature whose validity cannot be determined for a reason other than a trusted list that did not load** (for example a revocation source that did not answer, or a certificate chain DSS cannot build). Default: allowed after an explicit confirmation, written as "nie je možné zistiť" in the clause and record. Alternative: refused like an invalid one.
