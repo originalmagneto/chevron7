@@ -10,7 +10,7 @@ Podrobný popis toho, čo Chevron7 robí a ako. Stiahnutie, požiadavky a inšta
 
 ## Podpisovanie
 
-1. Otvorte PDF cez `⌘O`, pretiahnutím do okna, dvojklikom alebo cez **Otvoriť v** vo Finderi, alebo ho podpíšte rýchlou akciou vo Finderi. Podpísaný súbor sa uloží vedľa pôvodného pod jeho menom s príponou `_podpisane`. Do vlastného priečinka aplikácie sa uloží len vtedy, keď pôvodný priečinok nie je zapisovateľný alebo keď dokument prišiel bez súboru (napríklad obrázok pretiahnutý z inej aplikácie).
+1. Otvorte PDF cez `⌘O`, potiahnutím do okna, dvojklikom alebo cez **Otvoriť v** vo Finderi, alebo ho podpíšte rýchlou akciou vo Finderi. Podpísaný súbor sa uloží vedľa pôvodného pod jeho menom s príponou `_podpisane`. Do vlastného priečinka aplikácie sa uloží len vtedy, keď pôvodný priečinok nie je zapisovateľný alebo keď dokument prišiel bez súboru (napríklad obrázok potiahnutý z inej aplikácie).
 2. Pri viacerých dokumentoch kliknite vo fronte podpisovania na **Podpísať všetky** (pozri [Dávkové podpisovanie](#dávkové-podpisovanie)).
 3. Vyberte formát, certifikát a voliteľne vizuálny podpis a kvalifikovanú časovú pečiatku.
 4. Podpíšte cez **Podpísať KEP** (karta v čítačke) alebo **Podpísať mobilom** (občiansky preukaz s NFC cez iPhone).
@@ -18,7 +18,7 @@ Podrobný popis toho, čo Chevron7 robí a ako. Stiahnutie, požiadavky a inšta
 
 ### Podpísané dokumenty a ich overenie
 
-Podpísané PDF aj kontajner `.asice` otvoríte z Findera dvojklikom, cez **Otvoriť v** alebo pretiahnutím na ikonu v Docku. Chevron7 sa v ponuke **Otvoriť v** ponúka aj vtedy, keď kontajnery `.asice` má na Macu na starosti iná aplikácia. Dokument sa otvorí na obrazovke podpisovania so stromom podpisov: pri každom podpise je podpisujúci, druh podpisu (KEP, kvalifikovaná pečať, nekvalifikovaný) a výsledok overenia, a to aj pri podpisoch vnorených v dokumentoch vnútri kontajnera. Najprv sa ukáže rýchle čítanie, overenie voči európskym zoznamom dôveryhodných služieb dobehne na pozadí. **Overiť znova** overenie zopakuje, **Overiť aj na slovensko.sk** otvorí štátnu overovaciu službu v prehliadači. Overenie v aplikácii je informatívne.
+Podpísané PDF aj kontajner `.asice` otvoríte z Findera dvojklikom, cez **Otvoriť v** alebo potiahnutím na ikonu v Docku. Chevron7 sa v ponuke **Otvoriť v** ponúka aj vtedy, keď kontajnery `.asice` má na Macu na starosti iná aplikácia. Dokument sa otvorí na obrazovke podpisovania so stromom podpisov: pri každom podpise je podpisujúci, druh podpisu (KEP, kvalifikovaná pečať, nekvalifikovaný) a výsledok overenia, a to aj pri podpisoch vnorených v dokumentoch vnútri kontajnera. Najprv sa ukáže rýchle čítanie, overenie voči európskym zoznamom dôveryhodných služieb dobehne na pozadí. **Overiť znova** overenie zopakuje, **Overiť aj na slovensko.sk** otvorí štátnu overovaciu službu v prehliadači. Overenie v aplikácii je informatívne.
 
 K už podpísanému dokumentu pridáte ďalší podpis tlačidlom **Pridať ďalší podpis**. Podpísané PDF ani kontajner sa pritom nemenia: PDF sa nekonvertuje do PDF/A ani sa doň nevpaľuje pečiatka a kontajner sa rozšíri o nový podpis, aby pôvodné podpisy ostali platné. Kontajner rozšíri iba podpis kartou, nie mobilom.
 

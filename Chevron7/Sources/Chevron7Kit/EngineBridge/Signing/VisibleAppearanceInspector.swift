@@ -70,6 +70,25 @@ public struct VisibleAppearanceInspector: View {
                         }
                         .padding(.vertical, 2)
                     }
+                    if state.selectedAsset != nil {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Vzhľad na strane")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Picker("Vzhľad na strane", selection: Binding(
+                                get: { state.layout },
+                                set: { state.setLayout($0) }
+                            )) {
+                                Text("Podrobný").tag(VisibleSignatureLayout.detailed)
+                                Text("Kompaktný").tag(VisibleSignatureLayout.compact)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .help("Kompaktný nechá na strane len podpis, meno a čas. Podrobný pridá certifikát a stav.")
+                        }
+                    }
+
 
                     HStack(spacing: 8) {
                         Button {

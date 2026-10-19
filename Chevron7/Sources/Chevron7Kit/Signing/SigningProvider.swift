@@ -273,6 +273,7 @@ public struct VisualStampSpec: Sendable {
     public var qualification: String?
     public var certificateName: String?
     public var timestampAuthorityName: String?
+    public var layout: VisibleSignatureLayout = .detailed
 
     public init(
         fullName: String,
@@ -284,7 +285,8 @@ public struct VisualStampSpec: Sendable {
         rotationDegrees: Double = 0,
         qualification: String? = nil,
         certificateName: String? = nil,
-        timestampAuthorityName: String? = nil
+        timestampAuthorityName: String? = nil,
+        layout: VisibleSignatureLayout = .detailed
     ) {
         self.fullName = fullName
         self.timestamp = timestamp
@@ -296,6 +298,7 @@ public struct VisualStampSpec: Sendable {
         self.qualification = qualification
         self.certificateName = certificateName
         self.timestampAuthorityName = timestampAuthorityName
+        self.layout = layout
     }
 }
 

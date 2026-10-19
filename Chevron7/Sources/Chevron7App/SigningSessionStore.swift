@@ -96,6 +96,7 @@ final class SigningSessionStore {
     /// Grafika zvolená v novej knižnici vizuálnych podpisov (Autogram macOS 2 štýl).
     var visualArtworkOverride: Data?
     var visualPlacement: VisibleSignaturePlacement?
+    var visualSignatureLayout: VisibleSignatureLayout = .detailed
 
     var queue: [SigningQueueItem] = []
     var selectedQueueID: UUID?
@@ -229,6 +230,7 @@ final class SigningSessionStore {
         let selectedVisualAppearanceID: String
         let visualArtworkOverride: Data?
         let visualPlacement: VisibleSignaturePlacement?
+        let visualSignatureLayout: VisibleSignatureLayout
         let signaturePage: Int
         let signatureRect: NormalizedRect
     }
@@ -720,7 +722,8 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped))
+                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped),
+                    layout: visualSignatureLayout)
                 let stampedData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,
@@ -768,7 +771,8 @@ final class SigningSessionStore {
                     imagePNG: imageData,
                     certificateName: stampCertificateName(viaMobile: viaMobile, mobileMethod: mobileMethod),
                     certificateQualification: stampQualification(viaMobile: viaMobile),
-                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped))
+                    timestampAuthorityName: stampTimestampAuthorityName(viaMobile: viaMobile, timestamped: timestamped),
+                    layout: visualSignatureLayout)
                 pdfData = await Self.stampPDFData(
                     pdfData,
                     stamp: stamp,
@@ -796,7 +800,8 @@ final class SigningSessionStore {
                     qualification: identities.first(where: { $0.id == selectedIdentityID })?.isQualified == true
                         ? "Kvalifikovaný elektronický podpis" : nil,
                     certificateName: identities.first(where: { $0.id == selectedIdentityID })?.label,
-                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil)
+                    timestampAuthorityName: timestamped ? settings.activeTSA.name : nil,
+                    layout: visualSignatureLayout)
             } else {
                 visualStamp = nil
             }
@@ -1142,6 +1147,7 @@ final class SigningSessionStore {
             selectedVisualAppearanceID: selectedVisualAppearanceID,
             visualArtworkOverride: visualArtworkOverride,
             visualPlacement: visualPlacement,
+            visualSignatureLayout: visualSignatureLayout,
             signaturePage: effectiveVisualPage,
             signatureRect: signatureRect)
         applyCurrentBatchOptions(to: &snapshot)
@@ -1472,7 +1478,8 @@ final class SigningSessionStore {
                             ? "Kvalifikovaný elektronický podpis" : nil,
                         timestampAuthorityName: snapshot.includeQualifiedTimestamp
                             ? (settings.availableTSAServers.first { $0.url == snapshot.tsaURL }?.name ?? snapshot.tsaURL)
-                            : nil)
+                            : nil,
+                        layout: snapshot.visualSignatureLayout)
                     pdfData = await Self.stampPDFData(
                         pdfData,
                         stamp: stamp,
@@ -1656,7 +1663,8 @@ final class SigningSessionStore {
                     ? "Kvalifikovaný elektronický podpis" : nil,
                 timestampAuthorityName: snapshot.includeQualifiedTimestamp
                     ? (settings.availableTSAServers.first { $0.url == snapshot.tsaURL }?.name ?? snapshot.tsaURL)
-                    : nil)
+                    : nil,
+                layout: snapshot.visualSignatureLayout)
             try checkBatchGeneration(generation)
             let stampedData = await Self.stampPDFData(
                 pdfData,
@@ -1712,7 +1720,8 @@ final class SigningSessionStore {
                     ? "Kvalifikovaný elektronický podpis" : nil,
                 timestampAuthorityName: snapshot.includeQualifiedTimestamp
                     ? (settings.availableTSAServers.first { $0.url == snapshot.tsaURL }?.name ?? snapshot.tsaURL)
-                    : nil)
+                    : nil,
+                layout: snapshot.visualSignatureLayout)
             attachedStamp = stamp
             try checkBatchGeneration(generation)
             pdfData = await Self.stampPDFData(
@@ -1741,7 +1750,8 @@ final class SigningSessionStore {
                 certificateName: snapshot.identityLabel,
                 timestampAuthorityName: snapshot.includeQualifiedTimestamp
                     ? (settings.availableTSAServers.first { $0.url == snapshot.tsaURL }?.name ?? snapshot.tsaURL)
-                    : nil)
+                    : nil,
+                layout: snapshot.visualSignatureLayout)
         } else {
             visualStamp = nil
         }

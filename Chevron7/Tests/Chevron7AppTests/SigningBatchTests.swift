@@ -87,6 +87,48 @@ final class SigningBatchTests: XCTestCase {
         XCTAssertTrue(visualStamps.allSatisfy { $0 != nil })
     }
 
+    func testCompactLayoutReachesSingleAndBatchRequests() async throws {
+        let provider = RecordingSigningProvider(identityRequiresPIN: false)
+        let store = makeStore(provider: provider)
+        let certificate = SigningIdentityInfo(
+            id: EngineBridgeSigningProvider.certificateIdentityPrefix + "1",
+            label: "Test identity", issuerSummary: "Test issuer", requiresPIN: false)
+        await store.addDocuments(at: [makePDF(named: "compact.pdf")], selectLast: true)
+        store.identities = [certificate]
+        store.selectedIdentityID = certificate.id
+        store.includeQualifiedTimestamp = false
+        store.outputFormat = .embeddedPAdES
+        store.includeVisibleSignature = true
+        store.visualSignatureLayout = .compact
+        store.visualPlacement = VisibleSignaturePlacement(
+            pageIndex: 0,
+            pageRect: CGRect(x: 350, y: 100, width: 180, height: 70),
+            rotationDegrees: 0)
+
+        await store.sign()
+        let recorded = await provider.recordedRequests()
+        let single = try XCTUnwrap(recorded.first?.visualStamp, store.lastError ?? "")
+        XCTAssertEqual(single.layout, .compact)
+
+        let batchProvider = RecordingSigningProvider(identityRequiresPIN: false)
+        let batch = makeStore(provider: batchProvider)
+        await batch.addDocuments(at: [makePDF(named: "compact-batch.pdf")], selectLast: false)
+        batch.identities = await batchProvider.availableIdentities()
+        batch.selectedIdentityID = "identity"
+        batch.includeQualifiedTimestamp = false
+        batch.outputFormat = .embeddedPAdES
+        batch.includeVisibleSignature = true
+        batch.visualSignatureLayout = .compact
+        batch.visualPlacement = store.visualPlacement
+        await batch.prepareBatch(ids: batch.queue.map(\.id))
+        XCTAssertEqual(batch.batchSettingsSnapshot?.visualSignatureLayout, .compact)
+        await batch.startBatch()
+        let stamps = await batchProvider.requestVisualStamps()
+        let stamped = try XCTUnwrap(stamps.first ?? nil)
+        XCTAssertEqual(stamped.layout, .compact)
+    }
+
+
 
  
     func testBatchOutputCollisionUsesDeterministicSiblingWithoutReplacingExisting() async {

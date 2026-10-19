@@ -132,7 +132,7 @@ struct SigningIntakeView: View {
             DropzoneArtwork(icon: "signature", tint: .accentColor)
 
             VStack(spacing: 8) {
-                Text("Pretiahnite dokument na podpísanie")
+                Text("Potiahnite dokument sem")
                     .font(.title2.weight(.bold))
 
                 Text("Podporované formáty: PDF, JPEG, PNG, TIFF. Chevron7 dokument podpíše kvalifikovaným elektronickým podpisom (KEP) s voliteľnou časovou pečiatkou.")
@@ -393,6 +393,9 @@ struct SigningPrepareView: View {
                 bridgePlacement = newValue
             }
         }
+        .onChange(of: visualState?.layout) { _, layout in
+            store.visualSignatureLayout = layout ?? .detailed
+        }
         .onChange(of: store.bakedVisualStampIsBlocked, initial: true) { _, blocked in
             if blocked { store.includeVisibleSignature = false }
         }
@@ -468,6 +471,7 @@ struct SigningPrepareView: View {
         let state = SignaturePlacementState(document: document)
         visualState = state
         refreshVisualCardContent()
+        store.visualSignatureLayout = state.layout
         if store.includeVisibleSignature {
             state.setEnabled(true)
             bridgePlacement = state.placement
@@ -503,6 +507,7 @@ struct SigningPrepareView: View {
         } else {
             store.visualArtworkOverride = nil
         }
+        store.visualSignatureLayout = visualState?.layout ?? store.visualSignatureLayout
     }
 
     private var previewColumn: some View {

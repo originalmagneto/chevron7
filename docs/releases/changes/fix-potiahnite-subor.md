@@ -1,0 +1,1 @@
+- **Súbor sa do okna potiahne, nepretiahne.** Prázdna obrazovka Podpisovania a Zaručenej konverzie teraz píše „Potiahnite dokument sem“.

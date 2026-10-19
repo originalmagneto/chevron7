@@ -725,7 +725,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
                 .render(asset: asset,
                         content: content,
                         signingTime: signingTime,
-                        rotationDegrees: placement.rotationDegrees)
+                        rotationDegrees: placement.rotationDegrees,
+                        layout: stamp.layout)
         } catch {
             throw SigningError.signingFailed("Náhľad grafického podpisu sa nepodarilo vyrenderovať.")
         }

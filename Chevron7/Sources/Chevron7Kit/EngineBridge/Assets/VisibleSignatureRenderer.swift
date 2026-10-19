@@ -46,7 +46,8 @@ public struct VisibleSignatureRenderer {
         content: VisibleSignatureCardContent,
         signingTime: Date,
         rotationDegrees: Double,
-        isPreview: Bool = false
+        isPreview: Bool = false,
+        layout: VisibleSignatureLayout = .detailed
     ) throws -> URL {
         guard let artwork = NSImage(contentsOf: assetStore.fileURL(for: asset)) else {
             throw VisibleSignatureRendererError.unreadableArtwork
@@ -55,7 +56,8 @@ public struct VisibleSignatureRenderer {
             artwork: artwork,
             content: content,
             signingTime: signingTime,
-            isPreview: isPreview
+            isPreview: isPreview,
+            layout: layout
         )
         let rotated = try rotatedImage(card, degrees: rotationDegrees)
         let directory = cacheRoot.appending(path: "\(ProductIdentity.name)/Visual Signatures", directoryHint: .isDirectory)
@@ -72,7 +74,8 @@ public struct VisibleSignatureRenderer {
     public func renderPNG(
         artworkPNG: Data,
         content: VisibleSignatureCardContent,
-        signingTime: Date
+        signingTime: Date,
+        layout: VisibleSignatureLayout = .detailed
     ) throws -> Data {
         guard let artwork = NSImage(data: artworkPNG) else {
             throw VisibleSignatureRendererError.unreadableArtwork
@@ -81,7 +84,8 @@ public struct VisibleSignatureRenderer {
             artwork: artwork,
             content: content,
             signingTime: signingTime,
-            isPreview: false)
+            isPreview: false,
+            layout: layout)
         guard let tiff = card.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else {
@@ -94,6 +98,12 @@ public struct VisibleSignatureRenderer {
     /// Logical card size in points. The bitmap is rendered at `renderScale` so text and
     /// artwork stay crisp when the stamp is stretched across a wide signature field.
     public static let cardSize = NSSize(width: 420, height: 260)
+    /// Wide and short: the signature is the stamp, the caption is one line under it.
+    public static let compactCardSize = NSSize(width: 420, height: 152)
+
+    public static func cardSize(for layout: VisibleSignatureLayout) -> NSSize {
+        layout == .compact ? compactCardSize : cardSize
+    }
     static let renderScale: CGFloat = 3
 
     // Fixed colours: the card ends up on white paper, so it must not follow the
@@ -106,9 +116,10 @@ public struct VisibleSignatureRenderer {
         artwork: NSImage,
         content: VisibleSignatureCardContent,
         signingTime: Date,
-        isPreview: Bool
+        isPreview: Bool,
+        layout: VisibleSignatureLayout
     ) throws -> NSImage {
-        let size = Self.cardSize
+        let size = Self.cardSize(for: layout)
         let scale = Self.renderScale
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -134,6 +145,15 @@ public struct VisibleSignatureRenderer {
         context.fill(CGRect(origin: .zero, size: size))
         context.setShouldAntialias(true)
         context.setShouldSmoothFonts(true)
+        if layout == .compact {
+            drawCompactCard(artwork: artwork, content: content, signingTime: signingTime,
+                            isPreview: isPreview, size: size)
+            NSGraphicsContext.restoreGraphicsState()
+            let image = NSImage(size: size)
+            image.addRepresentation(rep)
+            return image
+        }
+
 
         // Card frame (transparent background).
         let cardRect = NSRect(x: 6, y: 6, width: size.width - 12, height: size.height - 12)
@@ -239,6 +259,69 @@ public struct VisibleSignatureRenderer {
         image.addRepresentation(rep)
         return image
     }
+
+    /// Signature on a line, name on the left, time on the right. Certificate and
+    /// qualification stay in the signature panel; they are not printed on the page.
+    private func drawCompactCard(
+        artwork: NSImage,
+        content: VisibleSignatureCardContent,
+        signingTime: Date,
+        isPreview: Bool,
+        size: NSSize
+    ) {
+        let inset: CGFloat = 14
+        let captionY: CGFloat = 8
+        let captionHeight: CGFloat = 16
+        let lineY = captionY + captionHeight + 6
+        let artworkSlot = NSRect(x: inset,
+                                 y: lineY + 8,
+                                 width: size.width - inset * 2,
+                                 height: size.height - (lineY + 8) - 6)
+        let artworkRect = Self.aspectFitRect(imageSize: artwork.size, inside: artworkSlot)
+        artwork.draw(in: artworkRect, from: .zero, operation: .sourceOver, fraction: 1,
+                     respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
+
+        Self.mutedInkColor.setStroke()
+        let line = NSBezierPath()
+        line.move(to: CGPoint(x: inset, y: lineY))
+        line.line(to: CGPoint(x: size.width - inset, y: lineY))
+        line.lineWidth = 1
+        line.stroke()
+
+        let nameStyle = NSMutableParagraphStyle()
+        nameStyle.alignment = .left
+        nameStyle.lineBreakMode = .byTruncatingTail
+        let nameAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+            .foregroundColor: Self.inkColor,
+            .paragraphStyle: nameStyle
+        ]
+        let timeStyle = NSMutableParagraphStyle()
+        timeStyle.alignment = .right
+        timeStyle.lineBreakMode = .byClipping
+        let timeAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10.5),
+            .foregroundColor: Self.mutedInkColor,
+            .paragraphStyle: timeStyle
+        ]
+        let timeText = isPreview ? "Čas sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
+        let timeWidth = min((timeText as NSString).size(withAttributes: timeAttributes).width + 2,
+                            size.width * 0.42)
+        let gap: CGFloat = 12
+        let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            (name as NSString).draw(
+                in: NSRect(x: inset, y: captionY,
+                           width: size.width - inset * 2 - timeWidth - gap,
+                           height: captionHeight),
+                withAttributes: nameAttributes)
+        }
+        (timeText as NSString).draw(
+            in: NSRect(x: size.width - inset - timeWidth, y: captionY,
+                       width: timeWidth, height: captionHeight),
+            withAttributes: timeAttributes)
+    }
+
 
     static let signingTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()

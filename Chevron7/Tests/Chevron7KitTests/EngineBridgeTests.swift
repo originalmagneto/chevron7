@@ -100,7 +100,153 @@ final class EngineBridgeGeometryTests: XCTestCase {
         let background = try XCTUnwrap(bitmap.colorAt(x: margin, y: bitmap.pixelsHigh / 2))
         XCTAssertLessThan(background.alphaComponent, 0.01, "Pozadie karty nesmie prekryť obsah dokumentu")
     }
+
+    func testCompactSignatureLayoutIsShorterAndTransparent() throws {
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("compact-card-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let store = SignatureAssetStore(applicationSupportRoot: work)
+        try FileManager.default.createDirectory(at: store.assetsDirectory, withIntermediateDirectories: true)
+        let asset = SignatureAsset(id: UUID(), kind: .png, managedFilename: "art.png")
+        try signatureSquigglePNG().write(to: store.fileURL(for: asset))
+        let renderer = VisibleSignatureRenderer(assetStore: store, cacheRoot: work)
+        let content = VisibleSignatureCardContent(signerName: "JUDr. Jana Nováková",
+                                                 certificateQualification: "Kvalifikovaný elektronický podpis",
+                                                 timestampAuthorityName: "Sectigo")
+        let detailedURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
+                                              rotationDegrees: 0, layout: .detailed)
+        let compactURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
+                                             rotationDegrees: 0, isPreview: true, layout: .compact)
+        let detailed = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: detailedURL)))
+        let compact = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: compactURL)))
+        XCTAssertLessThan(compact.pixelsHigh, detailed.pixelsHigh)
+        XCTAssertEqual(compact.pixelsWide, Int(VisibleSignatureRenderer.compactCardSize.width * VisibleSignatureRenderer.renderScale))
+        XCTAssertEqual(compact.pixelsHigh, Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
+        let corner = try XCTUnwrap(compact.colorAt(x: 2, y: 2))
+        XCTAssertLessThan(corner.alphaComponent, 0.01, "Kompaktná pečiatka nesmie mať výplň karty")
+    }
+
+    private func signatureSquigglePNG() throws -> Data {
+        let size = NSSize(width: 360, height: 120)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 16, y: 42))
+        path.curve(to: NSPoint(x: 130, y: 78),
+                   controlPoint1: NSPoint(x: 40, y: 112),
+                   controlPoint2: NSPoint(x: 90, y: 8))
+        path.curve(to: NSPoint(x: 230, y: 48),
+                   controlPoint1: NSPoint(x: 168, y: 140),
+                   controlPoint2: NSPoint(x: 190, y: 18))
+        path.curve(to: NSPoint(x: 340, y: 70),
+                   controlPoint1: NSPoint(x: 270, y: 92),
+                   controlPoint2: NSPoint(x: 310, y: 28))
+        NSColor(calibratedRed: 0.08, green: 0.16, blue: 0.45, alpha: 1).setStroke()
+        path.lineWidth = 3.2
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+        image.unlockFocus()
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw VisibleSignatureRendererError.unableToEncode
+        }
+        return png
+    }
 }
+
+@MainActor
+final class VisibleSignatureLayoutTests: XCTestCase {
+    func testLayoutChoicePersistsAndRefitsThePlacedBaseline() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("layout-\(UUID().uuidString)", isDirectory: true)
+        let cache = root.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let assets = SignatureAssetStore(applicationSupportRoot: root)
+        try FileManager.default.createDirectory(at: assets.assetsDirectory, withIntermediateDirectories: true)
+        let id = UUID()
+        let asset = SignatureAsset(id: id, kind: .png, managedFilename: "\(id.uuidString).png")
+        try EngineBridgeSigningProvider.textArtworkPNG(fullName: "Test", timestamp: Date())
+            .write(to: assets.fileURL(for: asset))
+        let document = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.singlePageWhitePDF()))
+        let defaults = MemoryUserDefaults()
+        let state = SignaturePlacementState(assetStore: assets, document: document,
+                                            defaults: defaults, cacheRoot: cache)
+        state.select(asset)
+        let placed = try XCTUnwrap(state.placement)
+        state.setLayout(.compact)
+        let refitted = try XCTUnwrap(state.placement)
+        let aspect = VisibleSignatureRenderer.compactCardSize.width
+            / VisibleSignatureRenderer.compactCardSize.height
+        XCTAssertEqual(state.layout, .compact)
+        XCTAssertEqual(refitted.pageRect.minY, placed.pageRect.minY, accuracy: 0.5)
+        XCTAssertEqual(refitted.pageRect.height, refitted.pageRect.width / aspect, accuracy: 1)
+        XCTAssertLessThan(refitted.pageRect.height, placed.pageRect.height)
+        XCTAssertEqual(state.cardPreview?.size, VisibleSignatureRenderer.compactCardSize)
+
+        let restored = SignaturePlacementState(assetStore: assets, document: document,
+                                               defaults: defaults, cacheRoot: cache)
+        XCTAssertEqual(restored.layout, .compact)
+        XCTAssertEqual(restored.selectedAsset?.id, asset.id)
+    }
+
+    func testSavedChoiceWithoutLayoutStaysDetailed() throws {
+        let defaults = MemoryUserDefaults()
+        let payload = try JSONSerialization.data(withJSONObject: ["assetID": UUID().uuidString])
+        defaults.set(payload, forKey: SignaturePlacementState.preferencesKey)
+        let state = SignaturePlacementState(assetStore: SignatureAssetStore(
+            applicationSupportRoot: FileManager.default.temporaryDirectory
+                .appendingPathComponent("layout-old-\(UUID().uuidString)", isDirectory: true)),
+                                            defaults: defaults,
+                                            cacheRoot: FileManager.default.temporaryDirectory)
+        XCTAssertEqual(state.layout, .detailed)
+        XCTAssertNil(state.selectedAsset)
+    }
+
+    func testCompactLayoutReachesStamperAndEngineAppearance() throws {
+        let artwork = EngineBridgeSigningProvider.textArtworkPNG(fullName: "Test", timestamp: Date())
+        let document = try XCTUnwrap(PDFDocument(data: TestPDFBuilder.singlePageWhitePDF()))
+        let compactStamp = VisibleSignatureStamper.StampData(
+            fullName: "JUDr. Test",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            pageIndex: 0,
+            normalizedRect: NormalizedRect(x: 0.5, y: 0.7, width: 0.3, height: 0.08),
+            imagePNG: artwork,
+            layout: .compact)
+        _ = VisibleSignatureStamper().stamp(
+            document: document, stamp: compactStamp, includeTimestamp: true)
+        let annotation = try XCTUnwrap(
+            document.page(at: 0)?.annotations
+                .compactMap { $0 as? ImageStampAnnotation }.first)
+        XCTAssertEqual(annotation.renderedSize, VisibleSignatureRenderer.compactCardSize)
+
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appearance-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let provider = EngineBridgeSigningProvider(renderer: VisibleSignatureRenderer(cacheRoot: work))
+        let spec = VisualStampSpec(fullName: "JUDr. Test",
+                                   timestamp: Date(),
+                                   pageIndex: 0,
+                                   normalizedRect: NormalizedRect(x: 0.1, y: 0.2, width: 0.4, height: 0.1),
+                                   imagePNG: artwork,
+                                   layout: .compact)
+        let appearance = try provider.visibleAppearance(for: spec,
+                                                        certificateDisplayName: "JUDr. Test",
+                                                        qualification: nil,
+                                                        pdfData: TestPDFBuilder.singlePageWhitePDF(),
+                                                        directory: work)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: appearance.renderedPNGURL)))
+        XCTAssertEqual(bitmap.pixelsHigh,
+                       Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
+    }
+}
+
 
 final class EngineBridgeSelectionTests: XCTestCase {
     private func certificate(serial: String, qualification: String?) -> SigningCertificate {

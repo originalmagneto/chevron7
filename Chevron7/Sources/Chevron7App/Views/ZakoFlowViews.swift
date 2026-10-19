@@ -194,7 +194,7 @@ struct IntakeView: View {
             DropzoneArtwork(icon: isElectronic ? "signature" : "arrow.down.doc.fill", tint: .indigo)
 
             VStack(spacing: 8) {
-                Text(isElectronic ? "Pretiahnite dokument podpísaný klientom" : "Pretiahnite naskenovaný papierový dokument")
+                Text(isElectronic ? "Potiahnite dokument podpísaný klientom sem" : "Potiahnite naskenovaný dokument sem")
                     .font(.title2.weight(.bold))
 
                 Text(isElectronic

@@ -17,6 +17,7 @@ public struct VisibleSignatureStamper: Sendable {
         public var certificateName: String?
         public var certificateQualification: String?
         public var timestampAuthorityName: String?
+        public var layout: VisibleSignatureLayout = .detailed
 
         public init(
             fullName: String,
@@ -26,7 +27,8 @@ public struct VisibleSignatureStamper: Sendable {
             imagePNG: Data? = nil,
             certificateName: String? = nil,
             certificateQualification: String? = nil,
-            timestampAuthorityName: String? = nil
+            timestampAuthorityName: String? = nil,
+            layout: VisibleSignatureLayout = .detailed
         ) {
             self.fullName = fullName
             self.timestamp = timestamp
@@ -36,6 +38,7 @@ public struct VisibleSignatureStamper: Sendable {
             self.certificateName = certificateName
             self.certificateQualification = certificateQualification
             self.timestampAuthorityName = timestampAuthorityName
+            self.layout = layout
         }
     }
 
@@ -59,7 +62,8 @@ public struct VisibleSignatureStamper: Sendable {
                     certificateName: stamp.certificateName,
                     certificateQualification: stamp.certificateQualification,
                     timestampAuthorityName: includeTimestamp ? stamp.timestampAuthorityName : nil),
-                signingTime: stamp.timestamp)
+                signingTime: stamp.timestamp,
+                layout: stamp.layout)
             if let image = NSImage(data: enrichedPNG ?? imagePNG) {
                 let annotation = ImageStampAnnotation(bounds: rect, image: image)
                 page.addAnnotation(annotation)
@@ -97,7 +101,8 @@ public struct VisibleSignatureStamper: Sendable {
                     certificateName: stamp.certificateName,
                     certificateQualification: stamp.certificateQualification,
                     timestampAuthorityName: includeTimestamp ? stamp.timestampAuthorityName : nil),
-                signingTime: stamp.timestamp)
+                signingTime: stamp.timestamp,
+                layout: stamp.layout)
             guard let renderedImage = NSImage(data: enrichedPNG ?? imagePNG) else {
                 return self.stamp(document: document, stamp: stamp, includeTimestamp: includeTimestamp)
             }
@@ -174,6 +179,7 @@ public struct VisibleSignatureStamper: Sendable {
 
 final class ImageStampAnnotation: PDFAnnotation {
     private let image: NSImage
+    var renderedSize: NSSize { image.size }
 
     init(bounds: CGRect, image: NSImage) {
         self.image = image
