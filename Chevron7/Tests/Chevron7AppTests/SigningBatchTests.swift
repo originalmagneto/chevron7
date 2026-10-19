@@ -41,6 +41,57 @@ final class SigningBatchTests: XCTestCase {
             ])
     }
 
+    /// The signing screen sets up its visible signature once per opened document, keyed on
+    /// `documentGeneration`; the key must stay put while the screen changes other state and
+    /// move for every document, also one with the same byte count as the last.
+    func testDocumentGenerationStaysForTheSameDocument() async {
+        let provider = RecordingSigningProvider(identityRequiresPIN: false)
+        let store = makeStore(provider: provider)
+        await store.addDocuments(at: [makePDF(named: "steady.pdf")], selectLast: true)
+        let document = store.document
+        let generation = store.documentGeneration
+        XCTAssertNotNil(document)
+
+        store.signingPIN = "1234"
+        store.includeVisibleSignature = true
+        store.selectedIdentityID = "identity"
+        store.signaturePage = 0
+        store.includeQualifiedTimestamp.toggle()
+
+        XCTAssertEqual(store.documentGeneration, generation)
+        XCTAssertTrue(store.document === document)
+    }
+
+    func testDocumentGenerationChangesForEachDocument() async {
+        let provider = RecordingSigningProvider(identityRequiresPIN: false)
+        let store = makeStore(provider: provider)
+        let first = makePDF(named: "first.pdf")
+        let second = makePDF(named: "second.pdf")
+        await store.addDocuments(at: [first, second], selectLast: false)
+
+        await store.selectQueueItem(store.queue[0].id)
+        let firstGeneration = store.documentGeneration
+        let firstSize = store.document?.dataRepresentation()?.count
+        await store.selectQueueItem(store.queue[1].id)
+        // The old key, the byte count, could not tell these two apart.
+        XCTAssertEqual(store.document?.dataRepresentation()?.count, firstSize)
+        XCTAssertNotEqual(store.documentGeneration, firstGeneration)
+    }
+
+    func testDocumentGenerationChangesWhenTheSameFileOpensAgain() async {
+        let provider = RecordingSigningProvider(identityRequiresPIN: false)
+        let store = makeStore(provider: provider)
+        let url = makePDF(named: "again.pdf")
+        await store.addDocuments(at: [url], selectLast: true)
+        let generation = store.documentGeneration
+
+        store.reset()
+        await store.addDocuments(at: [url], selectLast: true)
+
+        XCTAssertNotNil(store.document)
+        XCTAssertNotEqual(store.documentGeneration, generation)
+    }
+
     func testVisualBatchAllowsIdentityWithoutPIN() async {
         let provider = RecordingSigningProvider(identityRequiresPIN: false)
         let store = makeStore(provider: provider)
