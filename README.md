@@ -69,6 +69,16 @@ Podrobný popis všetkých funkcií je v [príručke](docs/PRIRUCKA.md).
 
 ### Inštalácia
 
+**Cez Homebrew:** ak už máte [Homebrew](https://brew.sh), spustite v Termináli:
+
+```sh
+brew install --cask originalmagneto/tap/chevron7
+```
+
+Potom pokračujte krokom 2 nižšie. Homebrew nainštaluje iba Chevron7, nie ovládače kariet. Aplikácia sa aktualizuje sama; aktualizáciu cez Homebrew môžete vyžiadať príkazom `brew update && brew upgrade --cask --greedy originalmagneto/tap/chevron7`.
+
+**Zo súboru DMG:**
+
 1. Otvorte stiahnutý DMG a presuňte **Chevron7** do priečinka **Aplikácie**.
 2. Spustite Chevron7. macOS sa raz opýta, či chcete otvoriť aplikáciu stiahnutú z internetu; zvoľte **Otvoriť**.
 3. Pri prvom spustení si Chevron7 zaregistruje prepojenie so Safari a macOS to oznámi ako pridanú položku na pozadí. Nechajte ju povolenú, inak podpisovanie zo Safari nepôjde.
