@@ -1,0 +1,1 @@
+- **Nová verzia sa opýta pred inštaláciou.** Ak bola zapnutá tichá inštalácia, Chevron7 ju vypne a aktualizáciu ukáže v okne.

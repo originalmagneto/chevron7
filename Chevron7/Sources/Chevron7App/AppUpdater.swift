@@ -111,9 +111,10 @@ final class AppUpdater {
         gate.updaterStarted()
         controller.startUpdater()
         hasStarted = true
-        // Same turn as startUpdater, before Sparkle's deferred cycle. A check made
-        // later can collide with that cycle; this is the slot Sparkle documents.
+        // Same turn as startUpdater, before Sparkle's deferred cycle.
         let updater = controller.updater
+        // A stored SUAutomaticallyUpdate of 1 selects the silent driver, so no offer appears.
+        updater.automaticallyDownloadsUpdates = false
         if updater.automaticallyChecksForUpdates, updater.canCheckForUpdates, !updater.sessionInProgress {
             updater.checkForUpdatesInBackground()
         }
