@@ -1,0 +1,1 @@
+- **Chevron7 pri spustení skontroluje aktualizácie.** Ak je nová verzia a práve nič nepodpisujete, okno sa ukáže hneď. Počas podpisu, konverzie alebo odosielania do EZZK počká.

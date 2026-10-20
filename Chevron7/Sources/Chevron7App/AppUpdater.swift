@@ -9,10 +9,10 @@ import Sparkle
 /// Sparkle found in the background may be shown. Pure state, so tests can drive it
 /// without Sparkle.
 ///
-/// Launch check: every start of the updater owes one background check. Sparkle's own
-/// schedule pays it when the last check is older than the interval (it checks at
-/// once); otherwise Sparkle only schedules the next check, and the app then checks
-/// itself. A background check honours "Preskočiť túto verziu" as Sparkle does.
+/// Launch check: Sparkle's own cycle, on the next turn, checks only when the last
+/// check is older than the interval. A background check in this same turn is how
+/// Sparkle says to check on every launch.
+/// A background check honours "Preskočiť túto verziu" as Sparkle does.
 ///
 /// Presentation: an update found by a background check is shown at once only while
 /// Chevron7 is the active app and nothing is signing, authorizing a conversion,
@@ -111,6 +111,12 @@ final class AppUpdater {
         gate.updaterStarted()
         controller.startUpdater()
         hasStarted = true
+        // Same turn as startUpdater, before Sparkle's deferred cycle. A check made
+        // later can collide with that cycle; this is the slot Sparkle documents.
+        let updater = controller.updater
+        if updater.automaticallyChecksForUpdates, updater.canCheckForUpdates, !updater.sessionInProgress {
+            updater.checkForUpdatesInBackground()
+        }
     }
 
     func checkForUpdates() {
@@ -175,10 +181,12 @@ final class AppUpdater {
         }
     }
 
-    /// Brings the update Sparkle holds into focus. With an update session showing, the
-    /// standard driver only shows that alert; it starts no new check.
+    /// Orders the alert Sparkle already built. The reminder callback is deferred, and
+    /// by then the driver has marked the alert shown, so `checkForUpdates()` would
+    /// focus it too. This is the call that actually shows the window, including after
+    /// a busy wait.
     private func presentWaitingUpdate() {
-        controller.updater.checkForUpdates()
+        controller.userDriver.showUpdateInFocus()
     }
 }
 
