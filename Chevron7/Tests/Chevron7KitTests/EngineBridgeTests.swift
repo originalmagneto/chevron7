@@ -75,7 +75,7 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 200)
     }
 
-    func testRenderedCardHasWhiteBodyAndClearCorner() throws {
+    func testRenderedCardKeepsTransparentBackground() throws {
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("card-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
@@ -96,11 +96,8 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 4000, "Karta musí byť plná grafika, nie prázdne PNG")
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: png))
         let scale = Int(VisibleSignatureRenderer.renderScale)
-        let body = try XCTUnwrap(bitmap.colorAt(x: 20 * scale, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.deviceRGB))
-        XCTAssertGreaterThan(body.alphaComponent, 0.9, "Telo karty je biele, nie priehľadné")
-        XCTAssertGreaterThan(body.redComponent, 0.9)
-        let corner = try XCTUnwrap(bitmap.colorAt(x: 0, y: 0))
-        XCTAssertLessThan(corner.alphaComponent, 0.01, "Roh mimo zaoblenej karty ostáva priehľadný")
+        let background = try XCTUnwrap(bitmap.colorAt(x: 4 * scale, y: bitmap.pixelsHigh / 2))
+        XCTAssertLessThan(background.alphaComponent, 0.01, "Pozadie karty nesmie prekryť obsah dokumentu")
     }
 
     func testCompactSignatureLayoutIsShorterAndTransparent() throws {

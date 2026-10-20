@@ -171,7 +171,7 @@ public struct VisibleSignatureRenderer {
         image.addRepresentation(rep)
         return image
     }
-    /// White rounded card. The chevron in the mockup is the inspector control, not the stamp.
+    /// Facts beside the mark. No card fill: the uploaded artwork is already transparent.
     private func drawCompactCard(
         artwork: NSImage,
         content: VisibleSignatureCardContent,
@@ -179,7 +179,6 @@ public struct VisibleSignatureRenderer {
         isPreview: Bool,
         size: NSSize
     ) {
-        drawCardBody(size: size, accent: nil)
         let columnX: CGFloat = 16
         let columnW: CGFloat = 146
         let dividerX = columnX + columnW + 6
@@ -197,26 +196,18 @@ public struct VisibleSignatureRenderer {
         }
         let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty {
-            let plate = NSRect(x: columnX, y: 12, width: 22, height: 22)
-            NSColor(calibratedWhite: 0.93, alpha: 1).setFill()
-            NSBezierPath(roundedRect: plate, xRadius: 6, yRadius: 6).fill()
-            drawSymbol("creditcard", in: plate.insetBy(dx: 4, dy: 5), color: Self.mutedInkColor)
+            drawSymbol("creditcard", in: NSRect(x: columnX + 3, y: 16, width: 16, height: 14),
+                       color: Self.mutedInkColor)
             drawWrapped(name, in: NSRect(x: columnX + 28, y: 8, width: columnW - 28, height: 30),
                         font: NSFont.systemFont(ofSize: 9, weight: .semibold), color: Self.inkColor)
         }
-        NSColor.black.withAlphaComponent(0.08).setStroke()
-        let divider = NSBezierPath()
-        divider.move(to: CGPoint(x: dividerX, y: 12))
-        divider.line(to: CGPoint(x: dividerX, y: size.height - 12))
-        divider.lineWidth = 1
-        divider.stroke()
         let art = NSRect(x: dividerX + 8, y: 8, width: size.width - dividerX - 16, height: size.height - 16)
         artwork.draw(in: Self.aspectFitRect(imageSize: artwork.size, inside: art), from: .zero,
                      operation: .sourceOver, fraction: 1, respectFlipped: false,
                      hints: [.interpolation: NSImageInterpolation.high])
     }
 
-    /// Mark on top, two fact columns under it. The details button stays out of the stamp.
+    /// Mark on top, two fact columns under it. No card fill.
     private func drawDetailedCard(
         artwork: NSImage,
         content: VisibleSignatureCardContent,
@@ -224,17 +215,10 @@ public struct VisibleSignatureRenderer {
         isPreview: Bool,
         size: NSSize
     ) {
-        drawCardBody(size: size, accent: NSColor(calibratedRed: 0.24, green: 0.50, blue: 0.95, alpha: 1))
         let art = NSRect(x: 24, y: 112, width: size.width - 48, height: 132)
         artwork.draw(in: Self.aspectFitRect(imageSize: artwork.size, inside: art), from: .zero,
                      operation: .sourceOver, fraction: 1, respectFlipped: false,
                      hints: [.interpolation: NSImageInterpolation.high])
-        NSColor.black.withAlphaComponent(0.08).setStroke()
-        let rule = NSBezierPath()
-        rule.move(to: CGPoint(x: 20, y: 104))
-        rule.line(to: CGPoint(x: size.width - 20, y: 104))
-        rule.lineWidth = 1
-        rule.stroke()
 
         let badge: CGFloat = 26
         let textX: CGFloat = 22 + badge + 8
@@ -268,28 +252,7 @@ public struct VisibleSignatureRenderer {
                     font: NSFont.systemFont(ofSize: 9), color: Self.mutedInkColor)
     }
 
-    private func drawCardBody(size: NSSize, accent: NSColor?) {
-        let rect = NSRect(x: 2, y: 2, width: size.width - 4, height: size.height - 4)
-        let shape = NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14)
-        NSGraphicsContext.current?.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.10)
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
-        shadow.shadowBlurRadius = 3
-        shadow.set()
-        NSColor.white.setFill()
-        shape.fill()
-        NSGraphicsContext.current?.restoreGraphicsState()
-        NSColor.black.withAlphaComponent(0.08).setStroke()
-        shape.lineWidth = 1
-        shape.stroke()
-        guard let accent else { return }
-        NSGraphicsContext.current?.saveGraphicsState()
-        shape.addClip()
-        accent.setFill()
-        NSBezierPath(rect: NSRect(x: rect.minX, y: rect.minY, width: 4, height: rect.height)).fill()
-        NSGraphicsContext.current?.restoreGraphicsState()
-    }
+
 
     private func drawFactRow(symbol: String, fill: NSColor, title: String, subtitle: String,
                              x: CGFloat, y: CGFloat, width: CGFloat) {

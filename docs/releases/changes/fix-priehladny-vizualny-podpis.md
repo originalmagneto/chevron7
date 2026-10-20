@@ -1,0 +1,1 @@
+- **Vizuálny podpis už nezakrýva text.** Karta nemá biele pozadie. Vidno len grafiku, ktorú nahráte, a údaje o podpise.
