@@ -1,1 +1,1 @@
-- **Vizuálny podpis už nezakrýva text.** Karta nemá biele pozadie. Vidno len grafiku, ktorú nahráte, a údaje o podpise.
+- **Grafický podpis už nezakrýva text zmluvy.** Zmizol biely obdĺžnik. Vidno len pečiatku, podpis a krátke údaje, text dokumentu zostáva pod nimi.

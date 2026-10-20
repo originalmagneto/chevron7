@@ -1,1 +1,1 @@
-- **Vizuálny podpis má novú kartu.** Kompaktný má vľavo QES, QTS a názov karty, vpravo grafiku. Podrobný má grafiku hore a pod ňou dva stĺpce. Ak ostal starý rám, v inšpektore podpis znova vyberte.
+- **Grafický podpis má novú podobu.** Vpravo pri dokumente si vyberiete Kompaktný alebo Podrobný. Kompaktný ukáže vľavo, či ide o kvalifikovaný podpis a časovú pečiatku, a vedľa toho vašu pečiatku s podpisom. Podrobný má pečiatku hore a údaje pod ňou. Ak na papieri ostal starý rám, podpis v paneli znova vyberte.

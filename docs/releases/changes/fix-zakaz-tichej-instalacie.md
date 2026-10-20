@@ -1,1 +1,1 @@
-- **Aktualizácia sa nedá zapnúť na tichú inštaláciu.** Okno ponuky nemá voľbu automatickej inštalácie. Nová verzia sa nainštaluje až po „Nainštalovať“.
+- **V okne aktualizácie už nie je voľba tichej inštalácie.** Nová verzia sa nainštaluje až keď zvolíte Nainštalovať.

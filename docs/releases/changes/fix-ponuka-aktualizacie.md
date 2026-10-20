@@ -1,1 +1,1 @@
-- **Nová verzia sa opýta pred inštaláciou.** Ak bola zapnutá tichá inštalácia, Chevron7 ju vypne a aktualizáciu ukáže v okne.
+- **Nová verzia sa najprv opýta.** Chevron7 ju už nenainštaluje potichu. Keď je k dispozícii novšia verzia, ukáže sa okno a vy sa rozhodnete, či ju chcete.
