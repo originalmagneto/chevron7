@@ -1,0 +1,1 @@
+- **Kompaktný podpis sa zmestí na riadok podpisu.** Text je malý a nad grafikou, rám má veľkosť podpisového miesta. Ak ostal starý široký rám, v inšpektore podpis znova vyberte.

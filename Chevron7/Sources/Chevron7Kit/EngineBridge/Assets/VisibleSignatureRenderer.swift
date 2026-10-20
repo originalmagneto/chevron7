@@ -98,8 +98,8 @@ public struct VisibleSignatureRenderer {
     /// Logical card size in points. The bitmap is rendered at `renderScale` so text and
     /// artwork stay crisp when the stamp is stretched across a wide signature field.
     public static let cardSize = NSSize(width: 420, height: 260)
-    /// Wide and short: the mark between two muted icons, facts underneath.
-    public static let compactCardSize = NSSize(width: 420, height: 152)
+    /// Mark plus a short fact strip. Narrow enough to sit in a signature blank.
+    public static let compactCardSize = NSSize(width: 200, height: 108)
 
 
 
@@ -265,7 +265,7 @@ public struct VisibleSignatureRenderer {
         image.addRepresentation(rep)
         return image
     }
-    /// Icons sit on the fact line, next to the short codes, not beside the mark.
+    /// Small facts sit above the mark, so the box stays as wide as the signature.
     private func drawCompactCard(
         artwork: NSImage,
         content: VisibleSignatureCardContent,
@@ -273,64 +273,45 @@ public struct VisibleSignatureRenderer {
         isPreview: Bool,
         size: NSSize
     ) {
-        let margin: CGFloat = 8
-        let rowY: CGFloat = 18
-        let icon: CGFloat = 13
-        let iconGap: CGFloat = 4
-        let codeGap: CGFloat = 5
-        let factFont = NSFont.systemFont(ofSize: 11)
-        let codeFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        let nameFont = codeFont
-        let lineCenter = rowY + icon / 2
-        let iconY = rowY
-        let artworkSlot = NSRect(x: margin, y: rowY + icon + 10,
+        let margin: CGFloat = 6
+        let icon: CGFloat = 8
+        let iconGap: CGFloat = 3
+        let codeGap: CGFloat = 3
+        let factFont = NSFont.systemFont(ofSize: 7.5)
+        let codeFont = NSFont.systemFont(ofSize: 7.5, weight: .semibold)
+        let lineH: CGFloat = 10
+        let nameY = size.height - 4 - lineH
+        let timeY = nameY - 1 - lineH
+        let artworkSlot = NSRect(x: margin, y: 4,
                                  width: size.width - margin * 2,
-                                 height: size.height - (rowY + icon + 10) - 6)
+                                 height: timeY - 8)
         let artworkRect = Self.aspectFitRect(imageSize: artwork.size, inside: artworkSlot)
         artwork.draw(in: artworkRect, from: .zero, operation: .sourceOver, fraction: 1,
                      respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
 
-        func drawFact(_ text: String, x: CGFloat, font: NSFont, color: NSColor) {
-            let baseline = lineCenter - font.capHeight / 2
+        func drawFact(_ text: String, x: CGFloat, y: CGFloat, font: NSFont, color: NSColor) {
+            let baseline = y + lineH / 2 - font.capHeight / 2
             (text as NSString).draw(at: NSPoint(x: x, y: baseline), withAttributes: [
                 .font: font,
                 .foregroundColor: color
             ])
         }
 
-        let timeText = isPreview ? "Čas podpisu sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
-        let stampCode = Self.compactTimestampCode(content.timestampAuthorityName)
-        var rightWidth = (timeText as NSString).size(withAttributes: [.font: factFont]).width
-        rightWidth += icon + iconGap
-        if let stampCode {
-            rightWidth += (stampCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
-        }
-        rightWidth = min(rightWidth + 2, size.width * 0.48)
-        let rightX = size.width - margin - rightWidth
-        var cursor = rightX
-        drawSymbol("clock.fill", in: NSRect(x: cursor, y: iconY, width: icon, height: icon),
-                   color: Self.compactTimeColor)
-        cursor += icon + iconGap
-        if let stampCode {
-            drawFact(stampCode, x: cursor, font: codeFont, color: Self.compactTimeColor)
-            cursor += (stampCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
-        }
-        drawFact(timeText, x: cursor, font: factFont, color: Self.mutedInkColor)
-
         let signatureCode = Self.compactSignatureCode(content.certificateQualification)
         var nameX = margin
         if let signatureCode {
-            drawSymbol("checkmark.seal.fill", in: NSRect(x: nameX, y: iconY, width: icon, height: icon),
+            drawSymbol("checkmark.seal.fill",
+                       in: NSRect(x: nameX, y: nameY + (lineH - icon) / 2, width: icon, height: icon),
                        color: Self.compactSealColor)
             nameX += icon + iconGap
-            drawFact(signatureCode, x: nameX, font: codeFont, color: Self.compactSealColor)
+            drawFact(signatureCode, x: nameX, y: nameY, font: codeFont, color: Self.compactSealColor)
             nameX += (signatureCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
         }
         let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nameWidth = rightX - 12 - nameX
+        let nameWidth = size.width - margin - nameX
         if !name.isEmpty, nameWidth > 8 {
             var shown = name
-            let nameAttrs: [NSAttributedString.Key: Any] = [.font: nameFont]
+            let nameAttrs: [NSAttributedString.Key: Any] = [.font: codeFont]
             if (shown as NSString).size(withAttributes: nameAttrs).width > nameWidth {
                 while shown.count > 1,
                       ((shown + "…") as NSString).size(withAttributes: nameAttrs).width > nameWidth {
@@ -338,9 +319,21 @@ public struct VisibleSignatureRenderer {
                 }
                 shown += "…"
             }
-            drawFact(shown, x: nameX, font: nameFont, color: Self.inkColor)
+            drawFact(shown, x: nameX, y: nameY, font: codeFont, color: Self.inkColor)
         }
 
+        let timeText = isPreview ? "Čas podpisu sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
+        let stampCode = Self.compactTimestampCode(content.timestampAuthorityName)
+        var timeX = margin
+        drawSymbol("clock.fill",
+                   in: NSRect(x: timeX, y: timeY + (lineH - icon) / 2, width: icon, height: icon),
+                   color: Self.compactTimeColor)
+        timeX += icon + iconGap
+        if let stampCode {
+            drawFact(stampCode, x: timeX, y: timeY, font: codeFont, color: Self.compactTimeColor)
+            timeX += (stampCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
+        }
+        drawFact(timeText, x: timeX, y: timeY, font: factFont, color: Self.mutedInkColor)
     }
 
     /// eIDAS short name. Unknown or non-qualified text stays unlabeled rather than reading as QES.

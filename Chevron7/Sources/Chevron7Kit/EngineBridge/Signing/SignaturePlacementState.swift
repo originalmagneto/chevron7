@@ -136,7 +136,7 @@ public final class SignaturePlacementState {
         persistPreferences()
     }
 
-    /// Keep the baseline the person placed. Only the height follows the new card.
+    /// Keep the baseline and the centre. A larger box shrinks to the card; a smaller one stays.
     private func refittedPlacement() -> VisibleSignaturePlacement? {
         guard var current = placement,
               let page = document?.page(at: min(max(current.pageIndex, 0), max(pageCount - 1, 0))) else {
@@ -146,10 +146,11 @@ public final class SignaturePlacementState {
         guard cropBox.width > 0, cropBox.height > 0 else { return nil }
         let size = cardPreview?.size ?? VisibleSignatureRenderer.cardSize(for: layout)
         let aspect = size.width / max(size.height, 1)
-        var width = min(current.pageRect.width, cropBox.width)
+        let cap = VisibleSignatureRenderer.cardSize(for: layout)
+        var width = min(current.pageRect.width, cropBox.width, cap.width)
         var height = width / aspect
-        if height > cropBox.height {
-            height = cropBox.height
+        if height > min(cropBox.height, cap.height) {
+            height = min(cropBox.height, cap.height)
             width = height * aspect
         }
         var x = current.pageRect.midX - width / 2
@@ -177,8 +178,9 @@ public final class SignaturePlacementState {
         let aspectRatio = (cardPreview?.size ?? selectedAsset.flatMap {
             NSImage(contentsOf: assetStore.fileURL(for: $0))?.size
         }).map { max($0.width / max($0.height, 1), 1) } ?? (VisibleSignatureRenderer.cardSize(for: layout).width / VisibleSignatureRenderer.cardSize(for: layout).height)
-        let maxWidth = min(cropBox.width, 420)
-        let maxHeight = min(cropBox.height, 180)
+        let card = VisibleSignatureRenderer.cardSize(for: layout)
+        let maxWidth = min(cropBox.width, layout == .compact ? card.width : 420)
+        let maxHeight = min(cropBox.height, layout == .compact ? card.height : 180)
         let width = min(maxWidth, maxHeight * aspectRatio)
         let height = width / aspectRatio
         return VisibleSignaturePlacement(

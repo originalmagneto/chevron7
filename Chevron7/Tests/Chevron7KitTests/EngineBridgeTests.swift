@@ -125,22 +125,17 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertEqual(compact.pixelsHigh, Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
         let corner = try XCTUnwrap(compact.colorAt(x: 2, y: 2))
         XCTAssertLessThan(corner.alphaComponent, 0.01, "Kompaktná pečiatka nesmie mať výplň karty")
-        // Seal icon is x=8..<21 pt. QES text starts at 25 pt, so this band is the icon only.
+        // Seal and clock are 8 pt icons at x=6, above the mark. QES text starts at x=17.
         let scale = Int(VisibleSignatureRenderer.renderScale)
-        let sealIcon = (9 * scale)..<(20 * scale)
-        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: sealIcon, where: Self.isSealGreen), 4,
+        let iconBand = (7 * scale)..<(13 * scale)
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: iconBand, where: Self.isSealGreen), 4,
                              "Pečať v ikone má byť zafarbená, nie čierna šablóna")
-        let timeWidth = ("Čas podpisu sa doplní" as NSString).size(withAttributes: [
-            .font: NSFont.systemFont(ofSize: 11)
-        ]).width
-        let clockX = VisibleSignatureRenderer.compactCardSize.width - 8 - (timeWidth + 13 + 4 + 2)
-        let clock = Int(clockX * CGFloat(scale))..<Int((clockX + 13) * CGFloat(scale))
-        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: clock, where: Self.isTimeAmber), 4,
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: iconBand, where: Self.isTimeAmber), 4,
                              "Hodiny v ikone majú byť zafarbené")
-        XCTAssertEqual(
-            Self.opaquePixels(in: compact, x: 0..<clock.lowerBound, where: Self.isTimeAmber)
-            + Self.opaquePixels(in: compact, x: clock.upperBound..<compact.pixelsWide, where: Self.isTimeAmber),
-            0, "Jantárová farba smie byť len v ikone hodín")
+        let outside = (0..<(5 * scale))
+        XCTAssertEqual(Self.opaquePixels(in: compact, x: outside, where: Self.isTimeAmber)
+                       + Self.opaquePixels(in: compact, x: (16 * scale)..<compact.pixelsWide, where: Self.isTimeAmber),
+                       0, "Jantárová farba smie byť len pri ikone hodín")
 
         XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("QESIG"), "QES")
         XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("Kvalifikovaný elektronický podpis"), "QES")
@@ -231,7 +226,10 @@ final class VisibleSignatureLayoutTests: XCTestCase {
             / VisibleSignatureRenderer.compactCardSize.height
         XCTAssertEqual(state.layout, .compact)
         XCTAssertEqual(refitted.pageRect.minY, placed.pageRect.minY, accuracy: 0.5)
+        XCTAssertEqual(refitted.pageRect.midX, placed.pageRect.midX, accuracy: 0.5)
         XCTAssertEqual(refitted.pageRect.height, refitted.pageRect.width / aspect, accuracy: 1)
+        XCTAssertLessThanOrEqual(refitted.pageRect.width, VisibleSignatureRenderer.compactCardSize.width)
+        XCTAssertLessThanOrEqual(refitted.pageRect.height, VisibleSignatureRenderer.compactCardSize.height)
         XCTAssertLessThan(refitted.pageRect.height, placed.pageRect.height)
         XCTAssertEqual(state.cardPreview?.size, VisibleSignatureRenderer.compactCardSize)
 
