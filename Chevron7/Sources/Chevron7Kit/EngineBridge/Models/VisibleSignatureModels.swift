@@ -28,7 +28,7 @@ public struct VisibleSignaturePlacement: Sendable, Equatable {
 }
 
 /// How much of the visible stamp is the signature itself.
-/// `.detailed` is the certificate card. `.compact` keeps the mark, the name and the time.
+/// `.detailed` is the certificate card. `.compact` keeps the mark, with a seal and a clock beside it.
 public enum VisibleSignatureLayout: String, Codable, Sendable, Equatable {
     case detailed
     case compact

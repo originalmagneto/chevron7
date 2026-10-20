@@ -125,8 +125,49 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertEqual(compact.pixelsHigh, Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
         let corner = try XCTUnwrap(compact.colorAt(x: 2, y: 2))
         XCTAssertLessThan(corner.alphaComponent, 0.01, "Kompaktná pečiatka nesmie mať výplň karty")
+        let side = 68 * Int(VisibleSignatureRenderer.renderScale)
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: 0..<side, where: Self.isSealGreen), 12,
+                             "Ľavá strana má niesť zelenú pečať")
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: (compact.pixelsWide - side)..<compact.pixelsWide,
+                                               where: Self.isTimeAmber), 12,
+                             "Pravá strana má niesť hodiny")
+        let unqualified = VisibleSignatureCardContent(
+            signerName: "Komerčný",
+            certificateQualification: "Nekvalifikovaný certifikát")
+        let unqualifiedURL = try renderer.render(asset: asset, content: unqualified, signingTime: Date(),
+                                                 rotationDegrees: 0, layout: .compact)
+        let plain = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: unqualifiedURL)))
+        XCTAssertEqual(Self.opaquePixels(in: plain, x: 0..<side, where: Self.isSealGreen), 0,
+                       "Nekvalifikovaný certifikát nesmie dostať zelenú pečať")
+        let qesig = VisibleSignatureCardContent(signerName: "KEP", certificateQualification: "QESIG")
+        let qesigURL = try renderer.render(asset: asset, content: qesig, signingTime: Date(),
+                                           rotationDegrees: 0, layout: .compact)
+        let qualified = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: qesigURL)))
+        XCTAssertGreaterThan(Self.opaquePixels(in: qualified, x: 0..<side, where: Self.isSealGreen), 12,
+                             "QESIG má niesť zelenú pečať")
     }
 
+    private static func opaquePixels(in bitmap: NSBitmapImageRep, x range: Range<Int>,
+                                     where matches: (CGFloat, CGFloat, CGFloat) -> Bool) -> Int {
+        var count = 0
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 2) {
+            for x in stride(from: range.lowerBound, to: range.upperBound, by: 2) {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      color.alphaComponent > 0.5,
+                      matches(color.redComponent, color.greenComponent, color.blueComponent) else { continue }
+                count += 1
+            }
+        }
+        return count
+    }
+
+    private static func isSealGreen(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Bool {
+        green > 0.4 && green > red + 0.15 && green > blue
+    }
+
+    private static func isTimeAmber(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Bool {
+        red > 0.55 && red > green && red > blue && green > 0.25
+    }
     private func signatureSquigglePNG() throws -> Data {
         let size = NSSize(width: 360, height: 120)
         let image = NSImage(size: size)

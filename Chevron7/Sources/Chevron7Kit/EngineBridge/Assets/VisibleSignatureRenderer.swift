@@ -98,7 +98,7 @@ public struct VisibleSignatureRenderer {
     /// Logical card size in points. The bitmap is rendered at `renderScale` so text and
     /// artwork stay crisp when the stamp is stretched across a wide signature field.
     public static let cardSize = NSSize(width: 420, height: 260)
-    /// Wide and short: the signature is the stamp, the caption is one line under it.
+    /// Wide and short: the mark sits between a seal and a clock.
     public static let compactCardSize = NSSize(width: 420, height: 152)
 
     public static func cardSize(for layout: VisibleSignatureLayout) -> NSSize {
@@ -111,6 +111,7 @@ public struct VisibleSignatureRenderer {
     static let inkColor = NSColor(calibratedWhite: 0.12, alpha: 1)
     static let mutedInkColor = NSColor(calibratedWhite: 0.35, alpha: 1)
     static let accentColor = NSColor(calibratedRed: 0.13, green: 0.55, blue: 0.27, alpha: 1)
+    static let timeColor = NSColor(calibratedRed: 0.72, green: 0.46, blue: 0.08, alpha: 1)
 
     private func renderedCard(
         artwork: NSImage,
@@ -146,8 +147,7 @@ public struct VisibleSignatureRenderer {
         context.setShouldAntialias(true)
         context.setShouldSmoothFonts(true)
         if layout == .compact {
-            drawCompactCard(artwork: artwork, content: content, signingTime: signingTime,
-                            isPreview: isPreview, size: size)
+            drawCompactCard(artwork: artwork, content: content, size: size)
             NSGraphicsContext.restoreGraphicsState()
             let image = NSImage(size: size)
             image.addRepresentation(rep)
@@ -259,67 +259,104 @@ public struct VisibleSignatureRenderer {
         image.addRepresentation(rep)
         return image
     }
+    /// Exact labels the app sends. A substring of "KVALIF" also matches "Nekvalifikovaný".
+    private static func compactShowsQualifiedSeal(_ qualification: String?) -> Bool {
+        switch qualification {
+        case "Kvalifikovaný elektronický podpis", "QESIG", "QESEAL": true
+        default: false
+        }
+    }
 
-    /// Signature on a line, name on the left, time on the right. Certificate and
-    /// qualification stay in the signature panel; they are not printed on the page.
+    /// Mark in the middle. Coloured seal and clock sit on the sides; the name
+    /// and the time stay off this stamp (they belong on the detailed card).
     private func drawCompactCard(
         artwork: NSImage,
         content: VisibleSignatureCardContent,
-        signingTime: Date,
-        isPreview: Bool,
         size: NSSize
     ) {
-        let inset: CGFloat = 14
-        let captionY: CGFloat = 8
-        let captionHeight: CGFloat = 16
-        let lineY = captionY + captionHeight + 6
-        let artworkSlot = NSRect(x: inset,
-                                 y: lineY + 8,
-                                 width: size.width - inset * 2,
-                                 height: size.height - (lineY + 8) - 6)
+        let inset: CGFloat = 6
+        let column: CGFloat = 62
+        let gap: CGFloat = 6
+        let panelHeight: CGFloat = 112
+        let panelY = (size.height - panelHeight) / 2
+        let qualified = Self.compactShowsQualifiedSeal(content.certificateQualification)
+        let seal = qualified ? Self.accentColor : Self.mutedInkColor
+        drawSidePanel(NSRect(x: inset, y: panelY, width: column, height: panelHeight), color: seal)
+        drawSidePanel(NSRect(x: size.width - inset - column, y: panelY, width: column, height: panelHeight),
+                      color: Self.timeColor)
+        let midY = size.height / 2
+        drawMedallion(qualified ? "checkmark.seal.fill" : "signature",
+                      at: CGPoint(x: inset + column / 2, y: midY),
+                      color: seal,
+                      tickCount: qualified ? 12 : 0)
+        drawMedallion("clock.fill",
+                      at: CGPoint(x: size.width - inset - column / 2, y: midY),
+                      color: Self.timeColor,
+                      tickCount: 4)
+        let artworkSlot = NSRect(x: inset + column + gap,
+                                 y: 8,
+                                 width: size.width - 2 * (inset + column + gap),
+                                 height: size.height - 16)
         let artworkRect = Self.aspectFitRect(imageSize: artwork.size, inside: artworkSlot)
         artwork.draw(in: artworkRect, from: .zero, operation: .sourceOver, fraction: 1,
                      respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
+    }
 
-        Self.mutedInkColor.setStroke()
-        let line = NSBezierPath()
-        line.move(to: CGPoint(x: inset, y: lineY))
-        line.line(to: CGPoint(x: size.width - inset, y: lineY))
-        line.lineWidth = 1
-        line.stroke()
+    private func drawSidePanel(_ rect: NSRect, color: NSColor) {
+        let shape = NSBezierPath(roundedRect: rect, xRadius: 16, yRadius: 16)
+        color.withAlphaComponent(0.88).setFill()
+        shape.fill()
+        (color.blended(withFraction: 0.22, of: .black) ?? color).setStroke()
+        shape.lineWidth = 1.6
+        shape.stroke()
+    }
 
-        let nameStyle = NSMutableParagraphStyle()
-        nameStyle.alignment = .left
-        nameStyle.lineBreakMode = .byTruncatingTail
-        let nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
-            .foregroundColor: Self.inkColor,
-            .paragraphStyle: nameStyle
-        ]
-        let timeStyle = NSMutableParagraphStyle()
-        timeStyle.alignment = .right
-        timeStyle.lineBreakMode = .byClipping
-        let timeAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10.5),
-            .foregroundColor: Self.mutedInkColor,
-            .paragraphStyle: timeStyle
-        ]
-        let timeText = isPreview ? "Čas sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
-        let timeWidth = min((timeText as NSString).size(withAttributes: timeAttributes).width + 2,
-                            size.width * 0.42)
-        let gap: CGFloat = 12
-        let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty {
-            (name as NSString).draw(
-                in: NSRect(x: inset, y: captionY,
-                           width: size.width - inset * 2 - timeWidth - gap,
-                           height: captionHeight),
-                withAttributes: nameAttributes)
+    /// Disc and ticks in white so they read on the coloured side panel.
+    private func drawMedallion(_ symbol: String, at center: CGPoint, color: NSColor, tickCount: Int) {
+        let radius: CGFloat = 17
+        let mark = NSColor.white
+        mark.setStroke()
+        if tickCount > 0 {
+            for i in 0..<tickCount {
+                let angle = (CGFloat(i) + 0.5) / CGFloat(tickCount) * 2 * .pi
+                let inner = radius + 4
+                let outer = radius + 8
+                let tick = NSBezierPath()
+                tick.move(to: NSPoint(x: center.x + CGFloat(cos(Double(angle))) * inner,
+                                      y: center.y + CGFloat(sin(Double(angle))) * inner))
+                tick.line(to: NSPoint(x: center.x + CGFloat(cos(Double(angle))) * outer,
+                                      y: center.y + CGFloat(sin(Double(angle))) * outer))
+                tick.lineWidth = 1.8
+                tick.lineCapStyle = .round
+                tick.stroke()
+            }
         }
-        (timeText as NSString).draw(
-            in: NSRect(x: size.width - inset - timeWidth, y: captionY,
-                       width: timeWidth, height: captionHeight),
-            withAttributes: timeAttributes)
+        let ring = NSBezierPath(ovalIn: NSRect(x: center.x - radius - 2.5, y: center.y - radius - 2.5,
+                                               width: (radius + 2.5) * 2, height: (radius + 2.5) * 2))
+        ring.lineWidth = 1.5
+        ring.stroke()
+        let disc = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        (color.blended(withFraction: 0.18, of: .black) ?? color).setFill()
+        NSBezierPath(ovalIn: disc).fill()
+        let icon: CGFloat = 18
+        drawTintedSymbol(symbol,
+                         in: NSRect(x: center.x - icon / 2, y: center.y - icon / 2, width: icon, height: icon),
+                         color: mark)
+    }
+
+    /// `color.set()` does not tint a template symbol to white in this bitmap.
+    private func drawTintedSymbol(_ name: String, in rect: NSRect, color: NSColor) {
+        let configuration = NSImage.SymbolConfiguration(pointSize: rect.height, weight: .bold)
+        guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else { return }
+        let tinted = NSImage(size: rect.size, flipped: false) { bounds in
+            color.setFill()
+            NSBezierPath(rect: bounds).fill()
+            symbol.draw(in: bounds, from: .zero, operation: .destinationIn, fraction: 1)
+            return true
+        }
+        tinted.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
     }
 
 
