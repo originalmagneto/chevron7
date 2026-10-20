@@ -1,0 +1,1 @@
+- **Aktualizácia sa nedá zapnúť na tichú inštaláciu.** Okno ponuky nemá voľbu automatickej inštalácie. Nová verzia sa nainštaluje až po „Nainštalovať“.

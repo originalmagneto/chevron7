@@ -281,6 +281,7 @@ if [[ "$MODE" == "release" ]]; then
         -c "Add :SUFeedURL string $UPDATE_FEED_URL" \
         -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" \
         -c "Add :SUEnableAutomaticChecks bool true" \
+        -c "Add :SUAllowsAutomaticUpdates bool false" \
         -c "Add :SUScheduledCheckInterval integer 14400" \
         "$CONTENTS/Info.plist"
 fi

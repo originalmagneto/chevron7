@@ -113,7 +113,8 @@ final class AppUpdater {
         hasStarted = true
         // Same turn as startUpdater, before Sparkle's deferred cycle.
         let updater = controller.updater
-        // A stored SUAutomaticallyUpdate of 1 selects the silent driver, so no offer appears.
+        // Release builds also set SUAllowsAutomaticUpdates false, which hides the
+        // checkbox and ignores a stored SUAutomaticallyUpdate of 1.
         updater.automaticallyDownloadsUpdates = false
         if updater.automaticallyChecksForUpdates, updater.canCheckForUpdates, !updater.sessionInProgress {
             updater.checkForUpdatesInBackground()
