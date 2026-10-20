@@ -75,7 +75,7 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 200)
     }
 
-    func testRenderedCardKeepsTransparentBackground() throws {
+    func testRenderedCardHasWhiteBodyAndClearCorner() throws {
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("card-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
@@ -95,10 +95,12 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertEqual(Array(png.prefix(4)), [0x89, 0x50, 0x4E, 0x47])
         XCTAssertGreaterThan(png.count, 4000, "Karta musí byť plná grafika, nie prázdne PNG")
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: png))
-        // Sample the empty inner margin, inside the former white card fill.
-        let margin = Int(12 * VisibleSignatureRenderer.renderScale)
-        let background = try XCTUnwrap(bitmap.colorAt(x: margin, y: bitmap.pixelsHigh / 2))
-        XCTAssertLessThan(background.alphaComponent, 0.01, "Pozadie karty nesmie prekryť obsah dokumentu")
+        let scale = Int(VisibleSignatureRenderer.renderScale)
+        let body = try XCTUnwrap(bitmap.colorAt(x: 20 * scale, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(body.alphaComponent, 0.9, "Telo karty je biele, nie priehľadné")
+        XCTAssertGreaterThan(body.redComponent, 0.9)
+        let corner = try XCTUnwrap(bitmap.colorAt(x: 0, y: 0))
+        XCTAssertLessThan(corner.alphaComponent, 0.01, "Roh mimo zaoblenej karty ostáva priehľadný")
     }
 
     func testCompactSignatureLayoutIsShorterAndTransparent() throws {
@@ -111,9 +113,9 @@ final class EngineBridgeGeometryTests: XCTestCase {
         let asset = SignatureAsset(id: UUID(), kind: .png, managedFilename: "art.png")
         try signatureSquigglePNG().write(to: store.fileURL(for: asset))
         let renderer = VisibleSignatureRenderer(assetStore: store, cacheRoot: work)
-        let content = VisibleSignatureCardContent(signerName: "JUDr. Jana Nováková",
+        let content = VisibleSignatureCardContent(signerName: "Karta pripojená: I.CA SecureStore",
                                                  certificateQualification: "Kvalifikovaný elektronický podpis",
-                                                 timestampAuthorityName: nil)
+                                                 timestampAuthorityName: "Belgium BOSA (kvalifikovaná)")
         let detailedURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
                                               rotationDegrees: 0, layout: .detailed)
         let compactURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
@@ -123,19 +125,15 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertLessThan(compact.pixelsHigh, detailed.pixelsHigh)
         XCTAssertEqual(compact.pixelsWide, Int(VisibleSignatureRenderer.compactCardSize.width * VisibleSignatureRenderer.renderScale))
         XCTAssertEqual(compact.pixelsHigh, Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
-        let corner = try XCTUnwrap(compact.colorAt(x: 2, y: 2))
-        XCTAssertLessThan(corner.alphaComponent, 0.01, "Kompaktná pečiatka nesmie mať výplň karty")
-        // Seal and clock are 8 pt icons at x=6, above the mark. QES text starts at x=17.
+        let corner = try XCTUnwrap(compact.colorAt(x: 0, y: 0))
+        XCTAssertLessThan(corner.alphaComponent, 0.01, "Roh mimo zaoblenej karty ostáva priehľadný")
+        // Badges sit at x=16, size 22. Labels are dark, so colour in this band is the circle.
         let scale = Int(VisibleSignatureRenderer.renderScale)
-        let iconBand = (7 * scale)..<(13 * scale)
+        let iconBand = (18 * scale)..<(36 * scale)
         XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: iconBand, where: Self.isSealGreen), 4,
-                             "Pečať v ikone má byť zafarbená, nie čierna šablóna")
+                             "Pečať v ikone má byť zafarbená")
         XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: iconBand, where: Self.isTimeAmber), 4,
                              "Hodiny v ikone majú byť zafarbené")
-        let outside = (0..<(5 * scale))
-        XCTAssertEqual(Self.opaquePixels(in: compact, x: outside, where: Self.isTimeAmber)
-                       + Self.opaquePixels(in: compact, x: (16 * scale)..<compact.pixelsWide, where: Self.isTimeAmber),
-                       0, "Jantárová farba smie byť len pri ikone hodín")
 
         XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("QESIG"), "QES")
         XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("Kvalifikovaný elektronický podpis"), "QES")

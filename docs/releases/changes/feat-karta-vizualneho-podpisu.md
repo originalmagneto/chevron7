@@ -1,0 +1,1 @@
+- **Vizuálny podpis má novú kartu.** Kompaktný má vľavo QES, QTS a názov karty, vpravo grafiku. Podrobný má grafiku hore a pod ňou dva stĺpce. Ak ostal starý rám, v inšpektore podpis znova vyberte.

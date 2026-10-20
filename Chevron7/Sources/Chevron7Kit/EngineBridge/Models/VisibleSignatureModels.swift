@@ -28,7 +28,7 @@ public struct VisibleSignaturePlacement: Sendable, Equatable {
 }
 
 /// How much of the visible stamp is the signature itself.
-/// `.detailed` is the certificate card. `.compact` is the mark, with QES and QTS beside the facts.
+/// `.detailed` is the certificate card. `.compact` is the mark with QES and QTS beside it.
 public enum VisibleSignatureLayout: String, Codable, Sendable, Equatable {
     case detailed
     case compact

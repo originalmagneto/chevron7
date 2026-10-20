@@ -13,7 +13,7 @@ public enum VisibleSignatureRendererError: Error {
 
 public struct VisibleSignatureRenderer {
     /// Band reserved for the signature artwork (stamp, handwritten signature).
-    public static let artworkSlot = NSRect(x: 22, y: 120, width: 376, height: 106)
+    public static let artworkSlot = NSRect(x: 22, y: 108, width: 376, height: 136)
 
     public let assetStore: SignatureAssetStore
     let cacheRoot: URL
@@ -98,8 +98,8 @@ public struct VisibleSignatureRenderer {
     /// Logical card size in points. The bitmap is rendered at `renderScale` so text and
     /// artwork stay crisp when the stamp is stretched across a wide signature field.
     public static let cardSize = NSSize(width: 420, height: 260)
-    /// Mark plus a short fact strip. Narrow enough to sit in a signature blank.
-    public static let compactCardSize = NSSize(width: 200, height: 108)
+    /// Facts on the left, the mark on the right. Wide, because that is the layout.
+    public static let compactCardSize = NSSize(width: 380, height: 132)
 
 
 
@@ -116,6 +116,8 @@ public struct VisibleSignatureRenderer {
     /// Quieter than the detailed card's seal, so the mark stays the signature.
     static let compactSealColor = NSColor(calibratedRed: 0.36, green: 0.50, blue: 0.40, alpha: 1)
     static let compactTimeColor = NSColor(calibratedRed: 0.55, green: 0.44, blue: 0.28, alpha: 1)
+    static let sealFill = NSColor(calibratedRed: 0.18, green: 0.62, blue: 0.40, alpha: 1)
+    static let timeFill = NSColor(calibratedRed: 0.62, green: 0.48, blue: 0.30, alpha: 1)
 
 
     private func renderedCard(
@@ -161,111 +163,15 @@ public struct VisibleSignatureRenderer {
         }
 
 
-        // Card frame (transparent background).
-        let cardRect = NSRect(x: 6, y: 6, width: size.width - 12, height: size.height - 12)
-        let cardShape = NSBezierPath(roundedRect: cardRect, xRadius: 12, yRadius: 12)
-        Self.inkColor.withAlphaComponent(0.45).setStroke()
-        cardShape.lineWidth = 1.5
-        cardShape.stroke()
-
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .left
-        paragraph.lineBreakMode = .byTruncatingTail
-        let headingAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: Self.mutedInkColor,
-            .paragraphStyle: paragraph
-        ]
-        let nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 16, weight: .bold),
-            .foregroundColor: Self.inkColor,
-            .paragraphStyle: paragraph
-        ]
-        let detailAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11.5),
-            .foregroundColor: Self.inkColor,
-            .paragraphStyle: paragraph
-        ]
-
-        // Heading.
-        ("Elektronicky podpísal" as NSString).draw(
-            in: NSRect(x: 22, y: 232, width: size.width - 44, height: 16),
-            withAttributes: headingAttributes)
-
-        // Artwork gets the widest band of the card.
-        let artworkRect = Self.aspectFitRect(imageSize: artwork.size, inside: Self.artworkSlot)
-        artwork.draw(in: artworkRect, from: .zero, operation: .sourceOver, fraction: 1,
-                     respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
-
-        Self.inkColor.withAlphaComponent(0.25).setStroke()
-        let divider = NSBezierPath()
-        divider.move(to: CGPoint(x: 22, y: 112))
-        divider.line(to: CGPoint(x: size.width - 22, y: 112))
-        divider.lineWidth = 1
-        divider.stroke()
-
-        // Signer and certificate details.
-        (content.signerName as NSString).draw(
-            in: NSRect(x: 22, y: 88, width: size.width - 44, height: 20),
-            withAttributes: nameAttributes)
-        var details: [String] = []
-        if let certificateName = content.certificateName, !certificateName.isEmpty,
-           certificateName != content.signerName {
-            details.append("Certifikát: \(certificateName)")
-        }
-        if let qualification = content.certificateQualification, !qualification.isEmpty {
-            details.append(qualification)
-        }
-        if let timestampAuthorityName = content.timestampAuthorityName,
-           !timestampAuthorityName.isEmpty {
-            details.append("Časová pečiatka: \(timestampAuthorityName)")
-        }
-        var y: CGFloat = 70
-        for line in details.prefix(3) {
-            (line as NSString).draw(
-                in: NSRect(x: 22, y: y, width: size.width - 44, height: 15),
-                withAttributes: detailAttributes)
-            y -= 16
-        }
-
-        // Bottom row: time and status.
-        let footerY: CGFloat = 14
-        drawSymbol("clock.fill", in: NSRect(x: 22, y: footerY + 1, width: 13, height: 13), color: Self.mutedInkColor)
-        let timestampAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11),
-            .foregroundColor: Self.mutedInkColor,
-            .paragraphStyle: paragraph
-        ]
-        let timeText = isPreview
-            ? "Čas podpisu sa doplní"
-            : Self.signingTimeFormatter.string(from: signingTime)
-        (timeText as NSString).draw(
-            in: NSRect(x: 40, y: footerY, width: 160, height: 15),
-            withAttributes: timestampAttributes)
-        drawSymbol("checkmark.seal.fill", in: NSRect(x: 206, y: footerY, width: 15, height: 15), color: Self.accentColor)
-        let statusAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: Self.accentColor,
-            .paragraphStyle: paragraph
-        ]
-        let hasTimestamp = !(content.timestampAuthorityName ?? "").isEmpty
-        let statusText: String
-        if isPreview {
-            statusText = "Náhľad kvalifikovaného podpisu"
-        } else {
-            statusText = hasTimestamp ? "Kvalifikovaný podpis s pečiatkou" : "Kvalifikovaný elektronický podpis"
-        }
-        (statusText as NSString).draw(
-            in: NSRect(x: 226, y: footerY, width: size.width - 226 - 20, height: 15),
-            withAttributes: statusAttributes)
-
+        drawDetailedCard(artwork: artwork, content: content, signingTime: signingTime,
+                         isPreview: isPreview, size: size)
         NSGraphicsContext.restoreGraphicsState()
 
         let image = NSImage(size: size)
         image.addRepresentation(rep)
         return image
     }
-    /// Small facts sit above the mark, so the box stays as wide as the signature.
+    /// White rounded card. The chevron in the mockup is the inspector control, not the stamp.
     private func drawCompactCard(
         artwork: NSImage,
         content: VisibleSignatureCardContent,
@@ -273,68 +179,145 @@ public struct VisibleSignatureRenderer {
         isPreview: Bool,
         size: NSSize
     ) {
-        let margin: CGFloat = 6
-        let icon: CGFloat = 8
-        let iconGap: CGFloat = 3
-        let codeGap: CGFloat = 3
-        let factFont = NSFont.systemFont(ofSize: 7.5)
-        let codeFont = NSFont.systemFont(ofSize: 7.5, weight: .semibold)
-        let lineH: CGFloat = 10
-        let nameY = size.height - 4 - lineH
-        let timeY = nameY - 1 - lineH
-        let artworkSlot = NSRect(x: margin, y: 4,
-                                 width: size.width - margin * 2,
-                                 height: timeY - 8)
-        let artworkRect = Self.aspectFitRect(imageSize: artwork.size, inside: artworkSlot)
-        artwork.draw(in: artworkRect, from: .zero, operation: .sourceOver, fraction: 1,
-                     respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
-
-        func drawFact(_ text: String, x: CGFloat, y: CGFloat, font: NSFont, color: NSColor) {
-            let baseline = y + lineH / 2 - font.capHeight / 2
-            (text as NSString).draw(at: NSPoint(x: x, y: baseline), withAttributes: [
-                .font: font,
-                .foregroundColor: color
-            ])
+        drawCardBody(size: size, accent: nil)
+        let columnX: CGFloat = 16
+        let columnW: CGFloat = 146
+        let dividerX = columnX + columnW + 6
+        var rowY = size.height - 16 - 34
+        if let code = Self.compactSignatureCode(content.certificateQualification) {
+            drawFactRow(symbol: "checkmark", fill: Self.sealFill, title: code,
+                        subtitle: Self.qualificationTitle(content.certificateQualification),
+                        x: columnX, y: rowY, width: columnW)
+            rowY -= 38
         }
-
-        let signatureCode = Self.compactSignatureCode(content.certificateQualification)
-        var nameX = margin
-        if let signatureCode {
-            drawSymbol("checkmark.seal.fill",
-                       in: NSRect(x: nameX, y: nameY + (lineH - icon) / 2, width: icon, height: icon),
-                       color: Self.compactSealColor)
-            nameX += icon + iconGap
-            drawFact(signatureCode, x: nameX, y: nameY, font: codeFont, color: Self.compactSealColor)
-            nameX += (signatureCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
+        if let stamp = Self.compactTimestampCode(content.timestampAuthorityName) {
+            let subtitle = stamp == "QTS" ? "Kvalifikovaná časová pečiatka" : "Časová pečiatka"
+            drawFactRow(symbol: "clock.fill", fill: Self.timeFill, title: stamp,
+                        subtitle: subtitle, x: columnX, y: rowY, width: columnW)
         }
         let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nameWidth = size.width - margin - nameX
-        if !name.isEmpty, nameWidth > 8 {
-            var shown = name
-            let nameAttrs: [NSAttributedString.Key: Any] = [.font: codeFont]
-            if (shown as NSString).size(withAttributes: nameAttrs).width > nameWidth {
-                while shown.count > 1,
-                      ((shown + "…") as NSString).size(withAttributes: nameAttrs).width > nameWidth {
-                    shown.removeLast()
-                }
-                shown += "…"
-            }
-            drawFact(shown, x: nameX, y: nameY, font: codeFont, color: Self.inkColor)
+        if !name.isEmpty {
+            let plate = NSRect(x: columnX, y: 12, width: 22, height: 22)
+            NSColor(calibratedWhite: 0.93, alpha: 1).setFill()
+            NSBezierPath(roundedRect: plate, xRadius: 6, yRadius: 6).fill()
+            drawSymbol("creditcard", in: plate.insetBy(dx: 4, dy: 5), color: Self.mutedInkColor)
+            drawWrapped(name, in: NSRect(x: columnX + 28, y: 8, width: columnW - 28, height: 30),
+                        font: NSFont.systemFont(ofSize: 9, weight: .semibold), color: Self.inkColor)
+        }
+        NSColor.black.withAlphaComponent(0.08).setStroke()
+        let divider = NSBezierPath()
+        divider.move(to: CGPoint(x: dividerX, y: 12))
+        divider.line(to: CGPoint(x: dividerX, y: size.height - 12))
+        divider.lineWidth = 1
+        divider.stroke()
+        let art = NSRect(x: dividerX + 8, y: 8, width: size.width - dividerX - 16, height: size.height - 16)
+        artwork.draw(in: Self.aspectFitRect(imageSize: artwork.size, inside: art), from: .zero,
+                     operation: .sourceOver, fraction: 1, respectFlipped: false,
+                     hints: [.interpolation: NSImageInterpolation.high])
+    }
+
+    /// Mark on top, two fact columns under it. The details button stays out of the stamp.
+    private func drawDetailedCard(
+        artwork: NSImage,
+        content: VisibleSignatureCardContent,
+        signingTime: Date,
+        isPreview: Bool,
+        size: NSSize
+    ) {
+        drawCardBody(size: size, accent: NSColor(calibratedRed: 0.24, green: 0.50, blue: 0.95, alpha: 1))
+        let art = NSRect(x: 24, y: 112, width: size.width - 48, height: 132)
+        artwork.draw(in: Self.aspectFitRect(imageSize: artwork.size, inside: art), from: .zero,
+                     operation: .sourceOver, fraction: 1, respectFlipped: false,
+                     hints: [.interpolation: NSImageInterpolation.high])
+        NSColor.black.withAlphaComponent(0.08).setStroke()
+        let rule = NSBezierPath()
+        rule.move(to: CGPoint(x: 20, y: 104))
+        rule.line(to: CGPoint(x: size.width - 20, y: 104))
+        rule.lineWidth = 1
+        rule.stroke()
+
+        let badge: CGFloat = 26
+        let textX: CGFloat = 22 + badge + 8
+        let columnW = (size.width - 44) / 2 - badge
+        drawBadge("checkmark", in: NSRect(x: 22, y: 52, width: badge, height: badge), fill: Self.sealFill)
+        drawWrapped(Self.qualificationTitle(content.certificateQualification),
+                    in: NSRect(x: textX, y: 56, width: columnW, height: 32),
+                    font: NSFont.systemFont(ofSize: 11, weight: .bold), color: Self.inkColor)
+        let name = content.signerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        drawWrapped(name, in: NSRect(x: textX, y: 34, width: columnW, height: 22),
+                    font: NSFont.systemFont(ofSize: 10), color: Self.inkColor)
+        if let certificate = content.certificateName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !certificate.isEmpty, certificate != name {
+            drawWrapped(certificate, in: NSRect(x: textX, y: 16, width: columnW, height: 18),
+                        font: NSFont.systemFont(ofSize: 9), color: Self.mutedInkColor)
         }
 
-        let timeText = isPreview ? "Čas podpisu sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
-        let stampCode = Self.compactTimestampCode(content.timestampAuthorityName)
-        var timeX = margin
-        drawSymbol("clock.fill",
-                   in: NSRect(x: timeX, y: timeY + (lineH - icon) / 2, width: icon, height: icon),
-                   color: Self.compactTimeColor)
-        timeX += icon + iconGap
-        if let stampCode {
-            drawFact(stampCode, x: timeX, y: timeY, font: codeFont, color: Self.compactTimeColor)
-            timeX += (stampCode as NSString).size(withAttributes: [.font: codeFont]).width + codeGap
+        let rightX = size.width / 2 + 8
+        let rightText = rightX + badge + 8
+        drawBadge("clock.fill", in: NSRect(x: rightX, y: 52, width: badge, height: badge), fill: Self.timeFill)
+        drawWrapped(Self.timestampTitle(content.timestampAuthorityName) ?? "Čas podpisu",
+                    in: NSRect(x: rightText, y: 56, width: columnW, height: 32),
+                    font: NSFont.systemFont(ofSize: 11, weight: .bold), color: Self.inkColor)
+        if let authority = content.timestampAuthorityName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !authority.isEmpty {
+            drawWrapped(authority, in: NSRect(x: rightText, y: 34, width: columnW, height: 22),
+                        font: NSFont.systemFont(ofSize: 10), color: Self.inkColor)
         }
-        drawFact(timeText, x: timeX, y: timeY, font: factFont, color: Self.mutedInkColor)
+        let timeText = isPreview ? "Čas podpisu sa doplní" : Self.signingTimeFormatter.string(from: signingTime)
+        drawWrapped(timeText, in: NSRect(x: rightText, y: 16, width: columnW, height: 16),
+                    font: NSFont.systemFont(ofSize: 9), color: Self.mutedInkColor)
     }
+
+    private func drawCardBody(size: NSSize, accent: NSColor?) {
+        let rect = NSRect(x: 2, y: 2, width: size.width - 4, height: size.height - 4)
+        let shape = NSBezierPath(roundedRect: rect, xRadius: 14, yRadius: 14)
+        NSGraphicsContext.current?.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.10)
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 3
+        shadow.set()
+        NSColor.white.setFill()
+        shape.fill()
+        NSGraphicsContext.current?.restoreGraphicsState()
+        NSColor.black.withAlphaComponent(0.08).setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+        guard let accent else { return }
+        NSGraphicsContext.current?.saveGraphicsState()
+        shape.addClip()
+        accent.setFill()
+        NSBezierPath(rect: NSRect(x: rect.minX, y: rect.minY, width: 4, height: rect.height)).fill()
+        NSGraphicsContext.current?.restoreGraphicsState()
+    }
+
+    private func drawFactRow(symbol: String, fill: NSColor, title: String, subtitle: String,
+                             x: CGFloat, y: CGFloat, width: CGFloat) {
+        let badge: CGFloat = 22
+        drawBadge(symbol, in: NSRect(x: x, y: y + 6, width: badge, height: badge), fill: fill)
+        drawWrapped(title, in: NSRect(x: x + badge + 8, y: y + 16, width: width - badge - 8, height: 16),
+                    font: NSFont.systemFont(ofSize: 12, weight: .bold), color: Self.inkColor)
+        drawWrapped(subtitle, in: NSRect(x: x + badge + 8, y: y, width: width - badge - 8, height: 20),
+                    font: NSFont.systemFont(ofSize: 8.5), color: Self.mutedInkColor)
+    }
+
+    private func drawBadge(_ symbol: String, in rect: NSRect, fill: NSColor) {
+        fill.setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        drawSymbol(symbol, in: rect.insetBy(dx: rect.width * 0.26, dy: rect.height * 0.26), color: .white)
+    }
+
+    private func drawWrapped(_ text: String, in rect: NSRect, font: NSFont, color: NSColor) {
+        let style = NSMutableParagraphStyle()
+        style.alignment = .left
+        style.lineBreakMode = .byWordWrapping
+        (text as NSString).draw(in: rect, withAttributes: [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: style
+        ])
+    }
+
 
     /// eIDAS short name. Unknown or non-qualified text stays unlabeled rather than reading as QES.
     static func compactSignatureCode(_ qualification: String?) -> String? {
@@ -360,6 +343,29 @@ public struct VisibleSignatureRenderer {
             return "TS"
         }
         return nil
+    }
+
+    static func qualificationTitle(_ qualification: String?) -> String {
+        switch compactSignatureCode(qualification) {
+        case "QES": return "Kvalifikovaný elektronický podpis"
+        case "QESeal": return "Kvalifikovaná elektronická pečať"
+        case "AdES": return "Zaručený elektronický podpis"
+        case "AdESeal": return "Zaručená elektronická pečať"
+        default:
+            let text = qualification?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text.isEmpty ? "Elektronický podpis" : text
+        }
+    }
+
+    static func timestampTitle(_ authorityName: String?) -> String? {
+        switch compactTimestampCode(authorityName) {
+        case "QTS": return "Kvalifikovaná časová pečiatka"
+        case "TS": return "Časová pečiatka"
+        case nil:
+            let name = authorityName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return name.isEmpty ? nil : "Časová pečiatka"
+        default: return nil
+        }
     }
 
 
