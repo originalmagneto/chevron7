@@ -113,7 +113,7 @@ final class EngineBridgeGeometryTests: XCTestCase {
         let renderer = VisibleSignatureRenderer(assetStore: store, cacheRoot: work)
         let content = VisibleSignatureCardContent(signerName: "JUDr. Jana Nováková",
                                                  certificateQualification: "Kvalifikovaný elektronický podpis",
-                                                 timestampAuthorityName: "Sectigo")
+                                                 timestampAuthorityName: nil)
         let detailedURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
                                               rotationDegrees: 0, layout: .detailed)
         let compactURL = try renderer.render(asset: asset, content: content, signingTime: Date(),
@@ -125,26 +125,31 @@ final class EngineBridgeGeometryTests: XCTestCase {
         XCTAssertEqual(compact.pixelsHigh, Int(VisibleSignatureRenderer.compactCardSize.height * VisibleSignatureRenderer.renderScale))
         let corner = try XCTUnwrap(compact.colorAt(x: 2, y: 2))
         XCTAssertLessThan(corner.alphaComponent, 0.01, "Kompaktná pečiatka nesmie mať výplň karty")
-        let side = 68 * Int(VisibleSignatureRenderer.renderScale)
-        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: 0..<side, where: Self.isSealGreen), 12,
-                             "Ľavá strana má niesť zelenú pečať")
-        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: (compact.pixelsWide - side)..<compact.pixelsWide,
-                                               where: Self.isTimeAmber), 12,
-                             "Pravá strana má niesť hodiny")
-        let unqualified = VisibleSignatureCardContent(
-            signerName: "Komerčný",
-            certificateQualification: "Nekvalifikovaný certifikát")
-        let unqualifiedURL = try renderer.render(asset: asset, content: unqualified, signingTime: Date(),
-                                                 rotationDegrees: 0, layout: .compact)
-        let plain = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: unqualifiedURL)))
-        XCTAssertEqual(Self.opaquePixels(in: plain, x: 0..<side, where: Self.isSealGreen), 0,
-                       "Nekvalifikovaný certifikát nesmie dostať zelenú pečať")
-        let qesig = VisibleSignatureCardContent(signerName: "KEP", certificateQualification: "QESIG")
-        let qesigURL = try renderer.render(asset: asset, content: qesig, signingTime: Date(),
-                                           rotationDegrees: 0, layout: .compact)
-        let qualified = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: qesigURL)))
-        XCTAssertGreaterThan(Self.opaquePixels(in: qualified, x: 0..<side, where: Self.isSealGreen), 12,
-                             "QESIG má niesť zelenú pečať")
+        // Seal icon is x=8..<21 pt. QES text starts at 25 pt, so this band is the icon only.
+        let scale = Int(VisibleSignatureRenderer.renderScale)
+        let sealIcon = (9 * scale)..<(20 * scale)
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: sealIcon, where: Self.isSealGreen), 4,
+                             "Pečať v ikone má byť zafarbená, nie čierna šablóna")
+        let timeWidth = ("Čas podpisu sa doplní" as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 11)
+        ]).width
+        let clockX = VisibleSignatureRenderer.compactCardSize.width - 8 - (timeWidth + 13 + 4 + 2)
+        let clock = Int(clockX * CGFloat(scale))..<Int((clockX + 13) * CGFloat(scale))
+        XCTAssertGreaterThan(Self.opaquePixels(in: compact, x: clock, where: Self.isTimeAmber), 4,
+                             "Hodiny v ikone majú byť zafarbené")
+        XCTAssertEqual(
+            Self.opaquePixels(in: compact, x: 0..<clock.lowerBound, where: Self.isTimeAmber)
+            + Self.opaquePixels(in: compact, x: clock.upperBound..<compact.pixelsWide, where: Self.isTimeAmber),
+            0, "Jantárová farba smie byť len v ikone hodín")
+
+        XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("QESIG"), "QES")
+        XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("Kvalifikovaný elektronický podpis"), "QES")
+        XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("QESEAL"), "QESeal")
+        XCTAssertEqual(VisibleSignatureRenderer.compactSignatureCode("ADESIG"), "AdES")
+        XCTAssertNil(VisibleSignatureRenderer.compactSignatureCode("Nekvalifikovaný certifikát"))
+        XCTAssertEqual(VisibleSignatureRenderer.compactTimestampCode("Belgium BOSA (kvalifikovaná)"), "QTS")
+        XCTAssertEqual(VisibleSignatureRenderer.compactTimestampCode("DigiCert (nekvalifikovaná)"), "TS")
+        XCTAssertNil(VisibleSignatureRenderer.compactTimestampCode("https://tsa.kancelaria.test/tsp"))
     }
 
     private static func opaquePixels(in bitmap: NSBitmapImageRep, x range: Range<Int>,
@@ -162,11 +167,11 @@ final class EngineBridgeGeometryTests: XCTestCase {
     }
 
     private static func isSealGreen(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Bool {
-        green > 0.4 && green > red + 0.15 && green > blue
+        green > 0.42 && green > red && green > blue
     }
 
     private static func isTimeAmber(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Bool {
-        red > 0.55 && red > green && red > blue && green > 0.25
+        red > 0.35 && red > green && red > blue && green > 0.15
     }
     private func signatureSquigglePNG() throws -> Data {
         let size = NSSize(width: 360, height: 120)

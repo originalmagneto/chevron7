@@ -1,0 +1,1 @@
+- **Kompaktný podpis má skratky pri ikonách.** Pod grafickým podpisom je vľavo pečať s QES a meno, vpravo hodiny s QTS a čas, na jednej linke. Nekvalifikovaná pečiatka je TS, vlastná adresa ostane bez skratky. Podrobný vzhľad ostáva predvolený.

@@ -1,1 +1,1 @@
-- **Vizuálny podpis má kompaktný vzhľad.** Pri grafickom podpise si v inšpektore vyberiete Podrobný alebo Kompaktný. Kompaktný nechá podpis v strede a po bokoch farebnú pečať a hodiny, bez čiary a mena. Podrobný ostáva predvolený.
+- **Vizuálny podpis má kompaktný vzhľad.** Pri grafickom podpise si v inšpektore vyberiete Podrobný alebo Kompaktný. Kompaktný nechá podpis a pod ním skratky QES a QTS pri ikonách. Podrobný ostáva predvolený.
