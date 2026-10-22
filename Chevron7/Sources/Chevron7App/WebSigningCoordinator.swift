@@ -457,7 +457,7 @@ final class WebSigningCoordinator {
                 : (wantsTimestamp ? .padesT : .padesB)
 
             let content: Data
-            let signedBy: String
+            var signedBy: String
             let issuedBy: String
             switch method {
             case .autogramMobile:
@@ -497,6 +497,7 @@ final class WebSigningCoordinator {
                 // certificate, which an eID signature on this path never reads here.
                 issuedBy = ""
             }
+            signedBy = SignedOutputSigner.commonName(in: content) ?? signedBy
             let saved = archive(content, for: pending.request)
             signedDocumentStore.record(displayName: pending.request.filename,
                                        origin: .browser,
@@ -580,18 +581,21 @@ final class WebSigningCoordinator {
             // page's next request.
             guard session.isCurrent(token) else { return }
             let payload = wantsContainer ? (signed.asicData ?? signed.pdfData) : signed.pdfData
+            // PFS lists this name under the form's signatures; an eID signs
+            // without its certificate being read, so the output names it.
+            let signedBy = SignedOutputSigner.commonName(in: payload) ?? signed.signatureLabel
             let saved = archive(payload, for: pending.request)
             signedDocumentStore.record(displayName: pending.request.filename,
                                        origin: .browser,
                                        method: .card,
                                        signatureLevel: level,
-                                       signedBy: signed.signatureLabel,
+                                       signedBy: signedBy,
                                        url: saved)
             signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
             finish(.success(WebSignResponse(
                 requestID: pending.request.requestID,
                 content: payload.base64EncodedString(),
-                signedBy: signed.signatureLabel,
+                signedBy: signedBy,
                 issuedBy: signed.issuerName(fallback: identities.first(where: { $0.id == identityID })))), token: token)
         } catch {
             guard session.isCurrent(token) else { return }

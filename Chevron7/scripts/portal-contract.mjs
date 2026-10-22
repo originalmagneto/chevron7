@@ -404,28 +404,69 @@ function pfsSignFlow(ditec, form) {
     });
 }
 
+const PFS_FORM = {
+    objectId: '123',
+    objectDescription: 'Daňové priznanie k DPH',
+    xdcNamespaceUri: 'http://ekrform.financnasprava.sk/Formulare/dphv17',
+    xdcVersion: '1.5',
+    contentXml: '<dokument/>',
+    contentXsd: '<xs:schema/>',
+    xsdReference: 'http://ekrform.financnasprava.sk/Formulare/dphv17/form.xsd',
+    contentXslt: '<xsl:stylesheet/>',
+    xslReference: 'http://ekrform.financnasprava.sk/Formulare/dphv17/form.xsl',
+};
+
 async function pfsScenario() {
     const page = newPage(null);
     try {
-        const { username, signature } = await pfsSignFlow(page.ditec, {
-            objectId: '123',
-            objectDescription: 'Daňové priznanie k DPH',
-            xdcNamespaceUri: 'http://ekrform.financnasprava.sk/Formulare/dphv17',
-            xdcVersion: '1.5',
-            contentXml: '<dokument/>',
-            contentXsd: '<xs:schema/>',
-            xsdReference: 'http://ekrform.financnasprava.sk/Formulare/dphv17/form.xsd',
-            contentXslt: '<xsl:stylesheet/>',
-            xslReference: 'http://ekrform.financnasprava.sk/Formulare/dphv17/form.xsl',
-        });
+        const { username, signature } = await pfsSignFlow(page.ditec, PFS_FORM);
         const req = page.requests[0] || {};
         check('pfs: signs', signature === SIGNED, signature);
+        check('pfs: one signature serves the signer name and the container', page.requests.length === 1,
+            String(page.requests.length));
         check('pfs: identifier gets the version appended', req.eform && req.eform.identifier === 'http://ekrform.financnasprava.sk/Formulare/dphv17/1.5',
             req.eform && req.eform.identifier);
-        check('pfs: signer name before signing parses to a usable name', username.length > 0 && !username.includes('=') && username === username.trim(),
-            JSON.stringify(username));
+        check('pfs: the signer name is the signing certificate\'s', username === 'Ing. Ján Testovací', JSON.stringify(username));
+        check('pfs: signed as XAdES in ASiC-E', req.container === 'ASiC_E' && req.signatureLevel === 'XAdES_BASELINE_B',
+            JSON.stringify({ container: req.container, level: req.signatureLevel }));
     } catch (error) {
         check('pfs: flow completes', false, String(error && error.message ? error.message : error));
+    }
+
+    // The next return starts afresh: the cached signature is never handed over twice.
+    try {
+        await pfsSignFlow(page.ditec, PFS_FORM);
+        check('pfs: a second return signs again', page.requests.length === 2, String(page.requests.length));
+    } catch (error) {
+        check('pfs: a second return completes', false, String(error && error.message ? error.message : error));
+    }
+
+    const early = newPage(null);
+    const name = await new Promise((resolve) => early.ditec.dSigXadesBpJs.getSignerIdentification({
+        onSuccess: resolve, onError: (error) => resolve(`error: ${error && error.message}`),
+    }));
+    const parsed = getUserNameFromSignature(String(name));
+    check('pfs: without sign() the placeholder parses to a usable name and nothing is signed',
+        early.requests.length === 0 && parsed.length > 0 && !parsed.includes('=') && parsed === parsed.trim(),
+        JSON.stringify({ name, requests: early.requests.length }));
+
+    const cancelled = newPage(null);
+    cancelled.app.outcome = 'cancelled';
+    try {
+        await pfsSignFlow(cancelled.ditec, PFS_FORM);
+        check('pfs: a cancel in the panel fails the signer name', false, 'flow completed');
+    } catch (error) {
+        check('pfs: a cancel in the panel fails the signer name with code 1',
+            error && error.name === 'DitecError' && error.code === 1 && cancelled.requests.length === 1,
+            JSON.stringify({ name: error && error.name, code: error && error.code, requests: cancelled.requests.length }));
+    }
+    cancelled.app.outcome = 'signed';
+    try {
+        const retry = await pfsSignFlow(cancelled.ditec, PFS_FORM);
+        check('pfs: a retry after a cancel signs', retry.signature === SIGNED && cancelled.requests.length === 2,
+            String(cancelled.requests.length));
+    } catch (error) {
+        check('pfs: a retry after a cancel completes', false, String(error && error.message ? error.message : error));
     }
 }
 

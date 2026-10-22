@@ -65,8 +65,8 @@
     + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.pngplugin.PngBpPlugin","version":"2.0.0.23"},'
     + '{"name":"sk.ditec.zep.dsigner.xades.bp.plugins.pdfplugin.PdfBpPlugin","version":"2.0.0.23"}]}';
 
-  /// Shown by getSignerIdentification before a signature exists: PFS asks for
-  /// the name first and parses whatever follows "CN=".
+  /// Shown by getSignerIdentification when nothing is signed or about to be:
+  /// PFS parses whatever follows "CN=", so the answer always carries one.
   var SIGNER_PLACEHOLDER = "CN=(Používateľ Chevron7)";
 
   var counter = 0;
@@ -152,11 +152,18 @@
     signatureId: null,
     digestAlgUri: null,
     signaturePolicyIdentifier: null,
+    // Set by sign(): the portal's next step is a getter that signs.
+    signRequested: false,
+    // The BP signature getSignerIdentification already made, which the
+    // ASiC getter hands over instead of signing a second time.
+    presigned: false,
     signed: null
   };
 
   function reset() {
     session.objects = [];
+    session.signRequested = false;
+    session.presigned = false;
     session.signed = null;
   }
 
@@ -509,6 +516,7 @@
       session.signatureId = signatureId;
       session.digestAlgUri = digestAlgUri;
       session.signaturePolicyIdentifier = signaturePolicyIdentifier;
+      session.signRequested = true;
       if (callback && callback.onSuccess) callback.onSuccess();
     },
 
@@ -714,8 +722,38 @@
     }
   };
 
+  var BP_ASIC_SIGNATURE = { container: "ASiC_E", packaging: "ENVELOPING", level: "XAdES_BASELINE_B" };
+
+  /**
+   * PFS asks for the signer between sign() and the ASiC getter and lists that
+   * name under "Podpisy". D.Signer signs inside sign(), so its answer names the
+   * certificate; here the signature is made at this point instead, and the
+   * getter hands it over. The ASiC getter is the only signing getter this
+   * adapter has, so nothing else could have followed.
+   */
+  DSigXadesBpAdapter.prototype.getSignerIdentification = function (callback) {
+    if (session.signed || !session.signRequested || session.objects.length === 0) {
+      if (callback && callback.onSuccess) callback.onSuccess(signerIdentification());
+      return;
+    }
+    performSignature(BP_ASIC_SIGNATURE, {
+      onSuccess: function () {
+        session.presigned = true;
+        if (callback && callback.onSuccess) callback.onSuccess(signerIdentification());
+      },
+      onError: function (error) {
+        if (callback && callback.onError) callback.onError(error);
+      }
+    });
+  };
+
   DSigXadesBpAdapter.prototype.getSignatureWithASiCEnvelopeBase64 = function (callback) {
-    performSignature({ container: "ASiC_E", packaging: "ENVELOPING", level: "XAdES_BASELINE_B" }, callback);
+    if (session.presigned && session.signed) {
+      session.presigned = false;
+      if (callback && callback.onSuccess) callback.onSuccess(session.signed.content);
+      return;
+    }
+    performSignature(BP_ASIC_SIGNATURE, callback);
   };
 
   function DSigXadesAdapter() {}
