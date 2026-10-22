@@ -1,0 +1,1 @@
+- **Nové okno inštalácie.** Keď otvoríte stiahnutý súbor Chevron7.dmg, okno má vlastné pozadie v štýle aplikácie: ikona Chevron7 vľavo, priečinok Applications vpravo a jantárová šípka medzi nimi. Stačí potiahnuť Chevron7 na priečinok Applications.

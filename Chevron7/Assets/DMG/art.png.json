@@ -1,0 +1,5 @@
+{
+  "prompt": "Generated with Codex image generation (codex-cli 0.163.0), the app icon attached as reference: Use your image generation tool to create ONE wide background picture for a macOS disk image (DMG) installer window for the app whose icon is attached (Chevron7: an amber glowing glass chevron with a small glowing dot above it, on a midnight blue glass tile). Landscape, aspect ratio about 33:20 (it will be scaled and cropped to 1320x800). Style: premium, calm, Apple-like. Deep midnight navy ground (#0a0b1a to #141a33), a soft amber (#ffb23e) light glow and faint glass refractions, very subtle fine grain, perhaps a few faint thin amber chevron lines echoing the icon far in the background near the edges. IMPORTANT: no text, no letters, no logos, no app icons, no arrows, no folders, no UI. Keep the horizontal middle band (where two icons and their labels will sit at x=25% and x=75%, y=50%) calm and uncluttered.",
+  "createdAt": "2026-10-22",
+  "derived": "background.png and background@2x.png are composed from this by scripts/make-dmg-background.py"
+}
