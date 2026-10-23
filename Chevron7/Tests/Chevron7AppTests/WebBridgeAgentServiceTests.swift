@@ -85,6 +85,64 @@ final class WebBridgeAgentServiceTests: XCTestCase {
                        .register(retireLegacyAgent: false))
     }
 
+    // MARK: - Registered definition
+
+    func testUnregisteredAgentIsRegistered() {
+        for status in [SMAppService.Status.notRegistered, .notFound, .requiresApproval] {
+            XCTAssertEqual(WebBridgeAgentService.registration(status: status, bundledDefinition: "new",
+                                                              registeredDefinition: "new"),
+                           .register)
+        }
+    }
+
+    func testRegistrationOfTheSameDefinitionIsKept() {
+        XCTAssertEqual(WebBridgeAgentService.registration(status: .enabled, bundledDefinition: "abc",
+                                                          registeredDefinition: "abc"),
+                       .keep)
+    }
+
+    /// launchd keeps the plist it imported at registration, so a changed definition
+    /// reaches it only through a new registration.
+    func testChangedDefinitionIsRegisteredAgain() {
+        XCTAssertEqual(WebBridgeAgentService.registration(status: .enabled, bundledDefinition: "new",
+                                                          registeredDefinition: "old"),
+                       .renew)
+    }
+
+    /// Registrations from before the digest was remembered ran the Background agent.
+    func testRegistrationWithoutARememberedDefinitionIsRenewedOnce() {
+        XCTAssertEqual(WebBridgeAgentService.registration(status: .enabled, bundledDefinition: "new",
+                                                          registeredDefinition: nil),
+                       .renew)
+    }
+
+    func testUnreadableBundledPlistLeavesTheRegistrationAlone() {
+        XCTAssertEqual(WebBridgeAgentService.registration(status: .enabled, bundledDefinition: nil,
+                                                          registeredDefinition: "old"),
+                       .keep)
+    }
+
+    func testDefinitionDigestReadsTheBundledPlist() throws {
+        let agents = directory.appendingPathComponent("Contents/Library/LaunchAgents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
+        try Data("abc".utf8).write(to: agents.appendingPathComponent(WebBridgeAgentService.plistName))
+        XCTAssertEqual(WebBridgeAgentService.definitionDigest(inBundleAt: directory),
+                       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        XCTAssertNil(WebBridgeAgentService.definitionDigest(inBundleAt: directory.appendingPathComponent("missing")))
+    }
+
+    /// Every Safari message passes through the agent; as a Background job it ran at
+    /// priority 4 and a busy Mac kept the signing panel waiting for seconds.
+    func testShippedAgentPlistsAreInteractive() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        for script in ["build_app.sh", "scripts/install-webbridge-agent.sh"] {
+            let text = try String(contentsOf: root.appendingPathComponent(script), encoding: .utf8)
+            XCTAssertTrue(text.contains("<key>ProcessType</key>\n    <string>Interactive</string>"), script)
+            XCTAssertFalse(text.contains("<string>Background</string>"), script)
+        }
+    }
+
     // MARK: - Legacy plist
 
     func testOldInstallerPlistIsRecognisedForAnyCopyOfTheApp() throws {

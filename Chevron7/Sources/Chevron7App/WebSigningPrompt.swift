@@ -68,10 +68,14 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
 
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: NSSize(width: max(size.width, 900), height: max(size.height, 600))),
-            styleMask: [.titled, .closable, .utilityWindow, .resizable],
+            styleMask: [.titled, .closable, .utilityWindow, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false)
+        // The brand header runs under the title bar and carries the title itself;
+        // the window keeps it for Mission Control and VoiceOver.
         panel.title = "Podpísať dokument zo stránky"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
         panel.contentView = hosting
         panel.isFloatingPanel = true
         panel.level = .floating
