@@ -270,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WebBridgeAgentService.retireAbandonedAgents()
         WebBridgeAgentService.ensureRegistered()
         WebBridgeListener.shared.start()
+        DuplicateAppCopyMonitor.shared.refresh()
     }
 
     /// Finder's "Open With", a double click or a drop on the Dock icon: the

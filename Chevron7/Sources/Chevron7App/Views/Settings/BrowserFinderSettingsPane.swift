@@ -12,6 +12,9 @@ struct BrowserFinderSettingsPane: View {
     @State private var quickAction: QuickActionVisibility = .notInstalled
     @State private var finderMessage: String?
     @State private var showFinderGuide = false
+    @State private var copyMonitor = DuplicateAppCopyMonitor.shared
+    @State private var copyMessage: String?
+    @State private var trashingCopy: AppCopy.ID?
 
     private var resolvedFolder: String {
         let configured = settingsStore.settings.webSigningOutputPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,7 +26,12 @@ struct BrowserFinderSettingsPane: View {
         let folderActive = SettingsAdvancedState.webSigningFolderIsActive(settings)
         let retentionActive = SettingsAdvancedState.webSigningRetentionIsActive(settings)
         SettingsPaneForm(pane: .browserFinder,
-                         pills: SettingsStatus.browserFinder(agent: agentStatus, quickAction: quickAction)) {
+                         pills: SettingsStatus.browserFinder(agent: agentStatus, quickAction: quickAction,
+                                                             otherCopies: copyMonitor.copies.count)) {
+            if !copyMonitor.copies.isEmpty || copyMessage != nil {
+                otherCopiesSection
+            }
+
             Section {
                 agentStatusRow
                 Toggle("Ukladať podpísané dokumenty aj lokálne", isOn: $settingsStore.settings.webSigningSavesLocally)
@@ -102,11 +110,55 @@ struct BrowserFinderSettingsPane: View {
             }
         }
         .onAppear {
+            copyMonitor.refresh()
             agentStatus = WebBridgeAgentService.currentStatus()
             quickAction = FinderQuickActionService.currentVisibility()
         }
         .sheet(isPresented: $showFinderGuide) {
             FinderGuideSheet { showFinderGuide = false }
+        }
+    }
+
+    /// Other copies of the app, each with its own Safari extension that a portal may
+    /// pick instead of this one's.
+    private var otherCopiesSection: some View {
+        Section {
+            ForEach(copyMonitor.copies) { copy in
+                LabeledContent {
+                    otherCopyAction(copy)
+                } label: {
+                    Text("Chevron7 \(copy.version ?? "neznáma verzia")")
+                    Text(copy.url.path).textSelection(.enabled)
+                }
+            }
+            if let copyMessage {
+                Text(copyMessage).font(.callout).foregroundStyle(.secondary)
+            }
+        } header: {
+            Label("Ďalšie kópie Chevron7", systemImage: "square.on.square")
+        } footer: {
+            Text("Každá kópia pridáva do Safari vlastné rozšírenie Chevron7 a portál môže použiť rozšírenie zo staršej kópie. Podpis potom zlyhá s chybou „-200: Chevron7 nie je dostupný“. Ponechajte iba kópiu, ktorá je spustená teraz (\(DuplicateAppCopies.runningDescription)).")
+        }
+    }
+
+    @ViewBuilder
+    private func otherCopyAction(_ copy: AppCopy) -> some View {
+        if copy.isNewerThanRunning {
+            Text("Novšia ako spustená. Ukončite Chevron7, otvorte túto kópiu a staršiu odstráňte tam.")
+                .font(.callout).foregroundStyle(.orange).multilineTextAlignment(.trailing)
+        } else if copy.isRunning {
+            Text("Je spustená. Najprv ju ukončite.")
+                .font(.callout).foregroundStyle(.secondary)
+        } else if trashingCopy == copy.id {
+            ProgressView().controlSize(.small)
+        } else {
+            Button("Presunúť do Koša") {
+                trashingCopy = copy.id
+                Task {
+                    copyMessage = await copyMonitor.moveToTrash(copy)
+                    trashingCopy = nil
+                }
+            }
         }
     }
 

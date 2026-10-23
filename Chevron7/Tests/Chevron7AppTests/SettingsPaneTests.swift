@@ -22,5 +22,6 @@ final class SettingsPaneTests: XCTestCase {
 
     func testUnknownStoredPaneFallsBack() {
         XCTAssertEqual(SettingsPane.initial(stored: "conversion", ezzkConnected: true), .profile)
+        XCTAssertEqual(SettingsPane.initial(stored: "ai", ezzkConnected: false, hasOtherAppCopies: true), .browserFinder)
     }
 }

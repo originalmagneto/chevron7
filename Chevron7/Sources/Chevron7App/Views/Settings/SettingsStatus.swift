@@ -85,7 +85,8 @@ enum SettingsStatus {
     }
 
     static func browserFinder(agent: WebBridgeAgentService.Status,
-                              quickAction: QuickActionVisibility) -> [StatusPillModel] {
+                              quickAction: QuickActionVisibility,
+                              otherCopies: Int = 0) -> [StatusPillModel] {
         let safari: StatusPillModel = switch agent {
         case .enabled: StatusPillModel(tone: .ok, text: "Safari prepojené")
         case .unsignedBuild: StatusPillModel(tone: .off, text: "Safari: vývojárska zostava")
@@ -96,7 +97,10 @@ enum SettingsStatus {
         case .hiddenInFinder: StatusPillModel(tone: .attention, text: "Quick Action skrytá vo Findere")
         case .notInstalled: StatusPillModel(tone: .attention, text: "Quick Action nenainštalovaná")
         }
-        return [safari, finder]
+        guard otherCopies > 0 else { return [safari, finder] }
+        let copies = StatusPillModel(tone: .attention,
+                                     text: otherCopies == 1 ? "Ďalšia kópia Chevron7" : "Ďalšie kópie Chevron7: \(otherCopies)")
+        return [copies, safari, finder]
     }
 
     static func ai(mode: AppSettings.AIMode, reviewedPages: Int?) -> [StatusPillModel] {
