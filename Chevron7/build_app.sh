@@ -311,6 +311,9 @@ if [[ -x "$AGENT_BIN" ]]; then
 
     # A Developer ID build registers the agent itself through SMAppService
     # (WebBridgeAgentService); launchd reads this plist from the bundle.
+    # Interactive, because every Safari message passes through the agent: as a
+    # Background job it ran at priority 4 and on a busy Mac took up to 8 s to
+    # check its caller before the signing panel could open (2026-10-23).
     mkdir -p "$CONTENTS/Library/LaunchAgents"
     cat > "$CONTENTS/Library/LaunchAgents/app.slovensko.chevron7.webbridge.plist" <<'AGENTPLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -331,7 +334,7 @@ if [[ -x "$AGENT_BIN" ]]; then
         <string>app.slovensko.chevron7</string>
     </array>
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Interactive</string>
 </dict>
 </plist>
 AGENTPLIST

@@ -31,7 +31,7 @@ cat > "$PLIST" <<PLISTEOF
         <true/>
     </dict>
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Interactive</string>
 </dict>
 </plist>
 PLISTEOF

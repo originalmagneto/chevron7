@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import CryptoKit
 import Foundation
 import Security
 import ServiceManagement
@@ -52,7 +53,42 @@ enum WebBridgeAgentService {
         case failed(String)
     }
 
+    /// What to do with the registration of a signed regular launch.
+    enum Registration: Equatable {
+        /// launchd already runs the definition this bundle carries.
+        case keep
+        case register
+        /// Registered, but from another definition. launchd keeps the plist it
+        /// imported at registration and never reads the bundled one again, so a
+        /// changed `ProcessType` reached nobody: the owner's Mac still ran the
+        /// agent of 1.11.2 as a Background job under 1.17.1 (2026-10-23).
+        case renew
+    }
+
+    /// Defaults key holding the SHA-256 of the agent plist last registered.
+    static let registeredDefinitionKey = "webBridgeAgent.registeredDefinition"
+
     private static let log = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "web-bridge-agent")
+
+    /// A registration made before the definition was remembered counts as stale,
+    /// so every Mac re-registers once; an unreadable bundled plist changes nothing.
+    static func registration(status: SMAppService.Status, bundledDefinition: String?,
+                             registeredDefinition: String?) -> Registration {
+        guard status == .enabled else { return .register }
+        guard let bundledDefinition, bundledDefinition != registeredDefinition else { return .keep }
+        return .renew
+    }
+
+    /// SHA-256 of the agent plist inside `bundle`, nil when it cannot be read.
+    static func definitionDigest(inBundleAt bundleURL: URL = Bundle.main.bundleURL) -> String? {
+        let url = bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/\(plistName)")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func rememberRegisteredDefinition(defaults: UserDefaults = .standard) {
+        defaults.set(definitionDigest(), forKey: registeredDefinitionKey)
+    }
 
     static func plan(teamIdentifier: String?, launchMode: AppLaunchMode, translocated: Bool,
                      legacyAgentInstalled: Bool) -> Plan {
@@ -180,7 +216,7 @@ enum WebBridgeAgentService {
         }
         let service = SMAppService.agent(plistName: plistName)
         if legacyAgentFound {
-            migrateLegacyAgent(register: {
+            let migrated = migrateLegacyAgent(register: {
                 // The bootout unloaded whichever job held the label, so an existing
                 // registration is renewed as well.
                 if service.status == .enabled {
@@ -188,11 +224,30 @@ enum WebBridgeAgentService {
                 }
                 try service.register()
             })
-        } else if service.status != .enabled {
-            do {
-                try service.register()
-            } catch {
-                log.error("Web bridge agent not registered: \(error.localizedDescription, privacy: .public)")
+            if migrated { rememberRegisteredDefinition() }
+        } else {
+            let registration = registration(
+                status: service.status, bundledDefinition: definitionDigest(),
+                registeredDefinition: UserDefaults.standard.string(forKey: registeredDefinitionKey))
+            if registration == .renew {
+                // Only after the definition changed, never on every launch: the
+                // unregistration ends the agent, and launchd starts it again from the
+                // new definition once the listener connects.
+                log.notice("Web bridge agent definition changed, registering it again")
+                do {
+                    try service.unregister()
+                } catch {
+                    log.error("Web bridge agent not unregistered: \(error.localizedDescription, privacy: .public)")
+                }
+                waitUntilUnloaded("gui/\(getuid())/\(label)")
+            }
+            if registration != .keep {
+                do {
+                    try service.register()
+                    rememberRegisteredDefinition()
+                } catch {
+                    log.error("Web bridge agent not registered: \(error.localizedDescription, privacy: .public)")
+                }
             }
         }
         log.info("Web bridge agent status: \(String(describing: service.status), privacy: .public)")
@@ -271,6 +326,7 @@ enum WebBridgeAgentService {
             try? register()
         }
         let current = currentStatus()
+        if failure == nil, current == .enabled { rememberRegisteredDefinition() }
         if let failure, current != .enabled {
             return status(afterRegistrationError: failure, legacyAgentInstalled: legacyAgentInstalled())
         }
