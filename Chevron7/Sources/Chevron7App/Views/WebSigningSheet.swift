@@ -13,23 +13,30 @@ struct WebSigningSheet: View {
     @FocusState private var pinFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
+        VStack(spacing: 0) {
+            WebSigningBrandHeader(host: coordinator.pending?.request.pageHost)
 
-            if let banner = coordinator.signatureCheck.bannerModel {
-                SignatureBanner(model: banner)
-            }
-
-            HStack(alignment: .top, spacing: 24) {
-                if let pending = coordinator.pending, let document = pending.pdfDocument {
-                    WebSigningDocumentPreview(document: document, filename: pending.request.filename)
-                        .frame(width: 360)
-                        .frame(minHeight: 460)
+            VStack(alignment: .leading, spacing: 16) {
+                if let banner = coordinator.signatureCheck.bannerModel {
+                    SignatureBanner(model: banner)
                 }
-                controls
+
+                HStack(alignment: .top, spacing: 24) {
+                    if let pending = coordinator.pending, let document = pending.pdfDocument {
+                        WebSigningDocumentPreview(document: document, filename: pending.request.filename)
+                            .frame(width: 360)
+                            .frame(minHeight: 460)
+                    }
+                    controls
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+            .frame(maxHeight: .infinity, alignment: .top)
+
+            actions
         }
-        .padding(24)
         .frame(minWidth: 860, idealWidth: 920, maxWidth: 1100)
         .onChange(of: coordinator.pinFocusRequest) {
             pinFocused = true
@@ -51,7 +58,7 @@ struct WebSigningSheet: View {
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             if let pending = coordinator.pending {
                 documentCard(pending)
             }
@@ -68,49 +75,25 @@ struct WebSigningSheet: View {
 
             if coordinator.mobileSigningAvailable {
                 mobileOption
-                Divider()
             }
 
-            identityPicker
-            if coordinator.selectedIdentityRequiresPIN {
-                pinField
-            } else if !coordinator.identities.isEmpty {
-                bokNotice
-            }
+            cardOption
 
             if let error = coordinator.errorText {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-
-            Spacer(minLength: 0)
-            actions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "signature")
-                .font(.title2)
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Podpísať dokument zo stránky")
-                    .font(.headline)
-                HStack(spacing: 4) {
-                    Image(systemName: "safari")
-                    Text("Pôvod: \(coordinator.pending?.request.pageHost ?? "webový portál") cez rozšírenie Safari")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     private func documentCard(_ pending: WebSigningCoordinator.Pending) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 if pending.pdfDocument == nil, let thumb = pending.pdfThumbnail {
                     VStack(spacing: 4) {
@@ -128,23 +111,28 @@ struct WebSigningSheet: View {
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
+                } else {
+                    Image(systemName: documentSymbol(pending))
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                        .frame(width: 40, height: 40)
+                        .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .accessibilityHidden(true)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(pending.request.filename)
-                        .font(.callout.weight(.medium))
+                        .font(.headline)
                         .lineLimit(2)
                         .truncationMode(.middle)
                     Text(pending.kindDescription)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        Text(pending.sizeDescription)
-                        Text("·")
-                        Text(pending.request.signatureLevel.replacingOccurrences(of: "_", with: " "))
+                    HStack(spacing: 6) {
+                        metaChip(pending.sizeDescription)
+                        metaChip(pending.request.signatureLevel.replacingOccurrences(of: "_", with: " "))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
                 }
             }
 
@@ -153,25 +141,46 @@ struct WebSigningSheet: View {
             }
 
             if let excerpt = pending.xmlExcerpt {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(pending.request.eform != nil || pending.request.payloadMimeType.contains("xml")
                         ? "Ukážka obsahu formulára (čiastočný náhľad):"
                         : "Ukážka obsahu dokumentu (čiastočný náhľad):")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(excerpt)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
-                            .padding(6)
+                            .textSelection(.enabled)
+                            .padding(10)
                     }
-                    .frame(maxHeight: 70)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: .infinity, maxHeight: 90, alignment: .leading)
+                    // Its own height, so the panel grows when the certificates appear
+                    // instead of squeezing the excerpt.
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        .inspectorCard(padding: 14)
+    }
+
+    private func documentSymbol(_ pending: WebSigningCoordinator.Pending) -> String {
+        if pending.request.eform != nil || pending.request.payloadMimeType.lowercased().contains("xml") {
+            return "doc.text"
+        }
+        return pending.xmlExcerpt == nil ? "doc" : "doc.plaintext"
+    }
+
+    private func metaChip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.06), in: Capsule())
     }
 
     /// The other documents the one signature covers, each openable in Quick Look
@@ -212,23 +221,34 @@ struct WebSigningSheet: View {
     /// State portals ask for Baseline B, so without this the phone offers only
     /// the handwritten-equivalent signature and the qualified one stays greyed out.
     private var timestampToggle: some View {
-        Toggle(isOn: $coordinator.addsQualifiedTimestamp) {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Pridať kvalifikovanú časovú pečiatku")
-                    .font(.callout)
+                    .font(.callout.weight(.medium))
                 if coordinator.addsUnrequestedTimestamp {
                     Label("Podpíše sa ako osvedčený podpis (\(coordinator.effectiveLevelDescription)), o aký stránka nežiadala. nove.slovensko.sk takýto podpis odmietne.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Podpíše sa presne tak, ako pýta stránka (\(coordinator.effectiveLevelDescription)). Autogram v mobile to ponúkne ako vlastnoručný podpis.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            Spacer(minLength: 12)
+            Toggle("Pridať kvalifikovanú časovú pečiatku", isOn: $coordinator.addsQualifiedTimestamp)
+                .labelsHidden()
+                .toggleStyle(.switch)
         }
-        .toggleStyle(.switch)
+        .inspectorCard(padding: 12)
     }
 
     /// Signing with the phone needs no reader and no PIN here, so it is offered
@@ -239,6 +259,8 @@ struct WebSigningSheet: View {
             Image(systemName: "iphone.gen3.radiowaves.left.and.right")
                 .font(.title3)
                 .foregroundStyle(.tint)
+                .frame(width: 28)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Podpísať mobilom")
                     .font(.callout.weight(.medium))
@@ -262,7 +284,11 @@ struct WebSigningSheet: View {
             }
         }
         .padding(12)
-        .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(.tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 0.5)
+        )
     }
 
     private func confirmViaMobile(_ method: MobileSigningMethod) {
@@ -270,26 +296,36 @@ struct WebSigningSheet: View {
         Task { await coordinator.confirmViaMobile(method: method) }
     }
 
+    /// The card, its certificates and the PIN in one card, so the path to "Podpísať"
+    /// reads as one step after the phone.
+    private var cardOption: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            identityPicker
+            if coordinator.selectedIdentityRequiresPIN {
+                pinField
+            } else if !coordinator.identities.isEmpty {
+                bokNotice
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .inspectorCard(padding: 12)
+    }
+
     private var identityPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Alebo podpisovou kartou")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if coordinator.identities.isEmpty {
-                HStack(spacing: 8) {
-                    Text("Vložte kartu do čítačky.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Button("Hľadať znova") {
-                        Task { await coordinator.refreshIdentities() }
-                    }
-                    .buttonStyle(.link)
-                }
-            } else if !coordinator.certificatesResolved && !coordinator.selectedIdentityRequiresPIN {
-                Text(coordinator.identities.first?.label ?? "Karta pripojená")
-                    .font(.callout)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "creditcard")
+                    .font(.title3)
                     .foregroundStyle(.secondary)
-            } else if coordinator.certificatesResolved {
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(coordinator.mobileSigningAvailable ? "Alebo podpisovou kartou" : "Podpisovou kartou")
+                        .font(.callout.weight(.medium))
+                    cardStatus
+                }
+            }
+            if coordinator.certificatesResolved, !coordinator.identities.isEmpty {
                 // Every certificate on the card at once, marked qualified, mandate or
                 // commercial, as in the main window, instead of a menu that hides the second.
                 VStack(spacing: 6) {
@@ -299,11 +335,31 @@ struct WebSigningSheet: View {
                                     onSelect: { coordinator.selectedIdentityID = identity.id })
                     }
                 }
-            } else {
-                Text(coordinator.identities.first?.label ?? "Karta pripojená")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var cardStatus: some View {
+        if coordinator.identities.isEmpty {
+            HStack(spacing: 8) {
+                Text("Vložte kartu do čítačky.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Hľadať znova") {
+                    Task { await coordinator.refreshIdentities() }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+        } else if !coordinator.certificatesResolved {
+            Label(coordinator.identities.first?.label ?? "Karta pripojená", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            Text("Vyberte certifikát, ktorým sa dokument podpíše.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -314,14 +370,16 @@ struct WebSigningSheet: View {
                 .foregroundStyle(.secondary)
             SecureField("PIN", text: $coordinator.pin)
                 .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
                 .focused($pinFocused)
                 .onSubmit {
                     guard !coordinator.isWorking else { return }
                     Task { await coordinator.submitPIN() }
                 }
-            Text(coordinator.certificatesResolved
-                 ? "Enter podpíše dokument."
-                 : "Enter načíta certifikáty z karty.")
+            Label(coordinator.certificatesResolved
+                  ? "Enter podpíše dokument."
+                  : "Enter načíta certifikáty z karty.",
+                  systemImage: "return")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -342,26 +400,99 @@ struct WebSigningSheet: View {
                  : "Po kliknutí na Podpísať si eID klient vypýta BOK dvakrát: prihlásenie ku karte a potvrdenie podpisu.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var actions: some View {
-        HStack {
+        StickyActionBar {
             Button("Zrušiť", role: .cancel) { coordinator.cancel() }
                 .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
             Spacer()
             if coordinator.isWorking {
                 ProgressView().controlSize(.small)
             }
-            Button("Podpísať") { confirm() }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(coordinator.isWorking || coordinator.selectedIdentityID == nil)
+            Button { confirm() } label: {
+                Label("Podpísať", systemImage: "signature")
+                    .padding(.horizontal, 6)
+            }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(coordinator.isWorking || coordinator.selectedIdentityID == nil)
         }
     }
 
     private func confirm() {
         guard !coordinator.isWorking else { return }
         Task { await coordinator.confirm() }
+    }
+}
+
+/// The panel's top band: the app icon on its midnight ground, so a prompt that
+/// appears over Safari is recognisably Chevron7's, and the page that asked.
+///
+/// It runs under the transparent title bar, so the window title stays for
+/// Mission Control and VoiceOver without being drawn twice.
+struct WebSigningBrandHeader: View {
+    let host: String?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 56, height: 56)
+                .shadow(color: Chevron7Brand.amber.opacity(0.25), radius: 10)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("CHEVRON7")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.6)
+                    .foregroundStyle(Chevron7Brand.duskGrey)
+                Text("Podpísať dokument zo stránky")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Chevron7Brand.signalWhite)
+                originPill
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 10)
+        .padding(.bottom, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .bottom) {
+            ZStack(alignment: .bottom) {
+                LinearGradient(colors: [Chevron7Brand.midnight, Chevron7Brand.deepIndigo],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                // The one light: a faint glow from where the icon's chevron sits.
+                RadialGradient(colors: [Chevron7Brand.amber.opacity(0.16), .clear],
+                               center: UnitPoint(x: 0.06, y: 0.7), startRadius: 0, endRadius: 260)
+                LinearGradient(colors: [.clear, Chevron7Brand.amber.opacity(0.55), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 1)
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var originPill: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "safari")
+            Text(host ?? "webový portál")
+                .fontWeight(.medium)
+                .foregroundStyle(Chevron7Brand.signalWhite)
+            Text("· rozšírenie Safari")
+        }
+        .font(.caption)
+        .foregroundStyle(Chevron7Brand.haze)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.08), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+        .accessibilityLabel("Pôvod: \(host ?? "webový portál") cez rozšírenie Safari")
     }
 }

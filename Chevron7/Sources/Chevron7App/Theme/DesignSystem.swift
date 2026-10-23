@@ -26,6 +26,19 @@ public extension View {
     }
 }
 
+// MARK: - Brand
+
+/// The app icon's world, for the few surfaces that carry the brand: a midnight
+/// ground and one amber light, never amber as a fill (as on the website, DESIGN.md).
+enum Chevron7Brand {
+    static let midnight = Color(red: 0x0A / 255, green: 0x0B / 255, blue: 0x1A / 255)
+    static let deepIndigo = Color(red: 0x15 / 255, green: 0x18 / 255, blue: 0x39 / 255)
+    static let amber = Color(red: 0xFF / 255, green: 0xB2 / 255, blue: 0x3E / 255)
+    static let signalWhite = Color(red: 0xF5 / 255, green: 0xF5 / 255, blue: 0xF7 / 255)
+    static let haze = Color(red: 0xBE / 255, green: 0xC8 / 255, blue: 0xDC / 255)
+    static let duskGrey = Color(red: 0x8D / 255, green: 0x97 / 255, blue: 0xAB / 255)
+}
+
 // MARK: - Sticky Bottom Action Bar
 struct StickyActionBar<Content: View>: View {
     @ViewBuilder var content: () -> Content
