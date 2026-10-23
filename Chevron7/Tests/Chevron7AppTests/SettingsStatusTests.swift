@@ -81,6 +81,13 @@ final class SettingsStatusTests: XCTestCase {
                         pill(.ok, "Quick Action vo Findere")])
         XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, otherCopies: 2).first,
                        pill(.attention, "Ďalšie kópie Chevron7: 2"))
+        XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, safariExtension: .disabled),
+                       [pill(.attention, "Rozšírenie v Safari vypnuté"), pill(.ok, "Safari prepojené"),
+                        pill(.ok, "Quick Action vo Findere")])
+        XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, otherCopies: 1,
+                                                    safariExtension: .disabled).map(\.text),
+                       ["Ďalšia kópia Chevron7", "Rozšírenie v Safari vypnuté", "Safari prepojené", "Quick Action vo Findere"])
+        XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, safariExtension: .enabled).count, 2)
     }
 
     func testAI() {

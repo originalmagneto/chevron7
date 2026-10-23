@@ -15,6 +15,8 @@ struct BrowserFinderSettingsPane: View {
     @State private var copyMonitor = DuplicateAppCopyMonitor.shared
     @State private var copyMessage: String?
     @State private var trashingCopy: AppCopy.ID?
+    @State private var extensionStatus: SafariExtensionStatus = .unknown
+    @State private var extensionMessage: String?
 
     private var resolvedFolder: String {
         let configured = settingsStore.settings.webSigningOutputPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,13 +29,15 @@ struct BrowserFinderSettingsPane: View {
         let retentionActive = SettingsAdvancedState.webSigningRetentionIsActive(settings)
         SettingsPaneForm(pane: .browserFinder,
                          pills: SettingsStatus.browserFinder(agent: agentStatus, quickAction: quickAction,
-                                                             otherCopies: copyMonitor.copies.count)) {
+                                                             otherCopies: copyMonitor.copies.count,
+                                                             safariExtension: extensionStatus)) {
             if !copyMonitor.copies.isEmpty || copyMessage != nil {
                 otherCopiesSection
             }
 
             Section {
                 agentStatusRow
+                extensionStatusRow
                 Toggle("Ukladať podpísané dokumenty aj lokálne", isOn: $settingsStore.settings.webSigningSavesLocally)
             } header: {
                 Label("Safari", systemImage: "safari")
@@ -108,6 +112,11 @@ struct BrowserFinderSettingsPane: View {
                     Text("Kôš sa týka iba kópií podpisov z prehliadača. Dokumenty podpísané v aplikácii zostávajú, kde ste ich uložili.")
                 }
             }
+        }
+        .task { await refreshExtensionStatus() }
+        // Back from Safari's settings: the person may have switched the extension on.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshExtensionStatus() }
         }
         .onAppear {
             copyMonitor.refresh()
@@ -185,6 +194,40 @@ struct BrowserFinderSettingsPane: View {
         panel.prompt = "Vybrať"
         if panel.runModal() == .OK, let url = panel.url {
             settingsStore.settings.webSigningOutputPath = url.path
+        }
+    }
+
+    private func refreshExtensionStatus() async {
+        extensionStatus = await SafariExtensionState.current()
+        if extensionStatus == .enabled { extensionMessage = nil }
+    }
+
+    /// Whether Safari runs this app's extension at all; switched off, a portal offers
+    /// D.Signer instead and the agent row above still reads fine.
+    @ViewBuilder
+    private var extensionStatusRow: some View {
+        switch extensionStatus {
+        case .enabled:
+            Label("Rozšírenie Chevron7 je v Safari zapnuté.", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .disabled:
+            Label("Rozšírenie Chevron7 je v Safari vypnuté. Portály potom namiesto Chevron7 ponúknu D.Signer. Zapnite ho v nastaveniach Safari.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            openExtensionSettingsButton
+        case .unknown:
+            Label("Stav rozšírenia v Safari sa nepodarilo zistiť.", systemImage: "questionmark.circle")
+                .foregroundStyle(.secondary)
+            openExtensionSettingsButton
+        }
+        if let extensionMessage {
+            Text(extensionMessage).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private var openExtensionSettingsButton: some View {
+        Button("Otvoriť nastavenia rozšírenia v Safari…") {
+            Task { extensionMessage = await SafariExtensionState.openSafariSettings() }
         }
     }
 
