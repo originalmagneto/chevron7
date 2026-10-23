@@ -351,6 +351,86 @@ async function portalScenarios(name, file) {
     }
 }
 
+/**
+ * The nove.slovensko.sk composer since its 2026-10-05 build: it passes an error
+ * callback as the third argument, so DSignerMulti routes every failure there
+ * (code 1 for a cancel, which the composer treats as "closed", any other code
+ * with the message) instead of throwing it, and it sets the language before
+ * signing. Mirrors the composer's call in its apiClient bundle.
+ */
+function signWithErrorCallback(page, request, language) {
+    const out = { result: 'not-called', error: null };
+    const signer = new page.portal.DSigner();
+    if (language && typeof signer.setLanguage === 'function') signer.setLanguage(language);
+    signer.sign(request, (result) => { out.result = result; }, (code, message) => { out.error = { code, message }; });
+    return out;
+}
+
+async function noveComposerScenarios(file) {
+    if (!fs.existsSync(file)) {
+        console.log('SKIP: nove composer fixture missing, run Chevron7/scripts/fetch-portal-fixtures.sh');
+        return;
+    }
+    const clean = (page) => page.thrown.length === 0 && page.shell.errors.length === 0 && page.shell.alerts.length === 0;
+    const dump = (page, out) => JSON.stringify({ result: out.result, error: out.error, requests: page.requests.length, thrown: page.thrown.map(String) });
+
+    {
+        const page = newPage(file);
+        const out = signWithErrorCallback(page, asicRequest([xdcDocument()]), 'sk');
+        await settle();
+        check('nove composer: an XDC form signs with the language set', out.result === SIGNED && out.error === null
+            && page.requests.length === 1 && clean(page), dump(page, out));
+    }
+
+    {
+        const page = newPage(file);
+        page.app.outcome = 'cancelled';
+        const out = signWithErrorCallback(page, asicRequest([xdcDocument()]), 'sk');
+        await settle();
+        check('nove composer: a cancel reaches the error callback with code 1', out.result === 'not-called'
+            && out.error && out.error.code === 1 && clean(page), dump(page, out));
+    }
+
+    {
+        const page = newPage(file);
+        page.app.outcome = 'podpisovanie zlyhalo';
+        const out = signWithErrorCallback(page, asicRequest([xdcDocument()]), 'sk');
+        await settle();
+        check('nove composer: a failure reaches the error callback with its message', out.result === 'not-called'
+            && out.error && out.error.code === -200 && String(out.error.message).includes('podpisovanie zlyhalo')
+            && clean(page), dump(page, out));
+        page.app.outcome = 'signed';
+        const retry = signWithErrorCallback(page, asicRequest([xdcDocument()]), 'sk');
+        await settle();
+        check('nove composer: a retry after a failure signs', retry.result === SIGNED && page.requests.length === 2, dump(page, retry));
+    }
+
+    {
+        // The composer's backend decides AddTimestamp; with it the portal asks the
+        // signer for a timestamp request over the data objects, gets the response
+        // from its own TSA and submits it before sign(). Chevron7 cannot take part,
+        // so the request is refused visibly and nothing is signed.
+        const page = newPage(file);
+        let tsaAsked = false;
+        const request = {
+            ...asicRequest([xdcDocument()]),
+            AddTimestamp: true,
+            TimeStampPolicy: '',
+            TimeStampNonce: 0,
+            GetTsaResponse: (requestB64, onResponse) => { tsaAsked = true; onResponse('', null); },
+        };
+        const out = signWithErrorCallback(page, request, 'sk');
+        await settle();
+        check('nove composer: a portal timestamp is refused visibly, nothing is signed', out.result === 'not-called'
+            && out.error && String(out.error.message).includes('časov') && !tsaAsked
+            && page.requests.length === 0 && clean(page), dump(page, out));
+        const retry = signWithErrorCallback(page, asicRequest([xdcDocument()]), 'sk');
+        await settle();
+        check('nove composer: a signature without the timestamp signs after the refusal', retry.result === SIGNED
+            && page.requests.length === 1 && clean(page), dump(page, retry));
+    }
+}
+
 // --- financnasprava.sk (PFS EKR2, ASiC) ---
 
 /** Verbatim from the PFS bundle (fallback branch: no X509SubjectName tag). */
@@ -521,6 +601,7 @@ async function surfaceScenarios() {
 
 await portalScenarios('schranka', FIXTURES.schranka);
 await portalScenarios('nove', FIXTURES.nove);
+await noveComposerScenarios(FIXTURES.nove);
 await pfsScenario();
 await surfaceScenarios();
 currentPage = null;
