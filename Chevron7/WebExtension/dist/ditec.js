@@ -622,6 +622,24 @@
     unsupported("createXAdESZepBpT", callback);
   };
 
+  // nove.slovensko.sk (DSignerMulti of 2026-10-05) asks for these between the
+  // add calls and sign() when its backend sets AddTimestamp: a timestamp
+  // request over the data objects, answered by the portal's own TSA. The app
+  // cannot build that request, so the signature is refused visibly instead of
+  // the portal's spinner hanging on a missing method, and nothing is signed.
+  var PORTAL_TIMESTAMP_REFUSAL = "Portál žiada pred podpisom vlastnú časovú pečiatku dokumentov, "
+    + "ktorú rozšírenie Chevron7 zatiaľ nevie pridať. Dokument nebol podpísaný.";
+  DSigXadesBpAdapter.prototype.getIndividualDataObjectsTimeStampRequestBase64 = function (
+    reqPolicy, digestAlgUri, nonce, certReq, extensions, objectIds, callback
+  ) {
+    reset();
+    if (callback && callback.onError) callback.onError(generalError(PORTAL_TIMESTAMP_REFUSAL));
+  };
+  DSigXadesBpAdapter.prototype.submitIndividualDataObjectsTimeStampResponse = function (tsResponseB64, tsCertB64, callback) {
+    reset();
+    if (callback && callback.onError) callback.onError(generalError(PORTAL_TIMESTAMP_REFUSAL));
+  };
+
   DSigXadesBpAdapter.prototype.addXmlObject = function (
     objectId, objectDescription, objectFormatIdentifier, xdcXMLData, xdcIdentifier,
     xdcVersion, xdcUsedXSD, xsdReferenceURI, xdcUsedXSLT, xslReferenceURI,
