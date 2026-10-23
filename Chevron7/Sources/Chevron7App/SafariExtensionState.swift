@@ -32,11 +32,29 @@ enum SafariExtensionState {
 
     static func current() async -> SafariExtensionStatus {
         let isEnabled: Bool? = await withCheckedContinuation { continuation in
-            SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: identifier) { state, error in
-                continuation.resume(returning: error == nil ? state?.isEnabled : nil)
-            }
+            requestState { continuation.resume(returning: $0) }
         }
         return status(isEnabled: isEnabled)
+    }
+
+    private typealias StateHandler = @convention(block) (SFSafariExtensionState?, NSError?) -> Void
+
+    /// The SDK declares the completion handler `NS_SWIFT_UI_ACTOR`, so a Swift closure
+    /// passed to `getStateOfSafariExtension` checks that it runs on the main actor,
+    /// while SafariServices calls it on its XPC queue: 1.17.0 trapped there every time
+    /// Settings opened Prehliadač a Finder (2026-10-23). The selector is sent through
+    /// the runtime with a plain block instead, which carries no isolation.
+    private static func requestState(_ done: @escaping @Sendable (Bool?) -> Void) {
+        let selector = NSSelectorFromString("getStateOfSafariExtensionWithIdentifier:completionHandler:")
+        let manager: AnyObject = SFSafariExtensionManager.self
+        guard manager.responds(to: selector) else {
+            done(nil)
+            return
+        }
+        let handler: StateHandler = { state, error in
+            done(error == nil ? state?.isEnabled : nil)
+        }
+        _ = manager.perform(selector, with: identifier as NSString, with: handler as AnyObject)
     }
 
     /// Opens Safari's Extensions settings on this extension, starting Safari when it
