@@ -1,0 +1,1 @@
+- **Chevron7 už nepadá pri otvorení Nastavení.** Verzia 1.17.0 sa ukončila vždy, keď sa v Nastaveniach otvorila časť Prehliadač a Finder, čo pri tejto verzii mohlo nastať hneď po spustení aplikácie. Kontrola, či je rozšírenie Chevron7 v Safari zapnuté, teraz funguje bez pádu.
