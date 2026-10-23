@@ -57,9 +57,12 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The remembered pane, else EZZK while it is not connected (the one step every
-    /// advocate needs), else the profile.
-    static func initial(stored: String, ezzkConnected: Bool) -> SettingsPane {
+    /// Prehliadač a Finder while another copy of Chevron7 can be trashed (its Safari
+    /// extension can break signing on portals, and only that pane offers to trash it),
+    /// else the remembered pane, else EZZK while it is not connected (the one step
+    /// every advocate needs), else the profile.
+    static func initial(stored: String, ezzkConnected: Bool, hasOtherAppCopies: Bool = false) -> SettingsPane {
+        if hasOtherAppCopies { return .browserFinder }
         if let pane = SettingsPane(rawValue: stored) { return pane }
         return ezzkConnected ? .profile : .ezzk
     }

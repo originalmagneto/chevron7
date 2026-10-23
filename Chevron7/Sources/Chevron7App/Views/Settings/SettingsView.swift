@@ -42,7 +42,8 @@ struct SettingsView: View {
             selection = SettingsPane.initial(
                 stored: storedPane,
                 ezzkConnected: EZZKConnection.isConnected(mode: controller.mode,
-                                                          hasStoredCredentials: controller.hasStoredCredentials))
+                                                          hasStoredCredentials: controller.hasStoredCredentials),
+                hasOtherAppCopies: DuplicateAppCopyMonitor.shared.hasTrashableCopy)
         }
         .onChange(of: selection) { _, pane in
             if let pane { storedPane = pane.rawValue }

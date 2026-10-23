@@ -76,6 +76,11 @@ final class SettingsStatusTests: XCTestCase {
                        [pill(.attention, "Safari nie je prepojené"), pill(.attention, "Quick Action skrytá vo Findere")])
         XCTAssertEqual(SettingsStatus.browserFinder(agent: .unsignedBuild, quickAction: .notInstalled),
                        [pill(.off, "Safari: vývojárska zostava"), pill(.attention, "Quick Action nenainštalovaná")])
+        XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, otherCopies: 1),
+                       [pill(.attention, "Ďalšia kópia Chevron7"), pill(.ok, "Safari prepojené"),
+                        pill(.ok, "Quick Action vo Findere")])
+        XCTAssertEqual(SettingsStatus.browserFinder(agent: .enabled, quickAction: .visible, otherCopies: 2).first,
+                       pill(.attention, "Ďalšie kópie Chevron7: 2"))
     }
 
     func testAI() {
