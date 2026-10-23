@@ -86,7 +86,8 @@ enum SettingsStatus {
 
     static func browserFinder(agent: WebBridgeAgentService.Status,
                               quickAction: QuickActionVisibility,
-                              otherCopies: Int = 0) -> [StatusPillModel] {
+                              otherCopies: Int = 0,
+                              safariExtension: SafariExtensionStatus = .unknown) -> [StatusPillModel] {
         let safari: StatusPillModel = switch agent {
         case .enabled: StatusPillModel(tone: .ok, text: "Safari prepojené")
         case .unsignedBuild: StatusPillModel(tone: .off, text: "Safari: vývojárska zostava")
@@ -97,10 +98,16 @@ enum SettingsStatus {
         case .hiddenInFinder: StatusPillModel(tone: .attention, text: "Quick Action skrytá vo Findere")
         case .notInstalled: StatusPillModel(tone: .attention, text: "Quick Action nenainštalovaná")
         }
-        guard otherCopies > 0 else { return [safari, finder] }
-        let copies = StatusPillModel(tone: .attention,
-                                     text: otherCopies == 1 ? "Ďalšia kópia Chevron7" : "Ďalšie kópie Chevron7: \(otherCopies)")
-        return [copies, safari, finder]
+        var pills = [safari, finder]
+        if safariExtension == .disabled {
+            pills.insert(StatusPillModel(tone: .attention, text: "Rozšírenie v Safari vypnuté"), at: 0)
+        }
+        if otherCopies > 0 {
+            pills.insert(StatusPillModel(tone: .attention,
+                                         text: otherCopies == 1 ? "Ďalšia kópia Chevron7" : "Ďalšie kópie Chevron7: \(otherCopies)"),
+                         at: 0)
+        }
+        return pills
     }
 
     static func ai(mode: AppSettings.AIMode, reviewedPages: Int?) -> [StatusPillModel] {
