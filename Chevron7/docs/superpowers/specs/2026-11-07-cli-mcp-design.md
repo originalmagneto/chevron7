@@ -1,6 +1,6 @@
 # Chevron7 public CLI and local MCP
 
-Status: approved by the owner on 2026-11-07; implemented in codex/cli-mcp. Automated verification passed; real signing acceptance remains pending (see ../../INTEGRATION-VERIFICATION.md).
+Status: approved by the owner on 2026-11-07; implemented in codex/cli-mcp. Automated verification and a real-card signature through the installed signed candidate passed (see ../../INTEGRATION-VERIFICATION.md for evidence and limits).
 Date: 2026-11-07.
 Implementation baseline: `origin/main` at `b458d0591914ac83049f9ac89f948e342026cc53`, published as Chevron7 1.18.0 on 2026-10-23.
 
