@@ -106,7 +106,9 @@ extension ZakoSessionStore {
         electronicOriginal = nil
         e2eDecision = nil
         do {
-            let evidence = try await signingProvider.conversionEvidence(for: sourceURL)
+            let evidence = try await IntegrationValidationBroker.shared.run { [signingProvider] in
+                try await signingProvider.conversionEvidence(for: sourceURL)
+            }
             let data = try Data(contentsOf: sourceURL)
             let original = try ElectronicOriginal.make(sourceName: sourceURL.lastPathComponent, sourceData: data,
                                                        evidence: evidence)
@@ -131,7 +133,9 @@ extension ZakoSessionStore {
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try Data(contentsOf: url)
-            let sealEvidence = try await signingProvider.conversionEvidence(for: url)
+            let sealEvidence = try await IntegrationValidationBroker.shared.run { [signingProvider] in
+                try await signingProvider.conversionEvidence(for: url)
+            }
             qualifiedReport = try QualifiedValidationReport.accept(reportData: data, fileName: url.lastPathComponent,
                                                                    reportEvidence: sealEvidence, original: original)
         } catch {

@@ -67,6 +67,9 @@ final class WebSigningCoordinator {
         }
     }
 
+    private(set) var isIntegrationRequest = false
+    var otherSigningIsBusy: @MainActor () -> Bool = { false }
+    var signingDidStart: (@MainActor (String) -> Void)?
     private(set) var pending: Pending?
     /// Existing signatures of the document in the panel, for its banner.
     let signatureCheck: WebSigningSignatureCheck
@@ -125,7 +128,7 @@ final class WebSigningCoordinator {
 
     /// False on slovensko.sk, which accepts only the level it asked for.
     var timestampSwitchAvailable: Bool {
-        pending?.request.allowsAddedTimestamp ?? true
+        !isIntegrationRequest && (pending?.request.allowsAddedTimestamp ?? true)
     }
 
     /// Shown in the sheet so the consequence of the toggle is visible before signing.
@@ -249,10 +252,10 @@ final class WebSigningCoordinator {
     private var provider: any QualifiedSigningProviding { settingsStore.signingProvider }
 
     /// Called from the XPC bridge. Suspends until the person signs or cancels.
-    func handle(_ request: WebSignRequest) async throws -> WebSignResponse {
+    func handle(_ request: WebSignRequest, integration: Bool = false) async throws -> WebSignResponse {
         // isWorking too: after a cancel the engine may still be signing the old
         // request, and it holds the card until it ends.
-        guard pending == nil, !isWorking, !session.isOpen else {
+        guard pending == nil, !isWorking, !session.isOpen, !otherSigningIsBusy() else {
             // The page asked again while the panel is open (PFS's own sign button, behind
             // the floating panel); its "busy" dialog would sit unseen beneath the panel,
             // so the panel comes to the front to show what the page is waiting for.
@@ -289,6 +292,7 @@ final class WebSigningCoordinator {
             pdfDocument = doc
         }
 
+        isIntegrationRequest = integration
         pending = Pending(id: request.requestID,
                           request: request,
                           sizeDescription: Self.describeSize(bytes.count),
@@ -441,6 +445,7 @@ final class WebSigningCoordinator {
         signatureCheck.cancelInspection()
         let token = session.currentToken
         isWorking = true
+        if isIntegrationRequest { signingDidStart?(pending.request.requestID) }
         errorText = nil
         defer { isWorking = false }
 
@@ -498,19 +503,21 @@ final class WebSigningCoordinator {
                 issuedBy = ""
             }
             signedBy = SignedOutputSigner.commonName(in: content) ?? signedBy
-            let saved = archive(content, for: pending.request)
-            signedDocumentStore.record(displayName: pending.request.filename,
-                                       origin: .browser,
-                                       method: .mobile,
-                                       signatureLevel: requested,
-                                       signedBy: signedBy,
-                                       url: saved)
-            signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
+            if !isIntegrationRequest {
+                let saved = archive(content, for: pending.request)
+                signedDocumentStore.record(displayName: pending.request.filename,
+                                           origin: .browser,
+                                           method: .mobile,
+                                           signatureLevel: requested,
+                                           signedBy: signedBy,
+                                           url: saved)
+                signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
+            }
             finish(.success(WebSignResponse(
                 requestID: pending.request.requestID,
                 content: content.base64EncodedString(),
                 signedBy: signedBy,
-                issuedBy: issuedBy)), token: token)
+                issuedBy: issuedBy, method: "mobile", signatureLevel: requested)), token: token)
         } catch is CancellationError {
             guard session.isCurrent(token) else { return }
             errorText = "Podpisovanie mobilom ste zrušili."
@@ -534,6 +541,7 @@ final class WebSigningCoordinator {
         signatureCheck.cancelInspection()
         let token = session.currentToken
         isWorking = true
+        if isIntegrationRequest { signingDidStart?(pending.request.requestID) }
         errorText = nil
         defer { isWorking = false }
 
@@ -584,19 +592,22 @@ final class WebSigningCoordinator {
             // PFS lists this name under the form's signatures; an eID signs
             // without its certificate being read, so the output names it.
             let signedBy = SignedOutputSigner.commonName(in: payload) ?? signed.signatureLabel
-            let saved = archive(payload, for: pending.request)
-            signedDocumentStore.record(displayName: pending.request.filename,
-                                       origin: .browser,
-                                       method: .card,
-                                       signatureLevel: level,
-                                       signedBy: signedBy,
-                                       url: saved)
-            signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
+            if !isIntegrationRequest {
+                let saved = archive(payload, for: pending.request)
+                signedDocumentStore.record(displayName: pending.request.filename,
+                                           origin: .browser,
+                                           method: .card,
+                                           signatureLevel: level,
+                                           signedBy: signedBy,
+                                           url: saved)
+                signedDocumentStore.purgeBrowserCopies(olderThanDays: settingsStore.settings.webSigningRetentionDays)
+            }
             finish(.success(WebSignResponse(
                 requestID: pending.request.requestID,
                 content: payload.base64EncodedString(),
                 signedBy: signedBy,
-                issuedBy: signed.issuerName(fallback: identities.first(where: { $0.id == identityID })))), token: token)
+                issuedBy: signed.issuerName(fallback: identities.first(where: { $0.id == identityID })),
+                method: "card", signatureLevel: level)), token: token)
         } catch {
             guard session.isCurrent(token) else { return }
             // Kept open so a mistyped PIN can be corrected without the page

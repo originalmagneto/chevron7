@@ -21,6 +21,7 @@ public enum ProductIdentity {
     public static let webBridgeAgentIdentifier = "chevron7-webbridge-agent"
     /// Code signing identifier of the `webbridge-probe` developer tool.
     public static let webBridgeProbeIdentifier = "webbridge-probe"
+    public static let integrationIdentifier = "chevron7"
     public static let urlScheme = "chevron7"
     public static let installedAppURL = URL(fileURLWithPath: "/Applications/Chevron7.app", isDirectory: true)
 

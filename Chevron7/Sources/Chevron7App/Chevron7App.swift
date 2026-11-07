@@ -13,6 +13,7 @@ final class Chevron7AppModel {
     let zakoStore: ZakoSessionStore
     let ezzkAccountController: EZZKAccountController
     let signedDocumentStore: SignedDocumentStore
+    let integrationService: IntegrationService
     let webSigning: WebSigningCoordinator
     let cardReader: CardReaderStatus
     let updater: AppUpdater
@@ -35,12 +36,29 @@ final class Chevron7AppModel {
         // Before the bridge can hand over a request: portal copies a crash left behind.
         WebSigningSignatureCheck.removeStaleCopies()
         webSigning = WebSigningCoordinator(settingsStore: settings, signedDocumentStore: signedDocuments)
+        integrationService = IntegrationService(settingsStore: settings, coordinator: webSigning, signedDocuments: signedDocuments)
         cardReader = CardReaderStatus(
             discover: { [settings] in await settings.signingProvider.availableIdentities() },
             readCardATRs: { await SmartcardSlotReader.cardATRs() })
         let signing = signingStore
         let zako = zakoStore
         let browserSigning = webSigning
+        let integrations = integrationService
+        browserSigning.otherSigningIsBusy = { [weak signing, weak zako] in
+            guard let signing, let zako else { return true }
+            return signing.isSigning || signing.isResolvingCertificate
+                || signing.batchPhase == .preflighting || signing.batchPhase == .signing
+                || zako.isAuthorizing || zako.isResolvingCertificate
+        }
+        signing.externalSigningIsBusy = { [weak browserSigning, weak integrations, weak zako] in
+            browserSigning?.pending != nil || browserSigning?.isWorking == true || integrations?.isBusy == true
+                || zako?.isAuthorizing == true || zako?.isResolvingCertificate == true
+        }
+        zako.externalSigningIsBusy = { [weak browserSigning, weak integrations, weak signing] in
+            browserSigning?.pending != nil || browserSigning?.isWorking == true || integrations?.isBusy == true
+                || signing?.isSigning == true || signing?.isResolvingCertificate == true
+                || signing?.batchPhase == .preflighting || signing?.batchPhase == .signing
+        }
         let checker = settings.statusChecker
         let cardWorkInProgress: @MainActor () -> Bool = {
             signing.isSigning || signing.isResolvingCertificate
@@ -80,7 +98,11 @@ final class Chevron7AppModel {
         // launchd rendezvous; nothing signs without the sheet this raises.
         let coordinator = webSigning
         WebBridgeListener.shared.setSignHandler { request in
-            try await coordinator.handle(request)
+            guard await !integrations.isBusy else { throw WebSigningCoordinator.Failure.busy }
+            return try await coordinator.handle(request)
+        }
+        WebBridgeListener.shared.setIntegrationHandler { data in
+            await integrations.execute(data)
         }
     }
 }

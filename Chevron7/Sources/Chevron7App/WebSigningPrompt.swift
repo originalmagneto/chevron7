@@ -53,8 +53,10 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
     /// The app in front when the request arrived, normally Safari; it gets the
     /// keyboard back when the panel closes (`WebSigningFocusReturn`).
     private var requester: NSRunningApplication?
+    private var isIntegration = false
 
     func show(coordinator: WebSigningCoordinator) {
+        isIntegration = coordinator.isIntegrationRequest
         if let panel {
             place(panel)
             panel.orderFrontRegardless()
@@ -73,7 +75,7 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
             defer: false)
         // The brand header runs under the title bar and carries the title itself;
         // the window keeps it for Mission Control and VoiceOver.
-        panel.title = "Podpísať dokument zo stránky"
+        panel.title = isIntegration ? "Podpísať dokument z inej aplikácie" : "Podpísať dokument zo stránky"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.contentView = hosting
@@ -99,23 +101,23 @@ final class WebSigningPrompt: WebSigningPromptPresenting {
         let screens = NSScreen.screens.map {
             WebSigningPanelPlacement.Screen(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
+        let processIDs = isIntegration ? Set([requester?.processIdentifier].compactMap { $0 })
+            : Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").map(\.processIdentifier))
         let origin = WebSigningPanelPlacement.origin(panelSize: panel.frame.size,
-                                                     safariQuartzBounds: Self.safariFrontWindowBounds(),
+                                                     safariQuartzBounds: Self.frontWindowBounds(ownedBy: processIDs),
                                                      screens: screens,
                                                      mouseLocation: NSEvent.mouseLocation)
         panel.setFrameOrigin(origin)
     }
 
-    /// Front on-screen Safari window, in Quartz coordinates. Window bounds need no
+    /// Front on-screen requesting window, in Quartz coordinates. Window bounds need no
     /// Screen Recording permission; only window titles would.
-    private static func safariFrontWindowBounds() -> CGRect? {
-        let safariPIDs = Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari")
-            .map(\.processIdentifier))
-        guard !safariPIDs.isEmpty,
+    private static func frontWindowBounds(ownedBy processIDs: Set<pid_t>) -> CGRect? {
+        guard !processIDs.isEmpty,
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]] else { return nil }
         for window in windows {
-            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, safariPIDs.contains(pid),
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, processIDs.contains(pid),
                   (window[kCGWindowLayer as String] as? Int) == 0,
                   let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary),

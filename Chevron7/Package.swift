@@ -6,10 +6,12 @@ let package = Package(
     platforms: [.macOS("27.0")],
     products: [
         .executable(name: "Chevron7", targets: ["Chevron7App"]),
-        .library(name: "Chevron7Kit", targets: ["Chevron7Kit"])
+        .library(name: "Chevron7Kit", targets: ["Chevron7Kit"]),
+        .executable(name: "chevron7-cli", targets: ["chevron7"])
     ],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", exact: "0.12.1")
     ],
     targets: [
         .target(
@@ -24,11 +26,16 @@ let package = Package(
             name: "Chevron7Kit",
             dependencies: ["Chevron7WebBridge", "Chevron7Identity"]
         ),
+        .target(name: "Chevron7Integration", dependencies: ["Chevron7WebBridge"]),
+        .executableTarget(name: "chevron7", dependencies: ["Chevron7Integration", .product(name: "MCP", package: "swift-sdk")]),
+        .testTarget(name: "Chevron7CLITests", dependencies: ["chevron7", "Chevron7Integration"], exclude: ["mcp-stdio-smoke.py"]),
+        .testTarget(name: "Chevron7IntegrationTests", dependencies: ["Chevron7Integration"]),
         .executableTarget(
             name: "Chevron7App",
             dependencies: [
                 "Chevron7Kit",
                 "Chevron7Identity",
+                "Chevron7Integration",
                 .product(name: "Sparkle", package: "Sparkle")
             ]
         ),

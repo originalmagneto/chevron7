@@ -81,7 +81,7 @@ final class SignatureTreeLoader {
     /// `keptTreeWasValidated`: the tree shown while this runs came from an earlier validation,
     /// so a failure must not leave its verdicts (green) under "the result is only structural".
     private func validate(_ url: URL, run: UUID, keptTreeWasValidated: Bool) async {
-        let validated = await provider.validateSignatureTree(in: url)
+        let validated = await IntegrationValidationBroker.shared.validate(provider: provider, in: url)
         guard self.run == run else { return }
         switch validated {
         case .tree(let tree):

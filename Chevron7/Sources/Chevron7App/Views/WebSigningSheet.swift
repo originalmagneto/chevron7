@@ -14,7 +14,7 @@ struct WebSigningSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WebSigningBrandHeader(host: coordinator.pending?.request.pageHost)
+            WebSigningBrandHeader(host: coordinator.pending?.request.pageHost, integration: coordinator.isIntegrationRequest)
 
             VStack(alignment: .leading, spacing: 16) {
                 if let banner = coordinator.signatureCheck.bannerModel {
@@ -65,6 +65,12 @@ struct WebSigningSheet: View {
 
             if coordinator.timestampSwitchAvailable {
                 timestampToggle
+            } else if coordinator.isIntegrationRequest {
+                Label("Podpíše sa podľa požiadavky aplikácie (\(coordinator.effectiveLevelDescription)).",
+                      systemImage: "signature")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Label("slovensko.sk prijíma iba podpis bez časovej pečiatky, podpíše sa presne tak, ako pýta stránka (\(coordinator.effectiveLevelDescription)).",
                       systemImage: "clock.badge.xmark")
@@ -437,6 +443,7 @@ struct WebSigningSheet: View {
 /// Mission Control and VoiceOver without being drawn twice.
 struct WebSigningBrandHeader: View {
     let host: String?
+    var integration = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -451,7 +458,7 @@ struct WebSigningBrandHeader: View {
                     .font(.caption2.weight(.semibold))
                     .tracking(1.6)
                     .foregroundStyle(Chevron7Brand.duskGrey)
-                Text("Podpísať dokument zo stránky")
+                Text(integration ? "Podpísať dokument z inej aplikácie" : "Podpísať dokument zo stránky")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(Chevron7Brand.signalWhite)
                 originPill
@@ -481,11 +488,11 @@ struct WebSigningBrandHeader: View {
 
     private var originPill: some View {
         HStack(spacing: 5) {
-            Image(systemName: "safari")
-            Text(host ?? "webový portál")
+            Image(systemName: integration ? "app.connected.to.app.below.fill" : "safari")
+            Text(integration ? "Lokálna integrácia" : (host ?? "webový portál"))
                 .fontWeight(.medium)
                 .foregroundStyle(Chevron7Brand.signalWhite)
-            Text("· rozšírenie Safari")
+            Text(integration ? "· potvrdenie podpisu" : "· rozšírenie Safari")
         }
         .font(.caption)
         .foregroundStyle(Chevron7Brand.haze)
@@ -493,6 +500,6 @@ struct WebSigningBrandHeader: View {
         .padding(.vertical, 4)
         .background(Color.white.opacity(0.08), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
-        .accessibilityLabel("Pôvod: \(host ?? "webový portál") cez rozšírenie Safari")
+        .accessibilityLabel(integration ? "Pôvod: lokálna integrácia" : "Pôvod: \(host ?? "webový portál") cez rozšírenie Safari")
     }
 }
