@@ -229,11 +229,15 @@ public struct WebSignResponse: Codable, Sendable, Equatable {
     public let content: String
     public let signedBy: String
     public let issuedBy: String
+    public let method: String?
+    public let signatureLevel: String?
 
-    public init(requestID: String, content: String, signedBy: String, issuedBy: String) {
+    public init(requestID: String, content: String, signedBy: String, issuedBy: String, method: String? = nil, signatureLevel: String? = nil) {
         self.requestID = requestID
         self.content = content
         self.signedBy = signedBy
         self.issuedBy = issuedBy
+        self.method = method
+        self.signatureLevel = signatureLevel
     }
 }

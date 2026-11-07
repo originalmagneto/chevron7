@@ -19,11 +19,13 @@ final class SignedDocumentStore {
     enum Origin: String, Codable, Sendable {
         case app
         case browser
+        case integration
 
         var label: String {
             switch self {
             case .app: return "V aplikácii"
             case .browser: return "Z prehliadača"
+            case .integration: return "Z inej aplikácie"
             }
         }
     }
@@ -147,7 +149,7 @@ final class SignedDocumentStore {
     }
 
     private func trashCopy(of entry: SignedDocument) {
-        guard let url = entry.url else { return }
+        guard entry.origin != .integration, let url = entry.url else { return }
         do {
             try trash(url)
         } catch {

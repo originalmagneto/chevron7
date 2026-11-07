@@ -461,6 +461,7 @@ final class SigningSessionStore {
     /// An eID reads its certificates with an empty PIN: the engine asks the eID client
     /// for the BOK in its own window.
     func resolveCertificateForPreview(force: Bool = false) async {
+        guard !externalSigningIsBusy() else { return }
         guard !signingProviderIsDemo, !signingPIN.isEmpty || selectedCardAsksForBOK,
               !isResolvingCertificate else { return }
         guard force || !hasResolvedCertificate else { return }
@@ -485,6 +486,7 @@ final class SigningSessionStore {
     }
 
     func refreshIdentities() async {
+        guard !externalSigningIsBusy() else { return }
         guard !isSigning, !isRefreshingIdentities else { return }
         isRefreshingIdentities = true
         defer { isRefreshingIdentities = false }
@@ -510,8 +512,10 @@ final class SigningSessionStore {
         }
     }
 
+    var externalSigningIsBusy: @MainActor () -> Bool = { false }
+
     var canSign: Bool {
-        document != nil && selectedIdentityID != nil && !isSigning
+        document != nil && selectedIdentityID != nil && !isSigning && !externalSigningIsBusy()
     }
 
     /// Mobile signing always uses the qualified certificate on the eID, which is known only
@@ -655,6 +659,7 @@ final class SigningSessionStore {
     }
 
     func sign(viaMobile: Bool = false, mobileMethod: MobileSigningMethod = .autogramMobile) async {
+        guard !externalSigningIsBusy() else { lastError = "Chevron7 už spracúva inú požiadavku na podpis."; return }
         guard let document else { return }
         // Ask for the PIN instead of failing with "Certifikát nie je dostupný".
         if !viaMobile, signingNeedsPIN {
@@ -972,6 +977,7 @@ final class SigningSessionStore {
     }
 
     func prepareBatch(ids: [UUID]) async {
+        guard !externalSigningIsBusy() else { return }
         guard batchPhase != .preflighting, batchPhase != .signing else { return }
         invalidateBatchWork()
         let generation = batchGeneration
@@ -1322,6 +1328,7 @@ final class SigningSessionStore {
     }
 
     func startBatch() async {
+        guard !externalSigningIsBusy() else { lastError = "Chevron7 už spracúva inú požiadavku na podpis."; return }
         guard batchPhase == .ready,
               batchOptionsError == nil,
               let snapshot = batchSettingsSnapshot,

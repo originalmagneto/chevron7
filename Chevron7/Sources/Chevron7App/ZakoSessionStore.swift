@@ -115,6 +115,7 @@ final class ZakoSessionStore {
     var evidenceNumberRequested = false
     var fetchingEvidenceNumber = false
     var evidenceNumberError: String?
+    var externalSigningIsBusy: @MainActor () -> Bool = { false }
     var isAuthorizing = false
     private var reviewUpdatedAt: Date?
 
@@ -1093,6 +1094,7 @@ final class ZakoSessionStore {
     }
 
     func refreshIdentities() async {
+        guard !externalSigningIsBusy() else { return }
         guard !isRefreshingIdentities else { return }
         isRefreshingIdentities = true
         defer { isRefreshingIdentities = false }
@@ -1133,6 +1135,7 @@ final class ZakoSessionStore {
     }
 
     func resolveCertificateForAuthorization(force: Bool = false) async {
+        guard !externalSigningIsBusy() else { return }
         guard !signingProviderIsDemo, !signingPIN.isEmpty || !cardNeedsTypedPIN,
               !isResolvingCertificate else { return }
         guard force || !hasResolvedCertificate else { return }
@@ -1357,6 +1360,7 @@ final class ZakoSessionStore {
         return allErrors
     }
     func authorizeAndSign(viaMobile: Bool = false) async {
+        guard !externalSigningIsBusy() else { lastError = "Chevron7 už spracúva inú požiadavku na podpis."; return }
         guard !isAuthorizing else { return }
         isAuthorizing = true
         isAuthorizingViaMobile = viaMobile

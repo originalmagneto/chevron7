@@ -82,14 +82,18 @@ private final class CertificateResolutionProbeProvider: QualifiedSigningProvidin
         let shouldSuspend = lock.withLock {
             resolvedPINs.append(pin)
             if resolvedPINs.count == 1 {
-                firstResolutionStarted = true
+                if !suspendFirstResolution { firstResolutionStarted = true }
                 return suspendFirstResolution
             }
             return false
         }
         if shouldSuspend {
             await withCheckedContinuation { continuation in
-                lock.withLock { firstResolutionContinuation = continuation }
+                lock.withLock {
+                    firstResolutionContinuation = continuation
+                    // A waiter may release as soon as it observes this flag.
+                    firstResolutionStarted = true
+                }
             }
         }
         let identityID = pin == "1234" ? "engine-cert:resolved" : "engine-cert:\(pin)"

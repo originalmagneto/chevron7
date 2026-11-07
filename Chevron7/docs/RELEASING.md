@@ -60,6 +60,16 @@ When Apple refuses a submission, `notarize-release.sh` prints the notary log, wh
 
 An Admin can create the API key without the Account Holder: App Store Connect, Users and Access, Integrations, App Store Connect API, Team Keys, access "Developer". Apple offers the `.p8` for download only once. The workflow imports the identity into a temporary keychain and deletes it, the `.p12` and the `.p8` at the end of the job.
 
+### Signed test build before merging
+
+Dispatch the workflow from the candidate branch with `publish=false` to build and notarize the same app and DMG without creating a GitHub release, tag or Sparkle appcast:
+
+```bash
+gh workflow run release.yml -R originalmagneto/chevron7 --ref codex/cli-mcp -f publish=false -f version=1.19.0
+```
+
+The run uploads `Chevron7-v1.19.0-test-<run ID>` as an Actions artifact, containing the signed `Chevron7-v1.19.0.dmg`, for seven days. Download it from that run's Artifacts section or with `gh run download <run ID> -R originalmagneto/chevron7`. This mode requires all five signing and notarization secrets and fails if they are absent. The version is optional: it uses the next version derived from commits, or the latest release version when no release-worthy commits exist; an existing tag does not prevent a test build. `publish` defaults to `true`, and pushes to `main` retain the normal publishing behavior.
+
 ## Sparkle updates
 
 Chevron7 checks for updates with Sparkle 2 (`AppUpdater`, menu "Skontrolovať aktualizácie…"). Release builds carry `SUFeedURL` (`https://github.com/originalmagneto/chevron7/releases/latest/download/appcast.xml`), the Ed25519 public key `SUPublicEDKey`  and `SUEnableAutomaticChecks`, and `SUAllowsAutomaticUpdates` false so a stored silent-install preference cannot download or install before the person chooses Install; debug builds carry none of them, so they never offer to replace themselves. A launch for a portal request starts the updater only once the app becomes regular, so a signing panel never meets an update prompt. Every start of the updater checks the feed right away (`AppUpdater`, `UpdatePromptGate`), and the scheduled check runs every four hours (`SUScheduledCheckInterval` 14400) for an app left open. The app shows an update found in the background itself, at once while Chevron7 is active and nothing signs, authorizes a conversion, answers a browser request or talks to EZZK, else as soon as that holds; a skipped version stays skipped for these checks, as in Sparkle. Nothing is downloaded before the person chooses to install: `SUAutomaticallyUpdate` would install silently at quit.

@@ -93,11 +93,12 @@ final class SignatureTreeStoreTests: XCTestCase {
         await store.inspectExistingSignatures()
         let current = store.existingValidationTask
 
-        // The current validation finishes first, the stale one last.
-        await provider.releaseValidation(for: second)
-        await current?.value
+        // The shared engine broker holds the next validation until the cancelled
+        // provider returns. The stale result must still never replace the new one.
         await provider.releaseValidation(for: first)
         await stale?.value
+        await provider.releaseValidation(for: second)
+        await current?.value
 
         XCTAssertEqual(provider.validateCalls, 2)
         XCTAssertEqual(store.existingSignatureState.tree, Self.validated)

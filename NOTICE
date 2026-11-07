@@ -27,3 +27,13 @@ interaction pattern of SwiftPieces CommitButton by Saivion Hayes
 (https://github.com/Saivion/SwiftPieces), used under its MIT + Commons Clause
 License Condition v1.0; the upstream copyright and permission notice are
 reproduced in that file. No upstream source lines were copied.
+
+The native CLI and MCP adapter use the official MCP Swift SDK and resolved
+Swift dependencies: swift-system, swift-log and EventSource. The package also
+resolves swift-nio, swift-atomics and swift-collections; swift-nio includes
+CNIOLLHTTP. These dependencies retain their respective upstream licences and
+notices. Full LICENSE and NOTICE files from the pinned SwiftPM checkouts,
+including the SDK's licensing-transition notice and CNIOLLHTTP's notice, are
+bundled under Contents/Resources/Licenses/<dependency>. Package.resolved records
+the exact source revisions. These notices do not change the licences of the
+upstream components.

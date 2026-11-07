@@ -12,6 +12,7 @@ public enum WebBridgePeer: CaseIterable, Sendable {
     case agent
     /// `webbridge-probe`, the developer tool that stands in for Safari.
     case probe
+    case integrationClient
 
     public var signingIdentifier: String {
         switch self {
@@ -19,6 +20,7 @@ public enum WebBridgePeer: CaseIterable, Sendable {
         case .webExtension: ProductIdentity.webExtensionBundleIdentifier
         case .agent: ProductIdentity.webBridgeAgentIdentifier
         case .probe: ProductIdentity.webBridgeProbeIdentifier
+        case .integrationClient: ProductIdentity.integrationIdentifier
         }
     }
 }
@@ -35,7 +37,7 @@ public enum WebBridgeCallerRole: CaseIterable, Sendable {
     public var peers: [WebBridgePeer] {
         switch self {
         case .app: [.app]
-        case .endpointClient: [.webExtension, .probe]
+        case .endpointClient: [.webExtension, .probe, .integrationClient]
         }
     }
 

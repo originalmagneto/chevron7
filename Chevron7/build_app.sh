@@ -59,6 +59,25 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BIN_DIR/Chevron7" "$CONTENTS/MacOS/Chevron7"
 
+# Keep the full notices from the exact resolved native dependencies with the bundle.
+# BEGIN_NATIVE_LICENSES
+for dependency in swift-sdk swift-system swift-log eventsource swift-nio swift-atomics swift-collections; do
+    checkout=".build/checkouts/$dependency"
+    destination="$CONTENTS/Resources/Licenses/$dependency"
+    mkdir -p "$destination"
+    copied_license=false
+    for notice in "$checkout"/LICENSE* "$checkout"/NOTICE*; do
+        [[ -f "$notice" ]] || continue
+        cp "$notice" "$destination/"
+        [[ "$(basename "$notice")" != LICENSE* ]] || copied_license=true
+    done
+    [[ "$copied_license" == true ]] || { echo "Error: missing license for resolved dependency $dependency" >&2; exit 1; }
+done
+mkdir -p "$CONTENTS/Resources/Licenses/swift-nio/CNIOLLHTTP" "$CONTENTS/Resources/Licenses/Chevron7"
+cp .build/checkouts/swift-nio/Sources/CNIOLLHTTP/LICENSE "$CONTENTS/Resources/Licenses/swift-nio/CNIOLLHTTP/LICENSE"
+cp ../LICENSE ../NOTICE "$CONTENTS/Resources/Licenses/Chevron7/"
+# END_NATIVE_LICENSES
+
 # SwiftPM links Sparkle dynamically; this hand-built bundle embeds the framework.
 # ditto keeps its symlinks and permissions.
 SPARKLE_FRAMEWORK="$(find .build/artifacts -type d -path '*macos*' -name Sparkle.framework -print -quit 2>/dev/null || true)"
@@ -300,6 +319,9 @@ fi
 # launchd agent that owns the Mach service name. A GUI app cannot publish one:
 # launchd hands the receive right only to the process it launches for the name.
 # The agent is a rendezvous point, no document ever passes through it.
+mkdir -p "$CONTENTS/Helpers"
+cp "$BIN_DIR/chevron7-cli" "$CONTENTS/Helpers/chevron7"
+codesign --force --sign - --identifier chevron7 "$CONTENTS/Helpers/chevron7"
 AGENT_BIN="$BIN_DIR/chevron7-webbridge-agent"
 if [[ -x "$AGENT_BIN" ]]; then
     cp "$AGENT_BIN" "$CONTENTS/Helpers/chevron7-webbridge-agent" 2>/dev/null \

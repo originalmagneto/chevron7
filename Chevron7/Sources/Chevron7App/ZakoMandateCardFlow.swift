@@ -77,6 +77,7 @@ extension ZakoSessionStore {
 
     /// "Autorizovať konverziu": card, PIN or BOK, the MQC, then the signature.
     func beginAuthorization() async {
+        guard !externalSigningIsBusy() else { return }
         guard !isAuthorizing, cardPrompt == nil else { return }
         lastError = nil
         guard !signingProviderIsDemo else {
@@ -106,6 +107,7 @@ extension ZakoSessionStore {
     /// Moves the pending action on as far as the card allows: it stops at a prompt, at a
     /// refusal, or runs the action.
     func advanceCardFlow() async {
+        guard !externalSigningIsBusy() else { return }
         guard let action = pendingCardAction else { return }
         cardPrompt = nil
         // Only what the reader reports: `refreshIdentities` would also try a remembered PIN,

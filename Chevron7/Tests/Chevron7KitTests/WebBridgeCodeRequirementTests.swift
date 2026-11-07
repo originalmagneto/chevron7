@@ -55,7 +55,7 @@ final class WebBridgeCodeRequirementTests: XCTestCase {
     /// `NSXPCConnection` raises an Objective-C exception on a malformed
     /// requirement, which Swift cannot catch, so every variant must parse.
     func testEveryRequirementParses() {
-        let peerSets: [[WebBridgePeer]] = [[.app], [.agent], [.webExtension], [.probe], [.webExtension, .probe]]
+        let peerSets: [[WebBridgePeer]] = [[.app], [.agent], [.webExtension], [.probe], [.integrationClient], [.webExtension, .probe]]
         for peers in peerSets {
             for team in ["Q7AU96CW7H", nil, "bad\"team"] as [String?] {
                 let requirement = WebBridgeCodeRequirement.requirement(for: peers, teamIdentifier: team)
@@ -67,13 +67,22 @@ final class WebBridgeCodeRequirementTests: XCTestCase {
 
     func testRolesSeparateTheAppFromItsClients() {
         XCTAssertEqual(WebBridgeCallerRole.app.peers, [.app])
-        XCTAssertEqual(WebBridgeCallerRole.endpointClient.peers, [.webExtension, .probe])
+        XCTAssertEqual(WebBridgeCallerRole.endpointClient.peers, [.webExtension, .probe, .integrationClient])
 
         let appRequirement = WebBridgeCodeRequirement.requirement(for: [.app], teamIdentifier: "Q7AU96CW7H")
-        let clientRequirement = WebBridgeCodeRequirement.requirement(for: [.webExtension, .probe], teamIdentifier: "Q7AU96CW7H")
+        let clientRequirement = WebBridgeCodeRequirement.requirement(for: [.webExtension, .probe, .integrationClient], teamIdentifier: "Q7AU96CW7H")
         XCTAssertEqual(WebBridgeCallerRole.classify(teamIdentifier: "Q7AU96CW7H") { $0 == appRequirement }, .app)
         XCTAssertEqual(WebBridgeCallerRole.classify(teamIdentifier: "Q7AU96CW7H") { $0 == clientRequirement }, .endpointClient)
         XCTAssertNil(WebBridgeCallerRole.classify(teamIdentifier: "Q7AU96CW7H") { _ in false })
+    }
+
+    func testIntegrationRoleIsDistinctFromSafari() {
+        let integration = WebBridgeCodeRequirement.requirement(for: [.integrationClient], teamIdentifier: "Q7AU96CW7H")
+        XCTAssertTrue(integration.contains("identifier \"chevron7\""))
+        XCTAssertTrue(integration.contains("Q7AU96CW7H"))
+        XCTAssertFalse(integration.contains("WebExtension"))
+        let safari = WebBridgeCodeRequirement.requirement(for: [.webExtension, .probe], teamIdentifier: "Q7AU96CW7H")
+        XCTAssertFalse(safari.contains("identifier \"chevron7\""))
     }
 
     func testRunningProcessIsCheckedAgainstItsOwnRequirement() throws {

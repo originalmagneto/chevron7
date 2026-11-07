@@ -5,6 +5,7 @@ import Foundation
 import Chevron7Identity
 import Chevron7Kit
 import Chevron7WebBridge
+import Chevron7Integration
 import os
 
 /// Publishes the Mach service the Safari web extension handler connects to.
@@ -24,6 +25,13 @@ final class WebBridgeListener: NSObject, NSXPCListenerDelegate, @unchecked Senda
     private let lock = NSLock()
     private var signHandler: (@Sendable (WebSignRequest) async throws -> WebSignResponse)?
     private let jobs = WebSignJobStore()
+    private var integrationHandler: (@Sendable (Data) async -> Data)?
+
+    func setIntegrationHandler(_ handler: @escaping @Sendable (Data) async -> Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        integrationHandler = handler
+    }
 
     /// Installs the handler that turns a portal request into a real signature.
     /// Kept injectable so the transport can be exercised without the signing UI.
@@ -93,8 +101,25 @@ final class WebBridgeListener: NSObject, NSXPCListenerDelegate, @unchecked Senda
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        connection.exportedInterface = NSXPCInterface(with: WebSigningBridgeProtocol.self)
-        connection.exportedObject = self
+        let integrationRequirement = WebBridgeCodeRequirement.requirement(for: [.integrationClient])
+        if WebBridgeCodeRequirement.process(connection.processIdentifier, satisfies: integrationRequirement) {
+            connection.setCodeSigningRequirement(integrationRequirement)
+            lock.lock()
+            let handler = integrationHandler
+            lock.unlock()
+            guard let handler else { return false }
+            connection.exportedInterface = NSXPCInterface(with: IntegrationBridgeProtocol.self)
+            let service = IntegrationConnection(handler: handler)
+            connection.exportedObject = service
+            connection.invalidationHandler = { service.cancelRequests() }
+            connection.interruptionHandler = { service.cancelRequests() }
+        } else {
+            let requirement = WebBridgeCodeRequirement.requirement(for: [.webExtension, .probe])
+            guard WebBridgeCodeRequirement.process(connection.processIdentifier, satisfies: requirement) else { return false }
+            connection.setCodeSigningRequirement(requirement)
+            connection.exportedInterface = NSXPCInterface(with: WebSigningBridgeProtocol.self)
+            connection.exportedObject = self
+        }
         connection.resume()
         return true
     }
@@ -209,4 +234,38 @@ extension WebBridgeListener: WebSigningBridgeProtocol {
             return .failure(RejectedRequest(text: "Požiadavka na podpis je poškodená: \(detail)"))
         }
     }
+}
+
+/// The integration interface is never exported to Safari's connection.
+private final class IntegrationConnection: NSObject, IntegrationBridgeProtocol, @unchecked Sendable {
+    let handler: @Sendable (Data) async -> Data
+    private let lock = NSLock()
+    private var requests: [UUID: Task<Void, Never>] = [:]
+    private var closed = false
+    init(handler: @escaping @Sendable (Data) async -> Data) { self.handler = handler }
+    func execute(request: Data, reply: @escaping (Data) -> Void) {
+        let box = IntegrationReply(reply)
+        let id = UUID()
+        lock.lock()
+        guard !closed else { lock.unlock(); box.reply(Data()); return }
+        requests[id] = Task {
+            box.reply(await handler(request))
+            _ = lock.withLock { requests.removeValue(forKey: id) }
+        }
+        lock.unlock()
+    }
+    func cancelRequests() {
+        let pending = lock.withLock { () -> [Task<Void, Never>] in
+            closed = true
+            let tasks = Array(requests.values)
+            requests.removeAll()
+            return tasks
+        }
+        pending.forEach { $0.cancel() }
+    }
+}
+
+private final class IntegrationReply: @unchecked Sendable {
+    let reply: (Data) -> Void
+    init(_ reply: @escaping (Data) -> Void) { self.reply = reply }
 }
