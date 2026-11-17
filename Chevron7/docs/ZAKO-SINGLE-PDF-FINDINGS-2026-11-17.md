@@ -68,3 +68,27 @@ veraPDF through DSS `PDFAStructureValidator` (flavour taken from the XMP; the ap
 Structure: `qpdf --check` on the P→E, E→E and cross-reference stream appended outputs reports no syntax or stream encoding errors. The update holds only new objects plus the rewritten catalog, page tree root and outline (about 72 KB for 66 KB of clause pages and a 4 KB XDC); the trailer keeps `/Info` and the first `/ID` element and points `/Prev` at the source's cross-reference.
 
 The signed output (revision 3, PAdES Baseline T) and its slovensko.sk upload are Task 3 and later.
+
+## Task 11: verification (2026-11-17)
+
+Automated, on this branch:
+
+- `swift test` from `Chevron7/`: Chevron7KitTests 892 tests (9 skipped, 0 failures), Chevron7AppTests 573 (2 skipped, 0 failures), the Integration and CLI bundles green.
+- Engine `./mvnw -q -Djlink.jdk.path=$J test` (Zulu FX 25): 681 tests, 0 failures, 0 errors, 1 skipped (the stderr XML parser warnings in the log are from negative tests).
+- `scripts/check-rename-boundary.sh --strict`: boundary holds, no Chevron7 name in the new engine files.
+- `scripts/build-engine.sh` and `build_app.sh` (debug, not installed, not launched): both succeeded, so `.build/out/Products/Debug/Chevron7.app` bundles the new engine.
+
+### Pending for the owner (not done in this task)
+
+Step 2, Demo run (the built app above): choose "Jeden PDF s doložkou" in the authorize step, then:
+
+1. P→E: convert a scanned PDF in Skúšobný režim. Open the delivered `<new document name>.pdf` in Preview: the clause pages follow the content pages, the outline shows "Osvedčovacia doložka", the attachment `dolozka.xml.xdcf` (or `<number>.xml.xdcf`) is present. The Done screen's signature banner validates the PDF.
+2. E→E: convert a signed PDF the same way, including one that is PDF/A without attachments (it must be converted, not kept). Same checks.
+3. Record results here.
+
+Step 3, Testovacia evidencia with a card (owner's Mac, mandate certificate):
+
+1. One P→E and one E→E `.singlePDF` conversion; EZZK accepts and processes both (Register row `.processed`, "Overiť v EZZK").
+2. Upload one delivered PDF to the slovensko.sk validator and record whether the BOSA timestamp shows.
+3. Ask ORSR whether it accepts a PAdES PDF with an XML attachment (spec 5.8).
+4. Only then flip `SinglePDFProductionPolicy.enabled` for P→E in its own commit, with the release note for Ostrá evidencia.

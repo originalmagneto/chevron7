@@ -16,8 +16,10 @@ enum E2EProductionPolicy {
 
 /// Guaranteed conversion of an electronic document to a new electronic document (E→E,
 /// § 35 ods. 1 písm. c) and § 36 ods. 4 zákona č. 305/2013 Z. z.). The client's signatures are
-/// verified first, the PDF stays byte for byte when it is PDF/A without attachments (else a new
-/// PDF/A-2b), and the clause and record follow the official E→E forms. Signing, the register
+/// verified first, the PDF stays byte for byte when it is PDF/A without attachments and the
+/// output is the ASiC-E container (else a new PDF/A-2b; the one-PDF output always converts,
+/// because pages appended after the client's signatures would leave them changed after
+/// signing), and the clause and record follow the official E→E forms. Signing, the register
 /// and EZZK are the P→E path. Spec: `docs/superpowers/specs/2026-10-16-zako-e2e-design.md`.
 extension ZakoSessionStore {
     static let e2eMobileMessage = "Zaručenú konverziu elektronického dokumentu autorizujte kartou s mandátnym certifikátom."
