@@ -124,6 +124,8 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(provider.clientSource, try Data(contentsOf: source), "the client's PDF goes in unchanged")
         let row = try XCTUnwrap(store.evidenceStore.record(id: store.currentRecordID))
         XCTAssertEqual(row.direction, .electronicToElectronic)
+        XCTAssertEqual(row.clientOutput, .asicContainer, "a new row names its output")
+        XCTAssertNil(row.revisionOneLength)
         XCTAssertTrue(row.attestationXML.contains(OfficialForm.recordE2E_1_0.namespace))
         XCTAssertEqual(row.fingerprintSHA256Hex,
                        SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined())

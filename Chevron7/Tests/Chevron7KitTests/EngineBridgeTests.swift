@@ -1434,7 +1434,10 @@ final class EngineBridgeAppendedClauseTests: XCTestCase {
         let message = AutogramCLIEngine.fileFailureMessage(code: "PDFA_INVALID")
         let mapped = EngineBridgeSigningProvider.localizedEngineMessage(message)
         XCTAssertTrue(mapped.contains("nespĺňa PDF/A-3b"))
-        XCTAssertTrue(mapped.contains("evidenčné číslo zostáva nepoužité"))
+        // The number is not always unused (a 2027 resume has spent it), so the message never says so;
+        // it names the way out instead.
+        XCTAssertFalse(mapped.contains("evidenčné číslo"))
+        XCTAssertTrue(mapped.hasSuffix("Zvoľte výstup ako kontajner ASiC-E alebo dokument skúste previesť znova."))
         XCTAssertFalse(mapped.contains("\u{2014}"))
     }
 }

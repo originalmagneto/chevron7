@@ -420,7 +420,7 @@ extension ZakoSessionStore {
                 deliveredFileName: deliveredTarget.lastPathComponent,
                 ezzkMode: attestation.evidenceNumberMode ?? ezzkMode,
                 evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
-                clientOutput: deliversSinglePDF ? .singlePDF : nil,
+                clientOutput: deliversSinglePDF ? .singlePDF : .asicContainer,
                 // Revision 1 of the one PDF is the fingerprinted new document: a reader cuts it here.
                 revisionOneLength: deliversSinglePDF ? newDocument.count : nil)
             if let qualifiedReport {

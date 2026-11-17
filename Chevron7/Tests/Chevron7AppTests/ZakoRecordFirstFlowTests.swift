@@ -33,6 +33,8 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertNil(store.recordFirstPending)
         let row = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
         XCTAssertEqual(row.status, .processed)
+        XCTAssertEqual(row.clientOutput, .asicContainer, "a new row names its output")
+        XCTAssertNil(row.revisionOneLength)
         XCTAssertEqual(row.formPack?.recordVersion, "1.2")
         XCTAssertEqual(row.formPack?.packID, FormPackRepository.record12Unverified.id)
         XCTAssertTrue(row.attestationXML.contains(OfficialForm.record_1_2.namespace))
@@ -423,6 +425,41 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
     }
 
+    /// The client signature fails after EZZK processed the record: the message says the record stays
+    /// in EZZK and how to go on; a resume without the engine's one-PDF support refuses the same way.
+    func testFailedClientSignatureAfterTheRecordSaysHowToGoOn() async throws {
+        try requireXMLLint()
+        let settingsStore = makeSettingsStore()
+        let provider = SinglePDFRecordingProvider()
+        provider.refusesClient = true
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF)
+        store.clausePageRenderer = StubClausePageRenderer()
+        store.pdfClauseCheckRunner = CheckRecorder(status: 0, stderr: "").runner
+        store.outputDirectoryOverride = makeTemporaryDirectory("record-first-single-pdf-client-failed")
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.recordFirstPending?.stage, .signingClientContainer)
+        let detail = SigningError.signingFailed("Karta bola vybratá počas podpisu.").errorDescription ?? ""
+        XCTAssertEqual(store.lastError, RecordFirstClientSignatureError(detail: detail).errorDescription)
+        let message = try XCTUnwrap(store.lastError)
+        XCTAssertTrue(message.contains("Záznam o konverzii zostáva v EZZK"), message)
+        XCTAssertTrue(message.contains("Dokončiť konverziu"), message)
+        XCTAssertTrue(message.contains("novú konverziu"), message)
+
+        settingsStore.useRealSigningProvider(NoAppendedClauseProvider())
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.lastError,
+                       RecordFirstClientSignatureError(
+                           detail: SigningError.signingFailed(ZakoSinglePDFDelivery.engineRefusal).errorDescription ?? "")
+                           .errorDescription)
+        XCTAssertEqual(store.recordFirstPending?.stage, .signingClientContainer, "the conversion can still be finished")
+        XCTAssertNotEqual(store.step, .done)
+    }
+
     // MARK: - Fixtures
 
     private static let optionsReply = #"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing">"#
@@ -563,5 +600,14 @@ private final class CheckRecorder: @unchecked Sendable {
             }
             return (status, stderr)
         })
+    }
+}
+
+/// A provider without the engine's one-PDF support, as the Demo signer.
+private final class NoAppendedClauseProvider: QualifiedSigningProviding, @unchecked Sendable {
+    private let demo = DemoSigningProvider()
+    func availableIdentities() async -> [SigningIdentityInfo] { [] }
+    func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
+        try await demo.sign(request)
     }
 }

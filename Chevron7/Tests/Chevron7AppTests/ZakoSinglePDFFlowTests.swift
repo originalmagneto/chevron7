@@ -276,7 +276,7 @@ final class ZakoSinglePDFFlowTests: XCTestCase {
         let outputs = try FileManager.default.contentsOfDirectory(atPath: directory.path)
         XCTAssertEqual(outputs, ["Zmluva o dielo.asice"])
         let row = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
-        XCTAssertNil(row.clientOutput)
+        XCTAssertEqual(row.clientOutput, .asicContainer, "a new row names its output")
         XCTAssertNil(row.revisionOneLength)
         XCTAssertEqual(row.pdfFileName, "Zmluva o dielo.pdf")
         XCTAssertEqual(row.deliveredFileName, "Zmluva o dielo.asice")
@@ -294,6 +294,28 @@ final class ZakoSinglePDFFlowTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: written), Data("signed".utf8))
         XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)),
                        ["Zmluva o dielo.pdf", "Zmluva o dielo (2).pdf"], "no staging file is left")
+    }
+
+    /// A one PDF written under " (2)" because a file took the name the clause gives it: the Done
+    /// screen and the Register say so in one line; a container or a one PDF under its name says nothing.
+    func testRenamedNoticeOnlyForAOnePDFUnderAnotherName() {
+        var row = EvidenceRecord(status: .processed, direction: .paperToElectronic, originalName: "Zmluva",
+                                 newDocumentName: "Zmluva o dielo.pdf", evidenceNumber: "1563-261117-7",
+                                 fingerprintSHA256Hex: "ab", attestationXML: "", conversionTime: Date(),
+                                 performingPersonName: "", securityElementCount: 0, totalPages: 1, totalSheets: 1)
+        row.clientOutput = .singlePDF
+        row.pdfFileName = "Zmluva o dielo.pdf"
+        row.deliveredFileName = "Zmluva o dielo (2).pdf"
+        XCTAssertEqual(ZakoSinglePDFDelivery.renamedNotice(for: row),
+                       "Súbor bol uložený pod názvom Zmluva o dielo (2).pdf, lebo názov Zmluva o dielo.pdf uvedený v doložke medzitým obsadil iný súbor.")
+        row.deliveredFileName = "Zmluva o dielo.pdf"
+        XCTAssertNil(ZakoSinglePDFDelivery.renamedNotice(for: row))
+        row.clientOutput = .asicContainer
+        row.deliveredFileName = "Zmluva o dielo.asice"
+        XCTAssertNil(ZakoSinglePDFDelivery.renamedNotice(for: row), "a container always differs from its PDF name")
+        row.clientOutput = nil
+        XCTAssertNil(ZakoSinglePDFDelivery.renamedNotice(for: row))
+        XCTAssertNil(ZakoSinglePDFDelivery.renamedNotice(for: nil))
     }
 
     // MARK: - Fixtures

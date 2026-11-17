@@ -44,6 +44,16 @@ struct ZakoSinglePDFDelivery {
                               attachmentMimeType: AppendedClause.xdcMimeType)
     }
 
+    /// One line for the Done screen and the Register when the one PDF went out under another name
+    /// than the clause gives it (a file took the fixed name meanwhile, so it was written as " (2)");
+    /// nil for every other row.
+    static func renamedNotice(for record: EvidenceRecord?) -> String? {
+        guard let record, record.clientOutput == .singlePDF,
+              let delivered = record.deliveredFileName, let named = record.pdfFileName,
+              delivered != named else { return nil }
+        return "Súbor bol uložený pod názvom \(delivered), lebo názov \(named) uvedený v doložke medzitým obsadil iný súbor."
+    }
+
     static func refusal(mode: AppSettings.EZZKMode, viaMobile: Bool,
                         provider: QualifiedSigningProviding) -> String? {
         if mode == .production && !SinglePDFProductionPolicy.enabled {

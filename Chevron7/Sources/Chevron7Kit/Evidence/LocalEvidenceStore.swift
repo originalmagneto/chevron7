@@ -101,8 +101,9 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var validationEvidenceSource: String?
     /// What the client received; nil for rows written before the one-PDF output (a container).
     public var clientOutput: AppSettings.ZakoClientOutput?
-    /// One-PDF output: the byte length of the unchanged first revision (the signed PDF/A-3
-    /// before the clause was appended); nil for any other row.
+    /// One-PDF output: the byte length of the unchanged first revision, the unsigned content
+    /// PDF/A (2b) before the clause revision was appended, whose SHA-256 is the fingerprint;
+    /// nil for any other row.
     public var revisionOneLength: Int?
 
     public var evidenceURI: String? {

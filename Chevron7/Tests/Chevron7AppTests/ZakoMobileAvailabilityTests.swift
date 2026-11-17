@@ -95,6 +95,17 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         XCTAssertEqual(ZakoVerificationPresentation.keptDocumentLine(formatName: "PDF/A-2b", output: .singlePDF),
                        "nový PDF/A-3 s doložkou")
     }
+
+    /// An original that must be converted becomes a PDF/A-2b for the container and a PDF/A-3 with
+    /// the clause for the one PDF.
+    func testConvertedOriginalWordingFollowsClientOutput() {
+        XCTAssertEqual(ZakoVerificationPresentation.convertNote(reason: "Dokument nie je PDF/A", output: .asicContainer),
+                       "Dokument nie je PDF/A, preto vznikne nový PDF/A-2b. Podpisy klienta zostanú zapísané v doložke.")
+        XCTAssertEqual(ZakoVerificationPresentation.convertNote(reason: "Dokument nie je PDF/A", output: .singlePDF),
+                       "Dokument nie je PDF/A, preto vznikne nový PDF/A-3 s doložkou. Podpisy klienta zostanú zapísané v doložke.")
+        XCTAssertEqual(ZakoVerificationPresentation.convertedDocumentLine(output: .asicContainer), "nový PDF/A-2b")
+        XCTAssertEqual(ZakoVerificationPresentation.convertedDocumentLine(output: .singlePDF), "nový PDF/A-3 s doložkou")
+    }
 }
 
 /// Minimal non-demo signing provider: only what `QualifiedSigningProviding` requires with

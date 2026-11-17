@@ -1880,7 +1880,7 @@ final class ZakoSessionStore {
                 securityReview: securityReviewSnapshot,
                 ezzkMode: attestation.evidenceNumberMode ?? settingsStore.ezzkAccountController.mode,
                 evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
-                clientOutput: deliversSinglePDF ? .singlePDF : nil,
+                clientOutput: deliversSinglePDF ? .singlePDF : .asicContainer,
                 // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
                 revisionOneLength: deliversSinglePDF ? finalPDF.count : nil)
 

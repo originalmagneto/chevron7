@@ -43,13 +43,26 @@ struct RecordFirstPending: Sendable {
     let clientTSAURL: String?
 }
 
+/// The client signature of a record-first conversion failed after EZZK processed the record:
+/// the record stays there and the conversion is finished with "Dokončiť konverziu".
+struct RecordFirstClientSignatureError: LocalizedError, Equatable {
+    let detail: String
+
+    var errorDescription: String? {
+        let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentence = detail.isEmpty || detail.hasSuffix(".") ? detail : detail + "."
+        return (sentence.isEmpty ? "" : sentence + " ")
+            + "Záznam o konverzii zostáva v EZZK. Kliknite znova na Dokončiť konverziu, alebo začnite novú konverziu."
+    }
+}
+
 extension ZakoSessionStore {
     static let recordFirstMobileMessage = "Od 1. 1. 2027 sa najprv podpisuje záznam o konverzii, a ten mobil podpísať nevie. Autorizujte kartou."
     static let recordFirstModeChangedMessage = "Táto konverzia začala v inom režime EZZK. Prepnite späť alebo začnite konverziu znova."
     static let recordFirstFormChangedMessage = "Údaje konverzie sa zmenili po podpise záznamu o konverzii. Doložka musí zodpovedať podpísanému záznamu: vráťte zmeny alebo začnite konverziu znova."
     static let recordFirstWaitStoppedMessage = "Čakanie na EZZK je zastavené. Záznam je odoslaný a Chevron7 ho overuje aj na pozadí. Keď ho EZZK spracuje, kliknite znova na Autorizovať konverziu a doložka sa podpíše."
     static let recordFirstTimedOutMessage = "EZZK záznam zatiaľ nespracovalo. Chevron7 ho overuje aj na pozadí; neskôr kliknite znova na Autorizovať konverziu a konverzia sa dokončí."
-    static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Autorizovať konverziu a dokument sa podpíše znova."
+    static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Dokončiť konverziu a dokument sa podpíše znova."
     static let recordFirstSinglePDFIncompleteMessage = "Uložená konverzia nemá pripravenú doložku pre jeden PDF, preto ju nemožno dokončiť. Začnite konverziu znova."
     static let recordFirstMissingRowMessage = "Záznam tejto konverzie sa v Registri konverzií nenašiel, preto ju nemožno dokončiť. Začnite konverziu znova."
 
@@ -103,7 +116,7 @@ extension ZakoSessionStore {
             securityReview: securityReview,
             ezzkMode: pending.mode,
             evidenceNumberAllocatedAt: pending.attestation.evidenceNumberAllocatedAt,
-            clientOutput: pending.clientOutput == .singlePDF ? .singlePDF : nil,
+            clientOutput: pending.clientOutput,
             // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
             revisionOneLength: pending.clientOutput == .singlePDF ? pending.finalPDF.count : nil)
         do {
@@ -170,7 +183,20 @@ extension ZakoSessionStore {
             pending.stage = .signingClientContainer
             recordFirstPending = pending
         }
-        try await signClientContainer(pending)
+        do {
+            try await signClientContainer(pending)
+        } catch let error as SigningError where Self.recordFirstClientMessagesSayHowToGoOn.contains(error) {
+            throw error
+        } catch {
+            // EZZK holds the processed record: the message says so and how to finish.
+            throw RecordFirstClientSignatureError(detail: error.localizedDescription)
+        }
+    }
+
+    /// Client signature failures whose own message already says what happens next.
+    private static var recordFirstClientMessagesSayHowToGoOn: [SigningError] {
+        [.signingFailed(recordFirstMissingRowMessage), .signingFailed(recordFirstSinglePDFIncompleteMessage),
+         .signingFailed(recordFirstSinglePDFPrefixChangedMessage)]
     }
 
     /// Polls the row until EZZK reports it processed. Returns false when the wait ended
@@ -264,6 +290,10 @@ extension ZakoSessionStore {
             // Never the container instead: the record already names the one PDF.
             guard let appendedClause = pending.appendedClause, let fixedTarget = pending.fixedTarget else {
                 throw SigningError.signingFailed(Self.recordFirstSinglePDFIncompleteMessage)
+            }
+            // A resume may run with another signer than the one the conversion started with.
+            guard signingProvider.supportsAppendedClause else {
+                throw SigningError.signingFailed(ZakoSinglePDFDelivery.engineRefusal)
             }
             // The engine appends the stored clause to the PDF/A and signs the whole as PAdES.
             signed = try await middlewareInput.during(asksEIDForBOK) {

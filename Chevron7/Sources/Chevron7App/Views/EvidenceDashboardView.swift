@@ -732,6 +732,15 @@ struct RecordDetailView: View {
             if let output = UXLabels.clientOutputLabel(record.clientOutput) {
                 row("Výstup pre klienta", output)
             }
+            if let renamed = ZakoSinglePDFDelivery.renamedNotice(for: record) {
+                GridRow {
+                    Text("Uložený súbor").foregroundStyle(.secondary)
+                    Text(renamed)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
             if record.direction == .electronicToElectronic {
                 row("Druh konverzie", "Z elektronickej do elektronickej podoby")
                 row("Overenie podpisov", record.validationEvidenceSource ?? "neuložené")

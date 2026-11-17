@@ -484,6 +484,13 @@ struct DoneView: View {
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    if let renamed = ZakoSinglePDFDelivery.renamedNotice(
+                        for: store.evidenceStore.record(id: store.currentRecordID)) {
+                        Label(renamed, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     HStack(spacing: 12) {
                         Button {

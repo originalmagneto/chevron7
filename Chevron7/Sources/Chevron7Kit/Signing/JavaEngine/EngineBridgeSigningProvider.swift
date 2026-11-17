@@ -952,7 +952,7 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
             return "EU zoznam dôveryhodných CA sa nepodarilo stiahnuť. Zapnite internet a skúste znova; vizuálna pečiatka tento zoznam potrebuje."
         }
         if code("PDFA_INVALID") {
-            return "Výsledný PDF nespĺňa PDF/A-3b, preto nebol podpísaný. Konverzia sa nevykonala a evidenčné číslo zostáva nepoužité."
+            return "Výsledný PDF nespĺňa PDF/A-3b, preto nebol podpísaný. Zvoľte výstup ako kontajner ASiC-E alebo dokument skúste previesť znova."
         }
         if code("OUTPUT_VALIDATION_FAILED") {
             return "Engine odmietol výsledok podpisu (výstupná validácia)."
