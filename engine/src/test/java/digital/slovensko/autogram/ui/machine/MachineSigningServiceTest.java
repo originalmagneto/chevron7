@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -1247,7 +1248,7 @@ class MachineSigningServiceTest {
         assertEquals("PAdES_BASELINE_T", new MachineInspectionService().inspect(signed).getAsJsonArray("signatures")
                 .get(0).getAsJsonObject().get("format").getAsString());
         assertEquals(null, new MachineSigningService.PdfOutputValidator(new MachineInspectionService())
-                .appendedClauseFailure(signed, source, attachment, pages(Files.readAllBytes(files.pages())),
+                .appendedClauseFailure(signed, source, attachment, CLAUSE_NAME, pages(Files.readAllBytes(files.pages())),
                         "PAdES_BASELINE_T"));
     }
 
@@ -1316,7 +1317,7 @@ class MachineSigningServiceTest {
         var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService());
         var clausePages = pages(pages);
 
-        assertEquals(null, validator.appendedClauseFailure(signed, source, attachment, clausePages, "PAdES_BASELINE_T"));
+        assertEquals(null, validator.appendedClauseFailure(signed, source, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
 
         var changedSource = source.clone();
         changedSource[source.length / 2] ^= 1;
@@ -1328,17 +1329,44 @@ class MachineSigningServiceTest {
         extended[signed.length] = '\n';
 
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(signed, changedSource, attachment, clausePages, "PAdES_BASELINE_T"));
+                validator.appendedClauseFailure(signed, changedSource, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(signed, source, changedAttachment, clausePages, "PAdES_BASELINE_T"));
+                validator.appendedClauseFailure(signed, source, changedAttachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(signed, source, attachment, clausePages + 1, "PAdES_BASELINE_T"));
+                validator.appendedClauseFailure(signed, source, attachment, CLAUSE_NAME, clausePages + 1, "PAdES_BASELINE_T"));
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(signed, source, attachment, clausePages, "PAdES_BASELINE_B"));
+                validator.appendedClauseFailure(signed, source, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_B"));
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(appendedOnly, source, attachment, clausePages, "PAdES_BASELINE_T"));
+                validator.appendedClauseFailure(appendedOnly, source, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
         assertEquals("OUTPUT_VALIDATION_FAILED",
-                validator.appendedClauseFailure(extended, source, attachment, clausePages, "PAdES_BASELINE_T"));
+                validator.appendedClauseFailure(extended, source, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(signed, source, attachment, "1563-261117-8.xml.xdcf", clausePages,
+                        "PAdES_BASELINE_T"), "the clause must carry the requested name");
+    }
+
+    /// The signed file keeps the source's own embedded files as they were and adds only the clause.
+    @Test
+    void embeddedFilesMayOnlyGainTheClause() {
+        var clause = "clause".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var own = "own".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var before = Map.of("priloha.pdf", own);
+
+        assertTrue(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(before,
+                Map.of("priloha.pdf", own, CLAUSE_NAME, clause), CLAUSE_NAME, clause));
+        assertTrue(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(Map.of(),
+                Map.of(CLAUSE_NAME, clause), CLAUSE_NAME, clause));
+        assertFalse(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(before,
+                Map.of("priloha.pdf", "changed".getBytes(java.nio.charset.StandardCharsets.UTF_8), CLAUSE_NAME, clause),
+                CLAUSE_NAME, clause), "a changed own file");
+        assertFalse(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(before,
+                Map.of(CLAUSE_NAME, clause, "other.pdf", own), CLAUSE_NAME, clause), "a dropped own file");
+        assertFalse(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(before,
+                Map.of("priloha.pdf", own, "other.xml.xdcf", clause), CLAUSE_NAME, clause), "the clause under another name");
+        assertFalse(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(before,
+                Map.of("priloha.pdf", own, CLAUSE_NAME, clause, "extra.txt", own), CLAUSE_NAME, clause), "a second new file");
+        assertFalse(MachineSigningService.PdfOutputValidator.embeddedFilesAddOnly(Map.of(CLAUSE_NAME, clause),
+                Map.of(CLAUSE_NAME, clause), CLAUSE_NAME, clause), "the source already had it");
     }
 
     /// The job itself refuses a clause outside PAdES, so no caller can wrap it into a container.

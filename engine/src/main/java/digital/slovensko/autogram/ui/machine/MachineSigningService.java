@@ -196,7 +196,8 @@ public final class MachineSigningService {
             if (prepared.appendClause() != null) {
                 // The request validator refuses a content timestamp with an appended clause.
                 validationFailure = appendedClauseFailure(signedContent, prepared.sourceContent(),
-                        prepared.appendClause().attachment().content(), prepared.clausePages(), requestedLevel);
+                        prepared.appendClause().attachment().content(), prepared.appendClause().attachment().name(),
+                        prepared.clausePages(), requestedLevel);
             } else {
                 validationFailure = wrapsSignedSource(prepared, previousSignatureIds, signedContent)
                         ? wrappedSourceValidationFailure(signedContent, prepared.sourceContent(),
@@ -326,10 +327,11 @@ public final class MachineSigningService {
         return !previousSignatureIds.isEmpty() && !isZip(prepared.sourceContent()) && isZip(signedContent);
     }
 
-    private String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
-            String requestedLevel) {
+    private String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, String attachmentName,
+            int clausePages, String requestedLevel) {
         try {
-            return outputValidator.appendedClauseFailure(content, source, attachment, clausePages, requestedLevel);
+            return outputValidator.appendedClauseFailure(content, source, attachment, attachmentName, clausePages,
+                    requestedLevel);
         } catch (Throwable exception) {
             throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
         }
@@ -842,8 +844,8 @@ public final class MachineSigningService {
 
         /// A PDF/A with its appended clause, signed. A validator that cannot prove the output is
         /// exactly that refuses.
-        default String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
-                String requestedLevel) throws Exception {
+        default String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, String attachmentName,
+                int clausePages, String requestedLevel) throws Exception {
             return "OUTPUT_VALIDATION_FAILED";
         }
     }
@@ -1364,15 +1366,17 @@ public final class MachineSigningService {
         /**
          * The signed one-PDF output: the source bytes unchanged as its prefix, then exactly two
          * revisions (the clause, then the signature), the source's pages plus the clause's, the
-         * clause XDC as the one embedded file the source did not have, byte for byte, and one
-         * signature of the requested level (Baseline T with its intact timestamp) whose byte range
-         * covers the whole file. veraPDF must still accept the signed file as PDF/A-3b.
+         * clause XDC as the one embedded file the source did not have, byte for byte and under the
+         * requested name, the source's own embedded files unchanged, and one signature of the
+         * requested level (Baseline T with its intact timestamp) whose byte range covers the whole
+         * file. veraPDF must still accept the signed file as PDF/A-3b.
          */
         @Override
-        public String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
-                String requestedLevel) {
+        public String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, String attachmentName,
+                int clausePages, String requestedLevel) {
             final var failed = "OUTPUT_VALIDATION_FAILED";
-            if (content == null || source == null || attachment == null || requestedLevel == null
+            if (content == null || source == null || attachment == null || attachmentName == null
+                    || requestedLevel == null
                     || !requestedLevel.startsWith("PAdES_") || content.length <= source.length
                     || !Arrays.equals(content, 0, source.length, source, 0, source.length)
                     || !hasPdfHeaderAndEof(content) || occurrencesAfter(content, source.length, "%%EOF") != 2) {
@@ -1392,9 +1396,14 @@ public final class MachineSigningService {
                         || (long) byteRange[2] + byteRange[3] != content.length) {
                     return failed;
                 }
-                var added = new LinkedHashMap<>(embeddedFiles(signed));
-                added.keySet().removeAll(embeddedFiles(original).keySet());
-                if (added.size() != 1 || !Arrays.equals(added.values().iterator().next(), attachment)) {
+                if (!embeddedFilesAddOnly(embeddedFiles(original), embeddedFiles(signed), attachmentName, attachment)) {
+                    return failed;
+                }
+                // The file specification names the clause as the request did (/UF, else /F).
+                var specification = signed.getDocumentCatalog().getNames().getEmbeddedFiles().getValue(attachmentName);
+                var fileName = specification.getFileUnicode() != null ? specification.getFileUnicode()
+                        : specification.getFile();
+                if (!attachmentName.equals(fileName)) {
                     return failed;
                 }
             } catch (IOException exception) {
@@ -1410,6 +1419,25 @@ public final class MachineSigningService {
                 return failed;
             }
             return PdfClauseAppender.pdfaErrors(content).isEmpty() ? null : failed;
+        }
+
+        /**
+         * The signed file's embedded files are the source's, each under its name with its bytes,
+         * plus exactly the clause under {@code attachmentName}. Files are keyed by their name-tree
+         * name, which the appender sets to the attachment's name as it does /F and /UF.
+         */
+        static boolean embeddedFilesAddOnly(Map<String, byte[]> before, Map<String, byte[]> after,
+                String attachmentName, byte[] attachment) {
+            if (before.containsKey(attachmentName) || after.size() != before.size() + 1
+                    || !Arrays.equals(after.get(attachmentName), attachment)) {
+                return false;
+            }
+            for (var file : before.entrySet()) {
+                if (!Arrays.equals(after.get(file.getKey()), file.getValue())) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static Map<String, byte[]> embeddedFiles(org.apache.pdfbox.pdmodel.PDDocument document)
