@@ -49,6 +49,26 @@ class PdfFormAppearancesTest {
         }
     }
 
+    /// A PDF/A with its appended clause was checked by veraPDF as it is, so the PAdES job signs
+    /// exactly those bytes; without the flag the same document gets its field appearances first.
+    @Test
+    void aPadesJobForAnAppendedClauseKeepsTheDocumentUnchanged() throws Exception {
+        var source = NeedAppearancesFixture.webForm(true);
+
+        var appended = new eu.europa.esig.dss.model.InMemoryDocument(source, "dokument.pdf",
+                eu.europa.esig.dss.enumerations.MimeTypeEnum.PDF);
+        var parameters = SigningParameters.buildForPDF(appended, false, false, null);
+        parameters.setAppendsClause(true);
+        var plain = new eu.europa.esig.dss.model.InMemoryDocument(source, "dokument.pdf",
+                eu.europa.esig.dss.enumerations.MimeTypeEnum.PDF);
+
+        assertArrayEquals(source, SigningJob.buildFromRequest(appended, parameters, null).getDocument().openStream()
+                .readAllBytes());
+        assertFalse(Arrays.equals(source, SigningJob.buildFromRequest(plain,
+                SigningParameters.buildForPDF(plain, false, false, null), null).getDocument().openStream()
+                .readAllBytes()));
+    }
+
     @Test
     void appendsAnIncrementalUpdateAndKeepsTheSourceBytes() throws Exception {
         var source = NeedAppearancesFixture.webForm(true);

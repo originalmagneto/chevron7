@@ -1282,6 +1282,21 @@ class MachineSigningServiceTest {
         }
     }
 
+    /// veraPDF may name many rules; `file.failed` carries the first five, one per line.
+    @Test
+    void pdfaInvalidMessageCarriesAtMostFiveRules() throws Exception {
+        var writer = new RecordingWriter();
+        var rules = List.of("rule 1", "rule 2", "rule 3", "rule 4", "rule 5", "rule 6", "rule 7");
+        var service = new MachineSigningService(writer.writer(), request -> new FakeSession((input, completed) -> {
+            throw MachineProtocolException.withDetails("PDFA_INVALID", rules);
+        }), content -> true, () -> { }, new TrackingFileSystem());
+
+        service.sign("request-1", request("1234".toCharArray(), file("one", "source.pdf", "out.pdf")));
+
+        assertEquals("PDFA_INVALID", writer.payloadCode(2));
+        assertEquals(String.join("\n", rules.subList(0, 5)), writer.payloadString(2, "message"));
+    }
+
     /// The output check binds the signed file to what was asked: the same source bytes as its
     /// prefix, the same clause XDC, the clause's page count and the requested level.
     @Test
