@@ -270,12 +270,16 @@ struct AuthorizeView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Picker("Výstup pre klienta", selection: Bindable(store.settingsStore).settings.zakoClientOutput) {
-                    Text("Kontajner ASiC-E").tag(AppSettings.ZakoClientOutput.asicContainer)
-                    Text("Jeden PDF").tag(AppSettings.ZakoClientOutput.singlePDF)
+                LabeledContent("Výstup pre klienta") {
+                    Picker("Výstup pre klienta", selection: Bindable(store.settingsStore).settings.zakoClientOutput) {
+                        ForEach(AppSettings.ZakoClientOutput.allCases, id: \.self) { output in
+                            Text(UXLabels.clientOutputLabel(output) ?? "").tag(output)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .disabled(store.isAuthorizing || store.recordFirstPending != nil)
                 }
-                .pickerStyle(.segmented)
-                .disabled(store.isAuthorizing || store.recordFirstPending != nil)
                 if store.settings.zakoClientOutput == .singlePDF {
                     Text("Jeden PDF, ktorého súčasťou je osvedčovacia doložka ako príloha XML a ako posledné strany (§ 37 ods. 4 zákona č. 305/2013 Z. z., § 2 ods. 3 vyhlášky č. 70/2021 Z. z.). Vhodné napríklad pre Obchodný register, ktorý neprijíma kontajnery s viacerými súbormi.")
                         .font(.caption2)
@@ -373,6 +377,7 @@ struct AuthorizeView: View {
                 || store.mobileRefusalForClientOutput != nil)
             .help(store.mobileRefusalForClientOutput
                   ?? "Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
+            .accessibilityHint(store.mobileRefusalForClientOutput ?? "")
         }
     }
 }
