@@ -208,6 +208,13 @@ final class ZakoSessionStore {
         settings.zakoClientOutput == .singlePDF ? ZakoSinglePDFDelivery.mobileRefusal : nil
     }
 
+    /// Why Ostrá evidencia does not offer the one-PDF output yet (`SinglePDFProductionPolicy`);
+    /// nil in every other mode. The authorize step shows it under the output picker.
+    var singlePDFProductionRefusal: String? {
+        settingsStore.ezzkAccountController.mode == .production && !SinglePDFProductionPolicy.enabled
+            ? SinglePDFProductionPolicy.refusalMessage : nil
+    }
+
     /// True when the user turned mobile signing on but the phone path is unavailable because
     /// EZZK is outside Demo mode: the button (`isMobileSigningAvailable`) hides in that case, so
     /// the view shows this notice instead of nothing.

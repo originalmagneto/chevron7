@@ -181,6 +181,60 @@ final class ZakoSinglePDFFlowTests: XCTestCase {
         XCTAssertTrue(provider.clientRequests.isEmpty)
     }
 
+    /// "Autorizovať konverziu" in Ostrá evidencia with the one PDF: refused before the card flow,
+    /// so neither a card, a PIN nor the card's certificates are asked for.
+    func testSinglePDFRefusedInProductionBeforeTheCard() async throws {
+        let transport = ScriptedTransport([])
+        let controller = EZZKAccountController(mode: .production, credentialStore: MemoryCredentialStore(),
+                                               transportFactory: { _ in transport }, productionPolicy: .refused)
+        let settingsStore = makeSettingsStore(ezzkAccountController: controller)
+        let provider = SinglePDFRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF, preview: false)
+        XCTAssertFalse(store.signingProviderIsDemo)
+        XCTAssertEqual(store.singlePDFProductionRefusal, SinglePDFProductionPolicy.refusalMessage)
+        XCTAssertFalse(store.canBeginAuthorization, "the button is not live for a refused output")
+
+        await store.beginAuthorization()
+
+        XCTAssertEqual(store.lastError, SinglePDFProductionPolicy.refusalMessage)
+        XCTAssertNil(store.cardPrompt, "no card or PIN prompt")
+        XCTAssertNil(store.pendingCardAction)
+        XCTAssertEqual(provider.identityReadCount, 0, "the card is not read")
+        XCTAssertTrue(provider.requests.isEmpty)
+        XCTAssertNil(store.attestation.evidenceNumber)
+        XCTAssertEqual(transport.operations, [], "nothing reaches EZZK")
+    }
+
+    func testSinglePDFRefusedInProductionBeforeTheCardForAnElectronicOriginal() async throws {
+        let transport = ScriptedTransport([])
+        let controller = EZZKAccountController(mode: .production, credentialStore: MemoryCredentialStore(),
+                                               transportFactory: { _ in transport }, productionPolicy: .refused)
+        let settingsStore = makeSettingsStore(ezzkAccountController: controller)
+        let provider = SinglePDFRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF, preview: false)
+        store.direction = .electronicToElectronic
+
+        await store.beginAuthorization()
+
+        XCTAssertEqual(store.lastError, SinglePDFProductionPolicy.refusalMessage)
+        XCTAssertNil(store.cardPrompt)
+        XCTAssertEqual(provider.identityReadCount, 0)
+    }
+
+    /// The picker refuses the one PDF in Ostrá evidencia and offers it everywhere else.
+    func testProductionRefusalOnlyInProductionForTheOnePDF() throws {
+        let production = EZZKAccountController(mode: .production, credentialStore: MemoryCredentialStore(),
+                                               transportFactory: { _ in ScriptedTransport([]) }, productionPolicy: .refused)
+        let productionStore = try makeReadyStore(settingsStore: makeSettingsStore(ezzkAccountController: production),
+                                                 output: .asicContainer)
+        XCTAssertEqual(productionStore.singlePDFProductionRefusal, SinglePDFProductionPolicy.refusalMessage,
+                       "shown under the picker even before the one PDF is chosen")
+        let (testStore, _) = makeTestModeSettingsStore()
+        XCTAssertNil(try makeReadyStore(settingsStore: testStore, output: .singlePDF).singlePDFProductionRefusal)
+    }
+
     func testSinglePDFRefusedWithoutEngineBeforeNumber() async throws {
         let settingsStore = makeSettingsStore()
         settingsStore.useRealSigningProvider(ContainerOnlyProvider())

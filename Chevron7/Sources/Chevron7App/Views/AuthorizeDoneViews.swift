@@ -271,14 +271,22 @@ struct AuthorizeView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 LabeledContent("Výstup pre klienta") {
-                    Picker("Výstup pre klienta", selection: Bindable(store.settingsStore).settings.zakoClientOutput) {
+                    Picker("Výstup pre klienta", selection: clientOutputSelection) {
                         ForEach(AppSettings.ZakoClientOutput.allCases, id: \.self) { output in
                             Text(UXLabels.clientOutputLabel(output) ?? "").tag(output)
+                                .selectionDisabled(output == .singlePDF && store.singlePDFProductionRefusal != nil)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .disabled(store.isAuthorizing || store.recordFirstPending != nil)
+                }
+                // Ostrá evidencia does not run the one PDF yet: said here, before any card step.
+                if let refusal = store.singlePDFProductionRefusal, store.recordFirstPending == nil {
+                    Label(refusal, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(store.settings.zakoClientOutput == .singlePDF ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if store.settings.zakoClientOutput == .singlePDF {
                     Text("Jeden PDF, ktorého súčasťou je osvedčovacia doložka ako príloha XML a ako posledné strany (§ 37 ods. 4 zákona č. 305/2013 Z. z., § 2 ods. 3 vyhlášky č. 70/2021 Z. z.). Vhodné napríklad pre Obchodný register, ktorý neprijíma kontajnery s viacerými súbormi.")
@@ -322,6 +330,17 @@ struct AuthorizeView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard(padding: 14)
         .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// The output picker's selection: the one PDF cannot be chosen while Ostrá evidencia refuses
+    /// it, and a selection already on it can always switch back to the container.
+    private var clientOutputSelection: Binding<AppSettings.ZakoClientOutput> {
+        Binding(
+            get: { store.settings.zakoClientOutput },
+            set: { output in
+                if output == .singlePDF, store.singlePDFProductionRefusal != nil { return }
+                store.settingsStore.settings.zakoClientOutput = output
+            })
     }
 
     private var authorizationCardHint: String {

@@ -24,6 +24,7 @@ final class StubClausePageRenderer: ClausePageRendering, @unchecked Sendable {
 final class SinglePDFRecordingProvider: QualifiedSigningProviding, @unchecked Sendable {
     private let lock = NSLock()
     private var received: [SigningRequest] = []
+    private var identityReads = 0
     private let demo = DemoSigningProvider()
     nonisolated(unsafe) var refusesClient = false
     nonisolated(unsafe) var changesPrefix = false
@@ -34,7 +35,18 @@ final class SinglePDFRecordingProvider: QualifiedSigningProviding, @unchecked Se
     /// Every request in the order it arrived.
     var requests: [SigningRequest] { lock.withLock { received } }
 
-    func availableIdentities() async -> [SigningIdentityInfo] { [] }
+    /// How often the card was asked for its certificates (with or without a PIN).
+    var identityReadCount: Int { lock.withLock { identityReads } }
+
+    func availableIdentities() async -> [SigningIdentityInfo] {
+        lock.withLock { identityReads += 1 }
+        return []
+    }
+
+    func resolveIdentities(pin: String) async -> [SigningIdentityInfo]? {
+        lock.withLock { identityReads += 1 }
+        return nil
+    }
 
     func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
         lock.withLock { received.append(request) }
