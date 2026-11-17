@@ -43,7 +43,7 @@ public struct E2EFormModel: Sendable, Equatable {
         let office = d.performingPerson.officeName.trimmingCharacters(in: .whitespacesAndNewlines)
         let format: (ZakoCodelistItem, String?)
         if deliveredAsSinglePDF {
-            format = (E2ECodelists.otherFormat, "PDF/A-3")
+            format = (E2ECodelists.otherFormat, ZakoCodelists.pdfa3FormatName)
         } else {
             switch original.plan {
             case .keep(let item, let other): format = (item, other)

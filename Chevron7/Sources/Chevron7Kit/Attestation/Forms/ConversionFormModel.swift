@@ -40,9 +40,11 @@ public struct ConversionFormModel: Sendable, Equatable {
     /// Record 1.2 `NewDocumentType`: the converted document is the same kind of document.
     public var newDocumentType: String
     public var newDocumentFormat: ZakoCodelistItem
-    /// Set when the delivered file is one PDF/A-3 ("PDF/A-3"): the clause then names format
-    /// `Iny` with this text, record 1.0 writes it, record 1.2 uses CL009009 item 3.
-    public var newDocumentFormatOther: String?
+    /// True when the delivered file is one PDF/A-3 (the one-PDF output). The clause then names
+    /// format `Iny` with `newDocumentFormatOther`, record 1.0 writes the name, record 1.2 uses
+    /// CL009009 item 3.
+    public var deliversPDFA3: Bool
+    public var newDocumentFormatOther: String? { deliversPDFA3 ? ZakoCodelists.pdfa3FormatName : nil }
     /// SHA-256 of the delivered PDF/A in lower-case hex (record 1.2) and base64 (clause 1.3, record 1.0).
     public var fingerprintHex: String
     public var fingerprintBase64: String
@@ -116,7 +118,7 @@ public struct ConversionFormModel: Sendable, Equatable {
             newDocumentName: d.newDocumentName,
             newDocumentType: documentType,
             newDocumentFormat: deliveredAsSinglePDF ? E2ECodelists.otherFormat : ZakoCodelists.pdfa2FormatItem,
-            newDocumentFormatOther: deliveredAsSinglePDF ? "PDF/A-3" : nil,
+            deliversPDFA3: deliveredAsSinglePDF,
             fingerprintHex: newDocumentSHA256Hex.lowercased(),
             fingerprintBase64: AttestationClauseGenerator.fingerprintBase64(hex: newDocumentSHA256Hex),
             fingerprintMethod: ZakoCodelists.sha256Item,

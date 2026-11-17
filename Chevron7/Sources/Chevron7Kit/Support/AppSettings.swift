@@ -321,7 +321,7 @@ public struct AppSettings: Codable, Sendable {
         self.batchASiCPackaging = (try? container.decodeIfPresent(
             BatchASiCPackaging.self, forKey: .batchASiCPackaging)) ?? .perDocument
         self.zakoRecordFirstPreview = try container.decodeIfPresent(Bool.self, forKey: .zakoRecordFirstPreview) ?? false
-        self.zakoClientOutput = try container.decodeIfPresent(ZakoClientOutput.self, forKey: .zakoClientOutput) ?? .asicContainer
+        self.zakoClientOutput = (try? container.decodeIfPresent(ZakoClientOutput.self, forKey: .zakoClientOutput)) ?? .asicContainer
         self.qualifiedValidationServices = (try? container.decodeIfPresent(
             [QualifiedValidationService].self, forKey: .qualifiedValidationServices)) ?? []
     }

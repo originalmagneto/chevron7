@@ -62,13 +62,20 @@ final class E2EFormRendererTests: XCTestCase {
         let single = try E2EFormModel.make(original: original, attestation: attestation(), newDocumentName: "zmluva.pdf",
                                            newDocumentData: Data("%PDF-converted".utf8), usedDevice: "Chevron7 1.5.0",
                                            qualifiedReport: nil, deliveredAsSinglePDF: true)
-        let clause = try E2EDeliveryBuilder().clause(single)
-        XCTAssertNoThrow(clause)
+        XCTAssertNoThrow(try E2EDeliveryBuilder().clause(single))
         let clauseXML = ConversionCertificateE2ERenderer().render(single)
         XCTAssertTrue(clauseXML.contains("<ItemCode>Iny</ItemCode>"))
         XCTAssertTrue(clauseXML.contains("<NewDocumentFormatOther>PDF/A-3</NewDocumentFormatOther>"))
         let record = try E2EDeliveryBuilder().record(single)
         XCTAssertTrue(record.recordXML.contains("<NewDocumentFormat>PDF/A-3</NewDocumentFormat>"))
+    }
+
+    func testE2EDefaultKeepsThePlansFormat() throws {
+        var kept = try original([signature()])
+        kept.plan = .keep(format: E2ECodelists.otherFormat, formatOther: "XYZ")
+        let model = try model(kept)
+        XCTAssertTrue(ConversionCertificateE2ERenderer().render(model).contains("<NewDocumentFormatOther>XYZ</NewDocumentFormatOther>"))
+        XCTAssertTrue(try E2EDeliveryBuilder().record(model).recordXML.contains("<NewDocumentFormat>XYZ</NewDocumentFormat>"))
     }
 
     func testRecordForOneSignatureValidates() throws {

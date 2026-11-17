@@ -16,6 +16,11 @@ final class ZakoClientOutputSettingsTests: XCTestCase {
         XCTAssertEqual(old.zakoClientOutput, .asicContainer)
     }
 
+    func testUnknownClientOutputFallsBackToContainer() throws {
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"zakoClientOutput":"somethingNew"}"#.utf8))
+        XCTAssertEqual(decoded.zakoClientOutput, .asicContainer)
+    }
+
     func testOldEvidenceRowsDecodeWithoutClientOutput() throws {
         var row = EvidenceRecord(status: .signed, direction: .paperToElectronic, originalName: "a", newDocumentName: "b",
                                  evidenceNumber: "1", fingerprintSHA256Hex: String(repeating: "a", count: 64),
