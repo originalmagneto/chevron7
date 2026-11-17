@@ -37,16 +37,27 @@ struct SigningFile: Sendable, Equatable, Identifiable {
     let visibleAppearance: VisibleSignatureRequest?
     /// Further documents signed with `sourceURL` as data objects of one ASiC-E.
     let attachmentURLs: [URL]
+    /// ZaKo "one PDF": the clause pages and the XDC the engine appends to the source (v1 only).
+    let appendClause: ClauseAppendFiles?
+
+    struct ClauseAppendFiles: Sendable, Equatable {
+        let pagesURL: URL
+        let attachmentURL: URL
+        let attachmentName: String
+        let attachmentMimeType: String
+    }
 
     var redactedDisplayName: String {
         sourceURL.lastPathComponent
     }
 
-    init(id: String, sourceURL: URL, visibleAppearance: VisibleSignatureRequest? = nil, attachmentURLs: [URL] = []) {
+    init(id: String, sourceURL: URL, visibleAppearance: VisibleSignatureRequest? = nil, attachmentURLs: [URL] = [],
+         appendClause: ClauseAppendFiles? = nil) {
         self.id = id
         self.sourceURL = sourceURL
         self.visibleAppearance = visibleAppearance
         self.attachmentURLs = attachmentURLs
+        self.appendClause = appendClause
     }
 }
 

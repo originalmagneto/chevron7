@@ -137,6 +137,9 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     /// timestamp before a PAdES signature; it refuses one for an existing container.
     public var addsContentTimestamp: Bool { true }
 
+    /// The engine appends the clause to the PDF/A as PDF/A-3b and signs it (v1 `appendClause`).
+    public var supportsAppendedClause: Bool { true }
+
     /// A content timestamp only for the app's own signature of a new document: a portal decides
     /// its own format, and a record or an eForm has its own frame.
     static func wantsContentTimestamp(_ request: SigningRequest) -> Bool {
@@ -441,6 +444,14 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
     }
 
     public func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
+        if request.appendedClause != nil {
+            // Refused before the card is touched: the clause is appended only to a plain PAdES.
+            guard request.outputFormat == .embeddedPAdES, request.extraFiles.isEmpty, request.eform == nil,
+                  request.visualStamp == nil, !request.signsAsRecordContainer,
+                  !request.signsExtraFilesAsDataObjects, !Self.wantsContentTimestamp(request) else {
+                throw SigningError.signingFailed("Doložku nemožno pripojiť k tomuto typu podpisu.")
+            }
+        }
         let drivers = (try? await engine.drivers()) ?? []
         let usable = Self.usableDrivers(drivers)
         let connectedDriver = usable.first(where: { $0.id == Self.driverID }) ?? usable.first
@@ -523,7 +534,20 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         let wantsPAdES = request.outputFormat == .embeddedPAdES
         var sourceURL: URL
         var attachmentURLs: [URL] = []
-        if request.eform != nil, request.signsAsRecordContainer {
+        var appendClauseFiles: SigningFile.ClauseAppendFiles?
+        if let clause = request.appendedClause {
+            sourceURL = workDirectory.appendingPathComponent(Self.pdfSourceName(for: request))
+            try request.pdfData.write(to: sourceURL, options: [.atomic])
+            let pagesURL = workDirectory.appendingPathComponent("clause-pages.pdf")
+            try clause.pages.write(to: pagesURL, options: [.atomic])
+            let attachmentURL = workDirectory.appendingPathComponent("clause-attachment.bin")
+            try clause.attachment.write(to: attachmentURL, options: [.atomic])
+            appendClauseFiles = SigningFile.ClauseAppendFiles(
+                pagesURL: EnginePaths.canonical(pagesURL),
+                attachmentURL: EnginePaths.canonical(attachmentURL),
+                attachmentName: clause.attachmentName,
+                attachmentMimeType: clause.attachmentMimeType)
+        } else if request.eform != nil, request.signsAsRecordContainer {
             // A conversion record is a plain XML Data Container with no attachments
             // and no eForm attributes; the two never combine.
             throw SigningError.signingFailed("Záznam nemôže mať eForm atribúty.")
@@ -585,7 +609,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         let signingFile = SigningFile(id: "document",
                                       sourceURL: EnginePaths.canonical(sourceURL),
                                       visibleAppearance: appearanceRequest,
-                                      attachmentURLs: attachmentURLs)
+                                      attachmentURLs: attachmentURLs,
+                                      appendClause: appendClauseFiles)
         let engineRequest = EngineSigningRequest(
             sessionID: UUID(),
             driverID: driverID,
@@ -925,6 +950,9 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         }
         if code("TRUSTED_LIST_UNAVAILABLE") {
             return "EU zoznam dôveryhodných CA sa nepodarilo stiahnuť. Zapnite internet a skúste znova; vizuálna pečiatka tento zoznam potrebuje."
+        }
+        if code("PDFA_INVALID") {
+            return "Výsledný PDF nespĺňa PDF/A-3b, preto nebol podpísaný. Konverzia sa nevykonala a evidenčné číslo zostáva nepoužité."
         }
         if code("OUTPUT_VALIDATION_FAILED") {
             return "Engine odmietol výsledok podpisu (výstupná validácia)."

@@ -334,6 +334,10 @@ public struct SigningRequest: Sendable {
     /// authority as the signature timestamp and independent of `includeTimestamp`. Only for a
     /// provider whose `addsContentTimestamp` is true; never on the web, phone or ZaKo paths.
     public var includeContentTimestamp: Bool
+    /// ZaKo "one PDF": append this clause to `pdfData` (a PDF/A) as PDF/A-3b and sign the result
+    /// as PAdES; the engine does both in one request. Only for a provider whose
+    /// `supportsAppendedClause` is true, with `.embeddedPAdES` and no extra files, eForm or stamp.
+    public var appendedClause: AppendedClause?
 
     public init(pdfData: Data, identityID: String,
                 includeTimestamp: Bool, tsaURL: String? = nil,
@@ -347,7 +351,8 @@ public struct SigningRequest: Sendable {
                 signsExtraFilesAsDataObjects: Bool = false,
                 timestampServers: [String]? = nil,
                 signsAsRecordContainer: Bool = false,
-                includeContentTimestamp: Bool = false) {
+                includeContentTimestamp: Bool = false,
+                appendedClause: AppendedClause? = nil) {
         self.pdfData = pdfData
         self.identityID = identityID
         self.includeTimestamp = includeTimestamp
@@ -363,6 +368,7 @@ public struct SigningRequest: Sendable {
         self.timestampServers = timestampServers
         self.signsAsRecordContainer = signsAsRecordContainer
         self.includeContentTimestamp = includeContentTimestamp
+        self.appendedClause = appendedClause
     }
 }
 
@@ -460,6 +466,9 @@ public protocol QualifiedSigningProviding: Sendable {
     var alwaysAddsQualifiedTimestamp: Bool { get }
     /// Whether `sign` honours `SigningRequest.includeContentTimestamp` for a new signature.
     var addsContentTimestamp: Bool { get }
+    /// Whether `sign` honours `SigningRequest.appendedClause` (clause appended to the PDF/A
+    /// and signed as one PAdES document).
+    var supportsAppendedClause: Bool { get }
 }
 
 extension QualifiedSigningProviding {
@@ -472,6 +481,8 @@ extension QualifiedSigningProviding {
     public var alwaysAddsQualifiedTimestamp: Bool { false }
 
     public var addsContentTimestamp: Bool { false }
+
+    public var supportsAppendedClause: Bool { false }
 
     public func inspectSignatureTree(in fileURL: URL) async -> SignatureTreeResult {
         let result = await inspectInputSignatures(in: fileURL)

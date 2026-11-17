@@ -68,3 +68,14 @@ final class TimestampOptionalTests: XCTestCase {
         XCTAssertTrue(TimestampAuthority.isRetiredUnqualified("http://timestamp.sectigo.com"))
     }
 }
+
+final class ZakoPAdESAuthorityTests: XCTestCase {
+    func testPadesZakoAuthoritiesStartWithBosa() {
+        let urls = TimestampAuthority.zakoPAdESQualifiedURLs.map(\.absoluteString)
+        XCTAssertEqual(urls.first, TimestampAuthority.bosaURL)
+        XCTAssertEqual(urls.dropFirst().first, TimestampAuthority.sectigoQualifiedURL)
+        for url in urls {
+            XCTAssertTrue(TimestampAuthority.builtIn.first { $0.url == url }?.isQualified == true, url)
+        }
+    }
+}

@@ -260,7 +260,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                             } catch let error as CocoaError where error.code == .fileNoSuchFile {
                             }
                             return machineFile(id: file.id, sourceURL: file.sourceURL, targetURL: reservation.temporaryURL,
-                                attachmentURLs: file.attachmentURLs)
+                                attachmentURLs: file.attachmentURLs, appendClause: file.appendClause)
                         }
                         let levelAndTimestamp = Self.levelAndTimestamp(for: request, endpoints: timestamp.endpoints)
                         let machineRequest = MachineRequest(
@@ -569,7 +569,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
 
     // Not private: MachineRequestEncodingTests asserts the encoded shape directly,
     // the same way it already asserts `levelAndTimestamp`.
-    func machineFile(id: String, sourceURL: URL, targetURL: URL, attachmentURLs: [URL] = []) -> JSONValue {
+    func machineFile(id: String, sourceURL: URL, targetURL: URL, attachmentURLs: [URL] = [],
+                     appendClause: SigningFile.ClauseAppendFiles? = nil) -> JSONValue {
         // Java validátor vyžaduje reálny canonical path (realpath, /var → /private/var)
         let source = EnginePaths.canonical(sourceURL).path
         let target = EnginePaths.canonical(targetURL).path
@@ -580,6 +581,16 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         ]
         if !attachmentURLs.isEmpty {
             fields["attachments"] = .array(attachmentURLs.map { .string(EnginePaths.canonical($0).path) })
+        }
+        if let clause = appendClause {
+            fields["appendClause"] = .object([
+                "pages": .string(EnginePaths.canonical(clause.pagesURL).path),
+                "attachment": .object([
+                    "source": .string(EnginePaths.canonical(clause.attachmentURL).path),
+                    "name": .string(clause.attachmentName),
+                    "mimeType": .string(clause.attachmentMimeType)
+                ])
+            ])
         }
         return .object(fields)
     }
@@ -721,6 +732,8 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         let message = switch code {
         case "TIMESTAMP_FAILED":
             "A qualified timestamp could not be obtained. [TIMESTAMP_FAILED]"
+        case "PDFA_INVALID":
+            "The result is not PDF/A-3b. [PDFA_INVALID]"
         default:
             "Signing failed. [\(code)]"
         }
