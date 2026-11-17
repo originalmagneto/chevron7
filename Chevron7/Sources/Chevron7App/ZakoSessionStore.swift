@@ -202,6 +202,12 @@ final class ZakoSessionStore {
         settings.mobileSigningEnabled && !signingProviderIsDemo && settingsStore.ezzkAccountController.isDemoMode
     }
 
+    /// Why the phone cannot authorize with the chosen client output (the one PDF is signed with a
+    /// card only); nil for the container. The view disables the phone button with this text.
+    var mobileRefusalForClientOutput: String? {
+        settings.zakoClientOutput == .singlePDF ? ZakoSinglePDFDelivery.mobileRefusal : nil
+    }
+
     /// True when the user turned mobile signing on but the phone path is unavailable because
     /// EZZK is outside Demo mode: the button (`isMobileSigningAvailable`) hides in that case, so
     /// the view shows this notice instead of nothing.

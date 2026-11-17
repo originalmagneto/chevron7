@@ -269,6 +269,21 @@ struct AuthorizeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Výstup pre klienta", selection: Bindable(store.settingsStore).settings.zakoClientOutput) {
+                    Text("Kontajner ASiC-E").tag(AppSettings.ZakoClientOutput.asicContainer)
+                    Text("Jeden PDF").tag(AppSettings.ZakoClientOutput.singlePDF)
+                }
+                .pickerStyle(.segmented)
+                .disabled(store.isAuthorizing || store.recordFirstPending != nil)
+                if store.settings.zakoClientOutput == .singlePDF {
+                    Text("Jeden PDF, ktorého súčasťou je osvedčovacia doložka ako príloha XML a ako posledné strany (§ 37 ods. 4 zákona č. 305/2013 Z. z., § 2 ods. 3 vyhlášky č. 70/2021 Z. z.). Vhodné napríklad pre Obchodný register, ktorý neprijíma kontajnery s viacerými súbormi.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if store.showsQualifiedTimestampToggle {
                 // With the engine the card always timestamps, so the Demo switch shows on and locked.
                 let timestampLocked = store.signingProvider.alwaysAddsQualifiedTimestamp
@@ -354,8 +369,10 @@ struct AuthorizeView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil)
-            .help("Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
+            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil
+                || store.mobileRefusalForClientOutput != nil)
+            .help(store.mobileRefusalForClientOutput
+                  ?? "Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
         }
     }
 }
@@ -606,7 +623,7 @@ struct DoneView: View {
         }
     }
 
-    /// "Uložiť ako…": a copy of the file the client got (the ASiC-E, or the PDF/A on the
+    /// "Uložiť ako…": a copy of the file the client got (the ASiC-E, the one PDF, or the PDF/A on the
     /// phone route; rows from before the single output name only the PDF/A).
     private func exportAs() {
         exportError = nil

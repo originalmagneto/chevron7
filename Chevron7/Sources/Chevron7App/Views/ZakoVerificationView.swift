@@ -253,7 +253,8 @@ struct ZakoVerificationView: View {
             Divider()
             switch original.plan {
             case .keep:
-                Label("Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh.", systemImage: "doc.on.doc")
+                Label(ZakoVerificationPresentation.keepNote(output: store.settings.zakoClientOutput),
+                      systemImage: "doc.on.doc")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             case .convert(let reason):
@@ -584,7 +585,9 @@ struct E2EAttestationFormView: View {
 
     private var newDocumentLine: String {
         switch store.electronicOriginal?.plan {
-        case .keep(let format, let other): return "\(other ?? format.skName), nezmenený s podpismi klienta"
+        case .keep(let format, let other):
+            return ZakoVerificationPresentation.keptDocumentLine(formatName: other ?? format.skName,
+                                                                 output: store.settings.zakoClientOutput)
         case .convert: return "nový PDF/A-2b"
         case .none: return ""
         }
@@ -648,5 +651,19 @@ struct E2EAttestationFormView: View {
                 .font(.system(size: 10, weight: .semibold, design: .serif))
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Wording of the verification screen for an original that is already a valid PDF/A: with the
+/// one-PDF output it is converted, because the clause becomes the last pages of a new PDF/A-3.
+enum ZakoVerificationPresentation {
+    static func keepNote(output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF
+            ? "Pri výstupe ako jeden PDF sa prevedie na nový PDF/A a doložka sa pripojí na koniec."
+            : "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh."
+    }
+
+    static func keptDocumentLine(formatName: String, output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF ? "nový PDF/A-3 s doložkou" : "\(formatName), nezmenený s podpismi klienta"
     }
 }

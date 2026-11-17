@@ -729,6 +729,9 @@ struct RecordDetailView: View {
             row("Evidenčné číslo", record.evidenceNumber ?? "nezískané")
             row("Osvedčujúca osoba", record.performingPersonName.isEmpty ? "neurčená" : record.performingPersonName)
             row("Nový dokument", record.newDocumentName)
+            if let output = UXLabels.clientOutputLabel(record.clientOutput) {
+                row("Výstup pre klienta", output)
+            }
             if record.direction == .electronicToElectronic {
                 row("Druh konverzie", "Z elektronickej do elektronickej podoby")
                 row("Overenie podpisov", record.validationEvidenceSource ?? "neuložené")

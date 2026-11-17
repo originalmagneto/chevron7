@@ -73,6 +73,28 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         let settingsStore = makeSettingsStore(ezzkAccountController: controller)
         return (settingsStore, controller)
     }
+
+    /// One PDF is signed only with a card: the phone is refused with the delivery's own text,
+    /// and the container keeps the phone.
+    func testMobileDisabledForSinglePDF() {
+        let settingsStore = makeSettingsStore()
+        let store = ZakoSessionStore(settingsStore: settingsStore)
+        XCTAssertNil(store.mobileRefusalForClientOutput)
+        settingsStore.settings.zakoClientOutput = .singlePDF
+        XCTAssertEqual(store.mobileRefusalForClientOutput, ZakoSinglePDFDelivery.mobileRefusal)
+    }
+
+    /// The verification screen says what happens to a PDF/A original per chosen output.
+    func testKeptOriginalWordingFollowsClientOutput() {
+        XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .asicContainer),
+                       "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh.")
+        XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .singlePDF),
+                       "Pri výstupe ako jeden PDF sa prevedie na nový PDF/A a doložka sa pripojí na koniec.")
+        XCTAssertEqual(ZakoVerificationPresentation.keptDocumentLine(formatName: "PDF/A-2b", output: .asicContainer),
+                       "PDF/A-2b, nezmenený s podpismi klienta")
+        XCTAssertEqual(ZakoVerificationPresentation.keptDocumentLine(formatName: "PDF/A-2b", output: .singlePDF),
+                       "nový PDF/A-3 s doložkou")
+    }
 }
 
 /// Minimal non-demo signing provider: only what `QualifiedSigningProviding` requires with

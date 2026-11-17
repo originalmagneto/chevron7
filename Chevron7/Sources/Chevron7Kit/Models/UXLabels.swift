@@ -44,4 +44,13 @@ public enum UXLabels {
         case .late: return "Oneskorený"
         }
     }
+
+    /// The register detail's "Výstup pre klienta"; nil for a row without a recorded output.
+    public static func clientOutputLabel(_ output: AppSettings.ZakoClientOutput?) -> String? {
+        switch output {
+        case .asicContainer: return "Kontajner ASiC-E"
+        case .singlePDF: return "Jeden PDF s doložkou"
+        case nil: return nil
+        }
+    }
 }
