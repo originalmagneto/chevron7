@@ -35,25 +35,46 @@ public struct ClausePresentationRenderer: Sendable {
     static let paperSize = NSSize(width: 595.2756, height: 841.8898)
     static let margin: CGFloat = 36
 
+    /// How long loading the HTML and printing it may each take before the render gives up.
+    static let defaultTimeout: Duration = .seconds(60)
+
     private let xsltproc: URL
+    private let timeout: Duration
+    private let stages: ClausePrintStages
 
     public init(xsltproc: URL = URL(fileURLWithPath: "/usr/bin/xsltproc")) {
+        self.init(xsltproc: xsltproc, timeout: Self.defaultTimeout, stages: .webKit)
+    }
+
+    init(xsltproc: URL = URL(fileURLWithPath: "/usr/bin/xsltproc"), timeout: Duration, stages: ClausePrintStages) {
         self.xsltproc = xsltproc
+        self.timeout = timeout
+        self.stages = stages
     }
 
     @MainActor
     public func render(clauseXML: Data, form: OfficialForm) async throws -> Data {
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("clause-pages-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        } catch {
+            throw ClausePresentationError.transformFailed(error.localizedDescription)
+        }
         defer { try? FileManager.default.removeItem(at: work) }
 
         let html = try await Task.detached { [self] in
             try transform(clauseXML: clauseXML, stylesheet: form.presentation, in: work)
         }.value
         let output = work.appendingPathComponent("clause.pdf")
-        try await ClausePagePrinter().print(html: Self.injectingPrintStyle(into: html), to: output,
-                                            ruleStore: work.appendingPathComponent("rules", isDirectory: true))
+        do {
+            try await ClausePagePrinter(timeout: timeout, stages: stages)
+                .print(html: Self.injectingPrintStyle(into: html), to: output,
+                       ruleStore: work.appendingPathComponent("rules", isDirectory: true))
+        } catch {
+            // WebKit's and the file system's own errors are English and say nothing to the advocate.
+            throw ClausePresentationError.printFailed
+        }
         guard let pdf = try? Data(contentsOf: output), !pdf.isEmpty else {
             throw ClausePresentationError.printFailed
         }
@@ -66,22 +87,22 @@ public struct ClausePresentationRenderer: Sendable {
         let xslt = directory.appendingPathComponent("form.xslt")
         let html = directory.appendingPathComponent("clause.html")
         let log = directory.appendingPathComponent("xsltproc.log")
-        try clauseXML.write(to: xml)
-        try stylesheet.write(to: xslt)
-        FileManager.default.createFile(atPath: log.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: log)
-        defer { try? logHandle.close() }
-
         let process = Process()
-        process.executableURL = xsltproc
-        process.arguments = ["--nonet", "-o", html.path, xslt.path, xml.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = logHandle
+        let logHandle: FileHandle
         do {
+            try clauseXML.write(to: xml)
+            try stylesheet.write(to: xslt)
+            FileManager.default.createFile(atPath: log.path, contents: nil)
+            logHandle = try FileHandle(forWritingTo: log)
+            process.executableURL = xsltproc
+            process.arguments = ["--nonet", "-o", html.path, xslt.path, xml.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = logHandle
             try process.run()
         } catch {
             throw ClausePresentationError.transformFailed(error.localizedDescription)
         }
+        defer { try? logHandle.close() }
         process.waitUntilExit()
         let message = (try? String(contentsOf: log, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -101,10 +122,33 @@ public struct ClausePresentationRenderer: Sendable {
     }
 }
 
+/// The two steps of printing that wait on WebKit and AppKit; tests replace them with steps that
+/// never finish to exercise the timeout.
+struct ClausePrintStages: Sendable {
+    var load: @MainActor @Sendable (WKWebView, String) -> Void
+    var print: @MainActor @Sendable (NSPrintOperation, NSWindow, PrintCompletion) -> Void
+
+    static let webKit = ClausePrintStages(
+        load: { webView, html in webView.loadHTMLString(html, baseURL: nil) },
+        print: { operation, window, completion in
+            // Without panels AppKit finishes the modal operation on a thread of its own.
+            operation.runModal(for: window, delegate: completion,
+                               didRun: #selector(PrintCompletion.printOperationDidRun(_:success:contextInfo:)),
+                               contextInfo: nil)
+        })
+}
+
 /// Loads the HTML into an offscreen `WKWebView` that can reach no URL and prints it to a PDF file.
 @MainActor
 private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
-    private var loaded: CheckedContinuation<Void, Error>?
+    private let timeout: Duration
+    private let stages: ClausePrintStages
+    private var loaded: OneShot<Void>?
+
+    init(timeout: Duration, stages: ClausePrintStages) {
+        self.timeout = timeout
+        self.stages = stages
+    }
 
     func print(html: String, to output: URL, ruleStore storeURL: URL) async throws {
         try FileManager.default.createDirectory(at: storeURL, withIntermediateDirectories: true)
@@ -131,10 +175,10 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
             window.close()
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            loaded = continuation
-            webView.loadHTMLString(html, baseURL: nil)
-        }
+        let load = OneShot<Void>()
+        loaded = load
+        stages.load(webView, html)
+        try await load.value(within: timeout)
 
         let info = NSPrintInfo(dictionary: [
             .jobDisposition: NSPrintInfo.JobDisposition.save,
@@ -156,14 +200,10 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
         operation.showsProgressPanel = false
         operation.view?.frame = webView.bounds
         let completion = PrintCompletion()
-        let success = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            completion.continuation = continuation
-            // Without panels AppKit finishes the modal operation on a thread of its own.
-            operation.runModal(for: window, delegate: completion,
-                               didRun: #selector(PrintCompletion.printOperationDidRun(_:success:contextInfo:)),
-                               contextInfo: nil)
+        stages.print(operation, window, completion)
+        guard try await completion.result.value(within: timeout) else {
+            throw ClausePresentationError.printFailed
         }
-        guard success else { throw ClausePresentationError.printFailed }
     }
 
     // MARK: WKNavigationDelegate
@@ -175,43 +215,63 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        loaded?.resume()
-        loaded = nil
+        loaded?.resume(with: .success(()))
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        loaded?.resume(throwing: ClausePresentationError.printFailed)
-        loaded = nil
+        loaded?.resume(with: .failure(ClausePresentationError.printFailed))
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        loaded?.resume(throwing: ClausePresentationError.printFailed)
-        loaded = nil
+        loaded?.resume(with: .failure(ClausePresentationError.printFailed))
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        loaded?.resume(throwing: ClausePresentationError.printFailed)
-        loaded = nil
+        loaded?.resume(with: .failure(ClausePresentationError.printFailed))
     }
 }
 
 /// Receives `runModal(for:delegate:didRun:contextInfo:)`'s callback, which AppKit sends from the
 /// print operation's own thread when no panel is shown.
-private final class PrintCompletion: NSObject, @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending: CheckedContinuation<Bool, Never>?
-
-    var continuation: CheckedContinuation<Bool, Never>? {
-        get { lock.withLock { pending } }
-        set { lock.withLock { pending = newValue } }
-    }
+final class PrintCompletion: NSObject, Sendable {
+    let result = OneShot<Bool>()
 
     @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool,
                                     contextInfo: UnsafeMutableRawPointer?) {
-        let continuation = lock.withLock { () -> CheckedContinuation<Bool, Never>? in
-            defer { pending = nil }
-            return pending
+        result.resume(with: .success(success))
+    }
+}
+
+/// A value delivered at most once, from any thread, before or after someone waits for it; later
+/// deliveries (a callback after the timeout) are ignored.
+final class OneShot<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var outcome: Result<Value, Error>?
+    private var waiter: CheckedContinuation<Value, Error>?
+
+    func resume(with result: Result<Value, Error>) {
+        let waiting = lock.withLock { () -> CheckedContinuation<Value, Error>? in
+            guard outcome == nil else { return nil }
+            outcome = result
+            defer { waiter = nil }
+            return waiter
         }
-        continuation?.resume(returning: success)
+        waiting?.resume(with: result)
+    }
+
+    /// Waits for the value; after `timeout` it fails with `.printFailed` instead.
+    func value(within timeout: Duration) async throws -> Value {
+        let timer = Task { [self] in
+            guard (try? await Task.sleep(for: timeout)) != nil else { return }
+            resume(with: .failure(ClausePresentationError.printFailed))
+        }
+        defer { timer.cancel() }
+        return try await withCheckedThrowingContinuation { continuation in
+            let ready = lock.withLock { () -> Result<Value, Error>? in
+                if outcome == nil { waiter = continuation }
+                return outcome
+            }
+            if let ready { continuation.resume(with: ready) }
+        }
     }
 }

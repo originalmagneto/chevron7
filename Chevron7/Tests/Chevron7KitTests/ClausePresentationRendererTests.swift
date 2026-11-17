@@ -102,6 +102,54 @@ final class ClausePresentationRendererTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testHungLoadFailsAfterTheTimeout() async throws {
+        let stages = ClausePrintStages(load: { _, _ in }, print: ClausePrintStages.webKit.print)
+        try await assertTimesOut(ClausePresentationRenderer(timeout: .milliseconds(300), stages: stages))
+    }
+
+    @MainActor
+    func testHungPrintFailsAfterTheTimeout() async throws {
+        // The print operation never calls back, as when the web content process dies mid-print.
+        let stages = ClausePrintStages(load: ClausePrintStages.webKit.load, print: { _, _, _ in })
+        try await assertTimesOut(ClausePresentationRenderer(timeout: .seconds(2), stages: stages))
+    }
+
+    func testFileErrorsBecomeTransformFailures() throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("missing-\(UUID().uuidString)")
+        XCTAssertThrowsError(try ClausePresentationRenderer().transform(
+            clauseXML: Data("<a/>".utf8), stylesheet: OfficialForm.clause_1_3.presentation, in: missing)) { error in
+            guard case .transformFailed(let message)? = error as? ClausePresentationError else {
+                return XCTFail("unmapped \(error)")
+            }
+            XCTAssertFalse(message.isEmpty)
+        }
+    }
+
+    func testMissingXsltprocIsATransformFailure() async throws {
+        let renderer = ClausePresentationRenderer(xsltproc: URL(fileURLWithPath: "/nonexistent/xsltproc"))
+        do {
+            _ = try await renderer.render(clauseXML: Data("<a/>".utf8), form: .clause_1_3)
+            XCTFail("a missing xsltproc must not render")
+        } catch let error as ClausePresentationError {
+            guard case .transformFailed = error else { return XCTFail("\(error)") }
+        }
+    }
+
+    @MainActor
+    private func assertTimesOut(_ renderer: ClausePresentationRenderer,
+                                file: StaticString = #filePath, line: UInt = #line) async throws {
+        let clause = try Self.p2eClause(finalPDF: Data("%PDF-1.7 hung".utf8))
+        let started = ContinuousClock.now
+        do {
+            _ = try await renderer.render(clauseXML: Data(clause.clauseXML.utf8), form: .clause_1_3)
+            XCTFail("a hung render must fail", file: file, line: line)
+        } catch let error as ClausePresentationError {
+            XCTAssertEqual(error, .printFailed, file: file, line: line)
+        }
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(20), file: file, line: line)
+    }
+
     // MARK: - Engine fixtures
 
     /// Writes the fixtures the engine's clause appender tests read. Run once with
