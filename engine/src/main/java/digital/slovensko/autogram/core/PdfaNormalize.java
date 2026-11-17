@@ -71,6 +71,9 @@ public final class PdfaNormalize {
             }
 
             var catalog = document.getDocumentCatalog();
+            // PDF/A forbids image interpolation (rule 6.2.8-3), and scans and macOS PDFKit
+            // image pages ask for it; without this the output claims PDF/A-2b and fails veraPDF.
+            ImageInterpolation.clear(catalog.getCOSObject());
             applyOutputIntent(document, catalog, iccProfile);
             catalog.setMetadata(xmpMetadata(document, title, information.getProducer()));
             // An attached file must stay reachable through the catalog for PDF/A,

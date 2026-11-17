@@ -1,12 +1,34 @@
 package digital.slovensko.autogram.core;
 
+import eu.europa.esig.dss.model.FileDocument;
+import eu.europa.esig.dss.pdfa.PDFAStructureValidator;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.contentstream.operator.Operator;
+import org.apache.pdfbox.pdfparser.PDFStreamParser;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,6 +101,128 @@ class PdfaNormalizeTest {
 
         assertEquals(1, countOf(text, "%%EOF"), "one end marker after normalizing");
         assertEquals(1, countOf(text, "startxref"), "one cross-reference table after normalizing");
+    }
+
+    /**
+     * PDF/A-2 rule 6.2.8-3: an image may not ask for interpolation. Scans and PDFKit's image
+     * pages carry /Interpolate true, so the normalizer must clear it on image XObjects, on
+     * images nested in form XObjects and on inline images, or the output claims PDF/A-2b
+     * while veraPDF refuses it.
+     */
+    @Test
+    void normalizeClearsInterpolate() throws Exception {
+        var source = temporaryDirectory.resolve("interpolating.pdf");
+        Files.write(source, interpolatingImagesPdf());
+        assertEquals(3, interpolatingImages(Files.readAllBytes(source)), "the fixture must interpolate");
+
+        var output = temporaryDirectory.resolve("normalized.pdf");
+        PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+
+        var bytes = Files.readAllBytes(output);
+        assertEquals(0, interpolatingImages(bytes));
+        var check = new PDFAStructureValidator().validate(new FileDocument(output.toFile()));
+        assertTrue(check.isCompliant(), () -> String.join("\n", check.getErrorMessages()));
+        assertTrue(check.getProfileId().replace("-", "").toUpperCase().contains("2B"), check.getProfileId());
+    }
+
+    /** One page: an image XObject, the same kind of image inside a form XObject, an inline image. */
+    private static byte[] interpolatingImagesPdf() throws Exception {
+        try (var document = new PDDocument()) {
+            var page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            var pixels = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+            pixels.setRGB(1, 1, 0x336699);
+
+            var direct = LosslessFactory.createFromImage(document, pixels);
+            direct.getCOSObject().setBoolean(COSName.INTERPOLATE, true);
+
+            var nested = LosslessFactory.createFromImage(document, pixels);
+            nested.getCOSObject().setBoolean(COSName.INTERPOLATE, true);
+            var form = new PDFormXObject(document);
+            form.setBBox(new PDRectangle(100, 100));
+            form.setResources(new PDResources());
+            try (var content = new org.apache.pdfbox.pdmodel.PDFormContentStream(form)) {
+                content.drawImage(nested, 0, 0, 100, 100);
+            }
+
+            // Written by hand, so the inline image surely carries /I true.
+            var resources = new PDResources();
+            page.setResources(resources);
+            var imageName = resources.add(direct).getName();
+            var formName = resources.add(form).getName();
+            var content = new ByteArrayOutputStream();
+            content.write(("q 100 0 0 100 50 600 cm /" + imageName + " Do Q\n"
+                    + "q 1 0 0 1 200 600 cm /" + formName + " Do Q\n"
+                    + "q 100 0 0 100 350 600 cm\nBI /W 2 /H 2 /BPC 8 /CS /G /I true ID ")
+                    .getBytes(StandardCharsets.ISO_8859_1));
+            content.write(new byte[] {0, 64, (byte) 128, (byte) 255});
+            content.write("\nEI Q\n".getBytes(StandardCharsets.ISO_8859_1));
+            var stream = new org.apache.pdfbox.pdmodel.common.PDStream(document);
+            try (var out = stream.createOutputStream()) {
+                out.write(content.toByteArray());
+            }
+            page.setContents(stream);
+            var output = new ByteArrayOutputStream();
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    /** Counts image XObjects and inline images that ask for interpolation, wherever they sit. */
+    private static int interpolatingImages(byte[] pdf) throws Exception {
+        try (var document = Loader.loadPDF(pdf)) {
+            var count = 0;
+            var seen = Collections.newSetFromMap(new IdentityHashMap<COSBase, Boolean>());
+            var pending = new ArrayDeque<COSBase>();
+            pending.push(document.getDocumentCatalog().getCOSObject());
+            while (!pending.isEmpty()) {
+                var item = pending.pop();
+                if (item instanceof COSObject reference) {
+                    item = reference.getObject();
+                }
+                if (item == null || !seen.add(item)) {
+                    continue;
+                }
+                if (item instanceof COSStream stream) {
+                    if (COSName.IMAGE.equals(stream.getCOSName(COSName.SUBTYPE))
+                            && stream.getBoolean(COSName.INTERPOLATE, false)) {
+                        count++;
+                    }
+                    if (!COSName.IMAGE.equals(stream.getCOSName(COSName.SUBTYPE))) {
+                        count += interpolatingInlineImages(stream);
+                    }
+                }
+                if (item instanceof COSDictionary dictionary) {
+                    for (var entry : dictionary.entrySet()) {
+                        if (!COSName.PARENT.equals(entry.getKey())) {
+                            pending.push(entry.getValue());
+                        }
+                    }
+                } else if (item instanceof COSArray array) {
+                    for (var element : array) {
+                        pending.push(element);
+                    }
+                }
+            }
+            return count;
+        }
+    }
+
+    private static int interpolatingInlineImages(COSStream stream) {
+        try (var input = stream.createInputStream()) {
+            var count = 0;
+            for (var token : new PDFStreamParser(input.readAllBytes()).parse()) {
+                if (token instanceof Operator operator && operator.getImageParameters() != null) {
+                    var parameters = operator.getImageParameters();
+                    if (parameters.getBoolean(COSName.I, false) || parameters.getBoolean(COSName.INTERPOLATE, false)) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        } catch (Exception notContent) {
+            return 0;
+        }
     }
 
     private static int countOf(String haystack, String needle) {
