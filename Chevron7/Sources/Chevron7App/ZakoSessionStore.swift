@@ -161,6 +161,32 @@ final class ZakoSessionStore {
 
     static let recordFromOtherModeMessage = EZZKStatusChecker.recordFromOtherModeMessage
 
+    /// The engine returned a one-PDF output whose first revision is not the fingerprinted PDF/A.
+    static let singlePDFPrefixChangedMessage =
+        "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka. Nič sa neuložilo ani neodoslalo; skúste autorizáciu znova."
+
+    /// Writes `data` at `preferred`, or under `ConversionOutputNaming.uniqueURL` of that name when
+    /// a file holds it, and never replaces an existing file: the bytes go to a temporary file in
+    /// the same folder first, which is then moved, and a move never overwrites.
+    static func writeWithoutOverwriting(_ data: Data, preferred: URL,
+                                        fileManager: FileManager = .default) throws -> URL {
+        let directory = preferred.deletingLastPathComponent()
+        let staging = directory.appendingPathComponent(".\(UUID().uuidString).chevron7-tmp")
+        try data.write(to: staging, options: [.withoutOverwriting])
+        defer { try? fileManager.removeItem(at: staging) }
+        var target = preferred
+        for _ in 0..<8 {
+            do {
+                try fileManager.moveItem(at: staging, to: target)
+                return target
+            } catch CocoaError.fileWriteFileExists {
+                target = ConversionOutputNaming.uniqueURL(in: directory, fileName: preferred.lastPathComponent,
+                                                          fileManager: fileManager)
+            }
+        }
+        throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: target.path])
+    }
+
     static let mobileOutsideDemoMessage =
         "Zaručenú konverziu s EZZK podpisujte kartou SAK. Podpis z mobilu je zatiaľ dostupný iba v skúšobnom režime EZZK (lokálne, bez zápisu do evidencie)."
 
@@ -284,6 +310,8 @@ final class ZakoSessionStore {
     private var evidenceRequestID: UUID?
     /// Moves the keyboard to the eID client's BOK window while the engine waits for it.
     @ObservationIgnored var middlewareInput: any MiddlewareInputHandoff = EIDKeyboardHandoff.shared
+    /// Renders the clause's readable pages for the one-PDF output; tests stub it.
+    @ObservationIgnored var clausePageRenderer: any ClausePageRendering = ClausePresentationRenderer()
     var sourceAccessIsActive = false
     var outputDirectoryOverride: URL?
     var sourceNameOverride: String?
@@ -1438,6 +1466,16 @@ final class ZakoSessionStore {
             await authorizeElectronicOriginal(viaMobile: viaMobile, ezzkMode: ezzkMode)
             return
         }
+        // The client output is read once: the whole conversion delivers what was chosen here.
+        let output = settings.zakoClientOutput
+        // One PDF needs the engine and a card, and is not yet run in Ostrá evidencia: refused
+        // before a number is allocated.
+        if output == .singlePDF,
+           let refusal = ZakoSinglePDFDelivery.refusal(mode: ezzkMode, viaMobile: viaMobile,
+                                                       provider: signingProvider) {
+            lastError = refusal
+            return
+        }
         // The number is allocated here, after the card and its MQC, right before the
         // signature: never for a conversion that is not signed, so none lapses at midnight.
         if needsFreshEvidenceNumber {
@@ -1477,6 +1515,8 @@ final class ZakoSessionStore {
                 lastError = Self.recordFirstMobileMessage
                 return
             }
+            // The order of 1. 1. 2027 still delivers the container.
+            let deliversSinglePDF = output == .singlePDF && regime.regime == .clauseFirst
             serverTimeUsed = conversionTime
             attestation.conversionExecutionDateTime = conversionTime
             selectedFormPack = try formPackRepository.pack(
@@ -1519,9 +1559,24 @@ final class ZakoSessionStore {
             // One value names the PDF/A inside the signed container and in the clause and the
             // record (NewDocumentName), so the two are equal by construction, as in the
             // podpisuj.sk reference.
-            let containerDocumentName = ConversionOutputNaming.containerDocumentName(
+            let directory = ConversionOutputNaming.outputDirectory(
+                sourceURL: sourceURL,
+                preferredDirectory: outputDirectoryOverride,
+                fallback: settingsStore.outputDirectory)
+            var containerDocumentName = ConversionOutputNaming.containerDocumentName(
                 newDocumentName: attestation.newDocumentName,
                 fallback: attestation.originalDocumentName)
+            // One PDF: the delivered file's name is fixed before the clause names it, so clause,
+            // record and file agree; a name already taken in the folder is never reused.
+            let singlePDFTarget: URL?
+            if deliversSinglePDF {
+                let target = ZakoSinglePDFDelivery.fixedTarget(in: directory,
+                                                               containerDocumentName: containerDocumentName)
+                containerDocumentName = target.lastPathComponent
+                singlePDFTarget = target
+            } else {
+                singlePDFTarget = nil
+            }
             var deliveredAttestation = attestation
             deliveredAttestation.newDocumentName = containerDocumentName
             let clause = try ZakoClauseDeliveryBuilder().build(
@@ -1529,12 +1584,28 @@ final class ZakoSessionStore {
                 attestation: deliveredAttestation,
                 securityElements: confirmedElementsSnapshot,
                 originalNonEmptyPageIndices: nonEmptyPageIndices,
-                usedDevice: attestation.usedDeviceDescription)
+                usedDevice: attestation.usedDeviceDescription,
+                deliveredAsSinglePDF: deliversSinglePDF)
 
             // The record EZZK receives, validated before anything is signed: an invalid record
             // stops the conversion before the client container exists.
             let recordDelivery = try ZakoRecordDeliveryBuilder().build(
                 model: clause.model, form: FormPackRepository.recordForm(of: selectedFormPack))
+
+            // One PDF: the clause's readable pages, rendered from the very clause XML that is
+            // attached, before anything is signed.
+            let appendedClause: AppendedClause?
+            if deliversSinglePDF {
+                analysisProgressText = "Pripravujem strany osvedčovacej doložky…"
+                appendedClause = try await ZakoSinglePDFDelivery.appendedClause(
+                    clauseXML: Data(clause.clauseXML.utf8),
+                    clauseXDCF: clause.clauseXDCF,
+                    clauseFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber),
+                    form: .clause_1_3,
+                    renderer: clausePageRenderer)
+            } else {
+                appendedClause = nil
+            }
 
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"
             if !viaMobile, isCertificateTypePending {
@@ -1573,11 +1644,23 @@ final class ZakoSessionStore {
                 timestampServers = qualified
                 tsaURL = first
             }
+            // The one PDF is a PAdES signature, which slovensko.sk sees with BOSA's timestamp, so
+            // it keeps the PAdES order (BOSA first); the record above stays XAdES.
+            let clientTimestampServers: [String]?
+            let clientTSAURL: String?
+            if !deliversSinglePDF {
+                clientTimestampServers = timestampServers
+                clientTSAURL = tsaURL
+            } else if settingsStore.ezzkAccountController.isDemoMode {
+                clientTimestampServers = nil
+                clientTSAURL = stampsSignatures ? settings.timestampAuthority(signsXAdES: false).url : nil
+            } else {
+                let qualified = TimestampAuthority.zakoPAdESQualifiedURLs.map(\.absoluteString)
+                guard let first = qualified.first else { throw SigningError.timestampFailed }
+                clientTimestampServers = qualified
+                clientTSAURL = first
+            }
 
-            let directory = ConversionOutputNaming.outputDirectory(
-                sourceURL: sourceURL,
-                preferredDirectory: outputDirectoryOverride,
-                fallback: settingsStore.outputDirectory)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
             // The card's container follows the podpisuj.sk reference: the PDF/A under its new
@@ -1648,20 +1731,45 @@ final class ZakoSessionStore {
                 guard let identityID = selectedIdentityID else {
                     throw SigningError.identityUnavailable
                 }
-                signed = try await middlewareInput.during(asksEIDForBOK) {
-                    try await signingProvider.sign(SigningRequest(
-                        pdfData: finalPDF,
-                        identityID: identityID,
-                        includeTimestamp: stampsSignatures,
-                        tsaURL: tsaURL,
-                        pin: signingPIN.isEmpty ? nil : signingPIN,
-                        extraFiles: containerFiles,
-                        filename: containerDocumentName,
-                        signsExtraFilesAsDataObjects: true,
-                        timestampServers: timestampServers))
+                if let appendedClause {
+                    // The engine appends the clause to the PDF/A and signs the whole as PAdES.
+                    signed = try await middlewareInput.during(asksEIDForBOK) {
+                        try await signingProvider.sign(SigningRequest(
+                            pdfData: finalPDF,
+                            identityID: identityID,
+                            includeTimestamp: stampsSignatures,
+                            tsaURL: clientTSAURL,
+                            outputFormat: .embeddedPAdES,
+                            pin: signingPIN.isEmpty ? nil : signingPIN,
+                            filename: containerDocumentName,
+                            timestampServers: clientTimestampServers,
+                            appendedClause: appendedClause))
+                    }
+                } else {
+                    signed = try await middlewareInput.during(asksEIDForBOK) {
+                        try await signingProvider.sign(SigningRequest(
+                            pdfData: finalPDF,
+                            identityID: identityID,
+                            includeTimestamp: stampsSignatures,
+                            tsaURL: tsaURL,
+                            pin: signingPIN.isEmpty ? nil : signingPIN,
+                            extraFiles: containerFiles,
+                            filename: containerDocumentName,
+                            signsExtraFilesAsDataObjects: true,
+                            timestampServers: timestampServers))
+                    }
                 }
             }
 
+            if deliversSinglePDF {
+                // The clause fingerprints the PDF/A, so the signed file must begin with exactly
+                // those bytes (revision 1) and carry the clause and signature after them.
+                guard signed.asicData == nil,
+                      signed.pdfData.count > finalPDF.count,
+                      signed.pdfData.prefix(finalPDF.count) == finalPDF else {
+                    throw SigningError.signingFailed(Self.singlePDFPrefixChangedMessage)
+                }
+            }
             if let asic = signed.asicData {
                 let containerCheck = ASiCEContainerVerifier().verify(asic)
                 guard containerCheck.isValid else {
@@ -1685,7 +1793,12 @@ final class ZakoSessionStore {
             // Outputs are made unique, so neither the source nor an earlier output is replaced.
             let deliveredTarget: URL
             let pdfFileName: String
-            if !viaMobile, let asic = signed.asicData {
+            if let singlePDFTarget {
+                // The name was fixed before the clause; should a file have taken it meanwhile,
+                // the PDF goes beside it under a unique name and never replaces it.
+                deliveredTarget = try Self.writeWithoutOverwriting(signed.pdfData, preferred: singlePDFTarget)
+                pdfFileName = containerDocumentName
+            } else if !viaMobile, let asic = signed.asicData {
                 deliveredTarget = ConversionOutputNaming.uniqueURL(
                     in: directory,
                     fileName: ConversionOutputNaming.asicFileName(pdfFileName: containerDocumentName))
@@ -1724,7 +1837,10 @@ final class ZakoSessionStore {
                 formPack: FormPackStamp(pack: selectedFormPack),
                 securityReview: securityReviewSnapshot,
                 ezzkMode: attestation.evidenceNumberMode ?? settingsStore.ezzkAccountController.mode,
-                evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt)
+                evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
+                clientOutput: deliversSinglePDF ? .singlePDF : nil,
+                // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
+                revisionOneLength: deliversSinglePDF ? finalPDF.count : nil)
 
             // The row is registered before the record is signed, so a crash or force-quit
             // during the second signature still leaves it in the register. The status
