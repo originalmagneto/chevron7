@@ -16,7 +16,77 @@
       "enum": ["CAPABILITIES", "DRIVERS", "CERTIFICATES", "INSPECT", "SIGN"]
     },
     "payload": {
-      "type": "object"
+      "type": "object",
+      "description": "Operation specific. The SIGN payload is documented in $defs/signPayload, which this schema does not enforce."
+    }
+  },
+  "$defs": {
+    "signPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver", "certificateSerial", "pin", "signatureLevel", "timestamp", "files"],
+      "properties": {
+        "driver": { "type": "string" },
+        "certificateSerial": { "type": "string" },
+        "pin": { "type": "string" },
+        "signatureLevel": {
+          "type": "string",
+          "enum": ["PAdES_BASELINE_T", "PAdES_BASELINE_B", "XAdES_BASELINE_T", "XAdES_BASELINE_B"]
+        },
+        "timestamp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required", "servers"],
+          "properties": {
+            "required": { "type": "boolean" },
+            "servers": { "type": "array", "items": { "type": "string" } },
+            "authentication": { "type": "object" },
+            "content": {
+              "type": "boolean",
+              "description": "A qualified timestamp inside the signed data as well. Never with appendClause."
+            }
+          }
+        },
+        "files": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/signFile" } }
+      }
+    },
+    "signFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "target"],
+      "not": { "required": ["attachments", "appendClause"] },
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "description": "Absolute, normalized path of a regular file." },
+        "target": { "type": "string", "description": "Absolute path that does not exist yet." },
+        "attachments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string" },
+          "description": "Further documents (absolute paths) signed with the source as separate data objects of one new ASiC-E. XAdES levels only, no eForm, never with appendClause."
+        },
+        "appendClause": { "$ref": "#/$defs/appendClause" }
+      }
+    },
+    "appendClause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pages", "attachment"],
+      "description": "Appends the clause pages, and the clause XDC as an associated file, to the PDF/A source as one incremental update, checks the result as PDF/A-3b and signs it as PAdES in the same request. PAdES levels only; never with attachments, an eForm, a visible appearance or a content timestamp. A result veraPDF does not accept fails the file with PDFA_INVALID (payload message: up to five veraPDF rule lines, one per line) and nothing is signed.",
+      "properties": {
+        "pages": { "type": "string", "description": "Absolute path of the rendered clause pages (a PDF)." },
+        "attachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "name", "mimeType"],
+          "properties": {
+            "source": { "type": "string", "description": "Absolute path of the clause XDC." },
+            "name": { "type": "string", "minLength": 1, "description": "Name of the embedded file in the PDF." },
+            "mimeType": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
     }
   }
 }

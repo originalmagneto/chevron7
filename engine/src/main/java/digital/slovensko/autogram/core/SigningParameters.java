@@ -52,6 +52,7 @@ public class SigningParameters {
     private boolean plainRecordXdc;
     private TSPSource contentTimestampSource;
     private boolean extendsExistingContainer;
+    private boolean appendsClause;
 
     private SigningParameters(
             SignatureLevel level, DigestAlgorithm digestAlgorithm, ASiCContainerType container, SignaturePackaging signaturePackaging,
@@ -398,6 +399,17 @@ public class SigningParameters {
 
     public TSPSource getContentTimestampSource() {
         return contentTimestampSource;
+    }
+
+    /// The document is a PDF/A with the osvedčovacia doložka appended as one incremental update
+    /// (`PdfClauseAppender`), already checked by veraPDF: the signature follows it unchanged, so
+    /// no further revision (form field appearances) may come between them.
+    public void setAppendsClause(boolean value) {
+        appendsClause = value;
+    }
+
+    public boolean appendsClause() {
+        return appendsClause;
     }
 
     public boolean shouldEmbedSchemas() {

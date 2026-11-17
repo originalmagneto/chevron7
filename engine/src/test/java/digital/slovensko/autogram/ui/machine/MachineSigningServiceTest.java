@@ -1140,7 +1140,224 @@ class MachineSigningServiceTest {
         assertTrue(names.stream().noneMatch(name -> name.endsWith(".asice")), names.toString());
     }
 
-    private static final String RECORD_XDC = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><XMLDataContainer xmlns=\"http://data.gov.sk/def/container/xmldatacontainer+xml/1.1\">"
+    // MARK: - Appended clause (one PDF)
+
+    private static final String CLAUSE_TSA = "http://tsa.example.test/qts";
+    private static final String CLAUSE_NAME = "1563-261016-7.xml.xdcf";
+    private static final String XDC_MIME = "application/vnd.gov.sk.xmldatacontainer+xml";
+
+    private static byte[] coreResource(String name) throws Exception {
+        try (var stream = Objects.requireNonNull(MachineSigningServiceTest.class
+                .getResourceAsStream("/digital/slovensko/autogram/core/" + name), name)) {
+            return stream.readAllBytes();
+        }
+    }
+
+    private static MachineSettings clauseSettings() throws Exception {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
+        settings.answerTimestampsWith(ContentTimestampTest.authority());
+        settings.setTsaServer(CLAUSE_TSA, new eu.europa.esig.dss.service.http.commons.TimestampDataLoader());
+        return settings;
+    }
+
+    private static Pkcs12SignatureToken testToken() throws Exception {
+        return new Pkcs12SignatureToken(Objects.requireNonNull(MachineSigningServiceTest.class
+                .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()));
+    }
+
+    /// The session the engine opens, minus the card: the real job with the test keystore.
+    private static MachineSigningService.SigningSession clauseSession(MachineSettings settings, SigningKey key) {
+        return new FakeSession((input, completed) -> MachineSigningService.DefaultSigningSession.signingJob(
+                input.sourceContent(), input.file().source(), new MachineFileResponder(input.staging(), completed),
+                settings, input.file().visibleAppearance(), input.attachments(), input.appendClause())
+                .signWithKeyAndRespond(key));
+    }
+
+    private record ClauseFiles(Path source, Path pages, Path attachment) {
+        ClauseAppend appendClause() {
+            return new ClauseAppend(pages.toString(), attachment.toString(), CLAUSE_NAME, XDC_MIME);
+        }
+    }
+
+    private ClauseFiles clauseFiles(byte[] pages) throws Exception {
+        var directory = temporaryDirectory.toRealPath();
+        return new ClauseFiles(Files.write(directory.resolve("dokument.pdf"), coreResource("zako-p2e-final.pdf")),
+                Files.write(directory.resolve("dolozka-strany.pdf"), pages),
+                Files.write(directory.resolve("dolozka.xml.xdcf"), coreResource("clause-p2e.xdcf")));
+    }
+
+    private static SignRequest clauseRequest(ClauseFiles files, Path target) {
+        return new SignRequest("fake", "123", "1234".toCharArray(), "PAdES_BASELINE_T",
+                new QualifiedTimestampRequest(true, List.of(CLAUSE_TSA)),
+                List.of(new MachineFile("one", files.source().toString(), target.toString(), null, List.of(),
+                        files.appendClause())));
+    }
+
+    private static int countFrom(byte[] haystack, int from, String needle) {
+        var text = new String(haystack, from, haystack.length - from, java.nio.charset.StandardCharsets.ISO_8859_1);
+        var count = 0;
+        for (var index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) {
+            count++;
+        }
+        return count;
+    }
+
+    private static int pages(byte[] pdf) throws Exception {
+        try (var document = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            return document.getNumberOfPages();
+        }
+    }
+
+    /// One request appends the clause and signs the result at PAdES Baseline T: the source stays a
+    /// byte prefix, two revisions follow (the clause, then the signature), and the signature covers
+    /// every byte of the file the service published.
+    @Test
+    void signsAppendedClauseAsPadesT() throws Exception {
+        var writer = new RecordingWriter();
+        var files = clauseFiles(coreResource("clause-pages-p2e.pdf"));
+        var target = target("dokument-podpisany.pdf");
+        var settings = clauseSettings();
+        try (var token = testToken()) {
+            var service = new MachineSigningService(writer.writer(),
+                    request -> clauseSession(settings, new SigningKey(token, token.getKeys().get(0))),
+                    new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+            service.sign("request-1", clauseRequest(files, target));
+        }
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.completed", "session.completed"),
+                writer.lifecycleEventTypes(), writer.serialized());
+        var signed = Files.readAllBytes(target);
+        var source = Files.readAllBytes(files.source());
+        var attachment = Files.readAllBytes(files.attachment());
+        assertArrayEquals(source, Arrays.copyOf(signed, source.length));
+        assertEquals(2, countFrom(signed, source.length, "%%EOF"));
+        assertEquals(pages(source) + pages(Files.readAllBytes(files.pages())), pages(signed));
+        try (var document = org.apache.pdfbox.Loader.loadPDF(signed)) {
+            var signatures = document.getSignatureDictionaries();
+            assertEquals(1, signatures.size());
+            var byteRange = signatures.getFirst().getByteRange();
+            assertEquals(0, byteRange[0]);
+            assertEquals(signed.length, byteRange[2] + byteRange[3]);
+            var embedded = document.getDocumentCatalog().getNames().getEmbeddedFiles().getNames().get(CLAUSE_NAME);
+            assertArrayEquals(attachment, embedded.getEmbeddedFile().toByteArray());
+        }
+        assertEquals("PAdES_BASELINE_T", new MachineInspectionService().inspect(signed).getAsJsonArray("signatures")
+                .get(0).getAsJsonObject().get("format").getAsString());
+        assertEquals(null, new MachineSigningService.PdfOutputValidator(new MachineInspectionService())
+                .appendedClauseFailure(signed, source, attachment, pages(Files.readAllBytes(files.pages())),
+                        "PAdES_BASELINE_T"));
+    }
+
+    /// Pages whose font is not embedded make the appended document fail PDF/A-3b: the request
+    /// ends with PDFA_INVALID and veraPDF's reasons, before the card is ever asked to sign.
+    @Test
+    void pdfaInvalidStopsBeforeSigning() throws Exception {
+        var writer = new RecordingWriter();
+        var files = clauseFiles(helveticaPages());
+        var target = target("dokument-podpisany.pdf");
+        var settings = clauseSettings();
+        try (var token = testToken()) {
+            var key = org.mockito.Mockito.spy(new SigningKey(token, token.getKeys().get(0)));
+            var service = new MachineSigningService(writer.writer(), request -> clauseSession(settings, key),
+                    new MachineSigningService.PdfOutputValidator(new MachineInspectionService()));
+
+            service.sign("request-1", clauseRequest(files, target));
+
+            org.mockito.Mockito.verify(key, org.mockito.Mockito.never()).sign(org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any());
+        }
+
+        assertEquals(List.of("session.started", "file.signingStarted", "file.failed", "session.completed"),
+                writer.lifecycleEventTypes());
+        assertEquals("PDFA_INVALID", writer.payloadCode(2));
+        var message = writer.payloadString(2, "message");
+        assertTrue(message != null && !message.isBlank(), writer.serialized());
+        assertTrue(message.lines().count() <= 5, message);
+        assertFalse(Files.exists(target));
+        try (var leftovers = Files.list(temporaryDirectory)) {
+            assertTrue(leftovers.noneMatch(path -> path.getFileName().toString().startsWith(".autogram-machine-")));
+        }
+    }
+
+    /// The output check binds the signed file to what was asked: the same source bytes as its
+    /// prefix, the same clause XDC, the clause's page count and the requested level.
+    @Test
+    void appendedClauseFailureRefusesChangedPrefixOrAttachment() throws Exception {
+        var source = coreResource("zako-p2e-final.pdf");
+        var pages = coreResource("clause-pages-p2e.pdf");
+        var attachment = coreResource("clause-p2e.xdcf");
+        var retained = new MemoryRetainedFile();
+        var job = MachineSigningService.DefaultSigningSession.signingJob(source, "/tmp/dokument.pdf",
+                new MachineFileResponder(retained, () -> { }), clauseSettings(), null, List.of(),
+                new MachineSigningService.ClauseAppendContent(pages,
+                        new digital.slovensko.autogram.core.PdfClauseAppender.Attachment(CLAUSE_NAME, XDC_MIME, attachment)));
+        try (var token = testToken()) {
+            job.signWithKeyAndRespond(new SigningKey(token, token.getKeys().get(0)));
+        }
+        var signed = retained.readAll();
+        var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService());
+        var clausePages = pages(pages);
+
+        assertEquals(null, validator.appendedClauseFailure(signed, source, attachment, clausePages, "PAdES_BASELINE_T"));
+
+        var changedSource = source.clone();
+        changedSource[source.length / 2] ^= 1;
+        var changedAttachment = Arrays.copyOf(attachment, attachment.length + 1);
+        changedAttachment[attachment.length] = '\n';
+        var appendedOnly = digital.slovensko.autogram.core.PdfClauseAppender.append(source, pages,
+                new digital.slovensko.autogram.core.PdfClauseAppender.Attachment(CLAUSE_NAME, XDC_MIME, attachment)).pdf();
+        var extended = Arrays.copyOf(signed, signed.length + 1);
+        extended[signed.length] = '\n';
+
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(signed, changedSource, attachment, clausePages, "PAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(signed, source, changedAttachment, clausePages, "PAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(signed, source, attachment, clausePages + 1, "PAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(signed, source, attachment, clausePages, "PAdES_BASELINE_B"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(appendedOnly, source, attachment, clausePages, "PAdES_BASELINE_T"));
+        assertEquals("OUTPUT_VALIDATION_FAILED",
+                validator.appendedClauseFailure(extended, source, attachment, clausePages, "PAdES_BASELINE_T"));
+    }
+
+    /// The job itself refuses a clause outside PAdES, so no caller can wrap it into a container.
+    @Test
+    void appendedClauseJobNeedsPades() throws Exception {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.XAdES_BASELINE_B);
+        assertThrows(java.io.IOException.class, () -> MachineSigningService.DefaultSigningSession.signingJob(
+                coreResource("zako-p2e-final.pdf"), "/tmp/dokument.pdf",
+                new MachineFileResponder(new MemoryRetainedFile(), () -> { }), settings, null, List.of(),
+                new MachineSigningService.ClauseAppendContent(coreResource("clause-pages-p2e.pdf"),
+                        new digital.slovensko.autogram.core.PdfClauseAppender.Attachment(CLAUSE_NAME, XDC_MIME,
+                                coreResource("clause-p2e.xdcf")))));
+    }
+
+    private static byte[] helveticaPages() throws Exception {
+        try (var document = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.A4);
+            document.addPage(page);
+            try (var content = new org.apache.pdfbox.pdmodel.PDPageContentStream(document, page)) {
+                content.beginText();
+                content.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 12);
+                content.newLineAtOffset(72, 720);
+                content.showText("Osvedcovacia dolozka");
+                content.endText();
+            }
+            var output = new java.io.ByteArrayOutputStream();
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private static final String RECORD_XDC ="<?xml version=\"1.0\" encoding=\"UTF-8\"?><XMLDataContainer xmlns=\"http://data.gov.sk/def/container/xmldatacontainer+xml/1.1\">"
             + "<XMLData ContentType=\"application/xml; charset=UTF-8\" Identifier=\"http://data.gov.sk/doc/eform/50349287.ConversionRecordOfPaperToElectronicDocument.sk/1.0\" Version=\"1.0\"><ConversionRecord xmlns=\"https://data.gov.sk/id/egov/eform/50349287.ConversionRecordOfPaperToElectronicDocument.sk/1.0\"/></XMLData>"
             + "</XMLDataContainer>";
 

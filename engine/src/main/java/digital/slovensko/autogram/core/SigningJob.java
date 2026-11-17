@@ -224,8 +224,10 @@ public class SigningJob {
         }
 
         // Acrobat hides a PAdES signature whose revision still asks it to redraw the form
-        // fields. Only PAdES: an ASiC-E data object stays the source itself.
-        if (params.getSignatureType() == SignatureForm.PAdES && isPDF(document.getMimeType()))
+        // fields. Only PAdES: an ASiC-E data object stays the source itself. An appended clause
+        // is signed exactly as veraPDF checked it.
+        if (params.getSignatureType() == SignatureForm.PAdES && isPDF(document.getMimeType())
+                && !params.appendsClause())
             document = PdfFormAppearances.withGeneratedAppearances(document);
 
         return new SigningJob(document, params, responder, extraDocuments);

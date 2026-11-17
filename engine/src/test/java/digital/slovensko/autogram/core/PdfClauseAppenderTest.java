@@ -376,6 +376,51 @@ class PdfClauseAppenderTest {
         assertThrows(IOException.class, () -> PdfClauseAppender.append(encrypted, p2ePages(), clause()));
     }
 
+    /// The check-only command line the app runs before the record is signed: it answers by exit
+    /// code and stderr only, and leaves no file behind.
+    @Test
+    void checkOnlyExitCodes() throws Exception {
+        var source = Files.write(temporary.resolve("dokument.pdf"), finalPdf()).toString();
+        var pages = Files.write(temporary.resolve("strany.pdf"), p2ePages()).toString();
+        var helvetica = Files.write(temporary.resolve("helvetica.pdf"), helveticaPages()).toString();
+        var attachment = Files.write(temporary.resolve("dolozka.xml.xdcf"), resource("clause-p2e.xdcf")).toString();
+        List<Path> before;
+        try (var listing = Files.list(temporary)) {
+            before = listing.sorted().toList();
+        }
+
+        var compliantErrors = new ByteArrayOutputStream();
+        assertEquals(0, PdfClauseAppender.run(new String[] { source, pages, attachment, CLAUSE_NAME, XDC_MIME },
+                new java.io.PrintStream(compliantErrors, true, StandardCharsets.UTF_8)));
+        assertEquals("", compliantErrors.toString(StandardCharsets.UTF_8));
+
+        var refusal = new ByteArrayOutputStream();
+        assertEquals(3, PdfClauseAppender.run(new String[] { source, helvetica, attachment, CLAUSE_NAME, XDC_MIME },
+                new java.io.PrintStream(refusal, true, StandardCharsets.UTF_8)));
+        var lines = refusal.toString(StandardCharsets.UTF_8).lines().toList();
+        assertFalse(lines.isEmpty());
+        assertTrue(lines.size() <= 5, lines::toString);
+
+        var missing = temporary.resolve("chyba.pdf").toString();
+        assertEquals(2, PdfClauseAppender.run(new String[] { missing, pages, attachment, CLAUSE_NAME, XDC_MIME },
+                new java.io.PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8)));
+        assertEquals(1, PdfClauseAppender.run(new String[] { source, pages },
+                new java.io.PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8)));
+
+        // main maps the same answer to the process exit code.
+        var java = ProcessHandle.current().info().command().orElseThrow();
+        var process = new ProcessBuilder(java, "-cp", System.getProperty("java.class.path"),
+                PdfClauseAppender.class.getName(), source, helvetica, attachment, CLAUSE_NAME, XDC_MIME)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start();
+        assertEquals(3, process.waitFor());
+
+        try (var listing = Files.list(temporary)) {
+            assertEquals(before, listing.sorted().toList());
+        }
+    }
+
     // MARK: - Helpers
 
     private static String pageText(PDDocument document, int index) throws IOException {

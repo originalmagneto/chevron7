@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import digital.slovensko.autogram.core.DefaultDriverDetector;
 import digital.slovensko.autogram.core.DriverDetector;
 import digital.slovensko.autogram.core.PasswordManager;
+import digital.slovensko.autogram.core.PdfClauseAppender;
 import digital.slovensko.autogram.core.SigningJob;
 import digital.slovensko.autogram.core.SigningKey;
 import digital.slovensko.autogram.core.SigningParameters;
@@ -191,14 +192,21 @@ public final class MachineSigningService {
             }
             progress(requestId, file, "validating");
             var signedContent = prepared.readSignedContent();
-            var validationFailure = wrapsSignedSource(prepared, previousSignatureIds, signedContent)
-                    ? wrappedSourceValidationFailure(signedContent, prepared.sourceContent(),
-                            prepared.hasVisibleAppearance(), requestedLevel)
-                    : outputValidationFailure(signedContent, previousSignatureIds,
-                            prepared.hasVisibleAppearance(), requestedLevel);
-            if (validationFailure == null && contentTimestamp) {
-                validationFailure = contentTimestampFailure(signedContent,
-                        wrapsSignedSource(prepared, previousSignatureIds, signedContent) ? Set.of() : previousSignatureIds);
+            String validationFailure;
+            if (prepared.appendClause() != null) {
+                // The request validator refuses a content timestamp with an appended clause.
+                validationFailure = appendedClauseFailure(signedContent, prepared.sourceContent(),
+                        prepared.appendClause().attachment().content(), prepared.clausePages(), requestedLevel);
+            } else {
+                validationFailure = wrapsSignedSource(prepared, previousSignatureIds, signedContent)
+                        ? wrappedSourceValidationFailure(signedContent, prepared.sourceContent(),
+                                prepared.hasVisibleAppearance(), requestedLevel)
+                        : outputValidationFailure(signedContent, previousSignatureIds,
+                                prepared.hasVisibleAppearance(), requestedLevel);
+                if (validationFailure == null && contentTimestamp) {
+                    validationFailure = contentTimestampFailure(signedContent,
+                            wrapsSignedSource(prepared, previousSignatureIds, signedContent) ? Set.of() : previousSignatureIds);
+                }
             }
             if (validationFailure != null) {
                 throw MachineProtocolException.fromFailure(validationFailure);
@@ -215,7 +223,8 @@ public final class MachineSigningService {
                 code = "OUTPUT_CLEANUP_FAILED";
             }
             writer.write("file.failed", requestId, file.id(), failure(code,
-                    "TRUSTED_LIST_UNAVAILABLE".equals(code) ? failureCountry(exception) : null));
+                    "TRUSTED_LIST_UNAVAILABLE".equals(code) ? failureCountry(exception) : null,
+                    "PDFA_INVALID".equals(code) ? failureDetails(exception) : null));
         }
     }
 
@@ -317,6 +326,15 @@ public final class MachineSigningService {
         return !previousSignatureIds.isEmpty() && !isZip(prepared.sourceContent()) && isZip(signedContent);
     }
 
+    private String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
+            String requestedLevel) {
+        try {
+            return outputValidator.appendedClauseFailure(content, source, attachment, clausePages, requestedLevel);
+        } catch (Throwable exception) {
+            throw new MachineProtocolException("OUTPUT_VALIDATION_FAILED", exception);
+        }
+    }
+
     private String wrappedSourceValidationFailure(byte[] content, byte[] source, boolean visibleAppearance,
             String requestedLevel) {
         try {
@@ -336,7 +354,7 @@ public final class MachineSigningService {
                 return switch (protocolException.getMessage()) {
                     case "OUTPUT_CLEANUP_FAILED", "OUTPUT_VALIDATION_FAILED", "TIMESTAMP_QUALIFICATION_FAILED",
                             "TIMESTAMP_FAILED", "OUTPUT_PUBLISH_UNSUPPORTED", "OUTPUT_TARGET_EXISTS", "MACHINE_PLATFORM_UNSUPPORTED",
-                            "TRUSTED_LIST_UNAVAILABLE" -> protocolException.getMessage();
+                            "TRUSTED_LIST_UNAVAILABLE", "PDFA_INVALID" -> protocolException.getMessage();
                     default -> fallback;
                 };
             }
@@ -377,6 +395,16 @@ public final class MachineSigningService {
         return null;
     }
 
+    /// Up to five veraPDF rules the appended document breaks, one per line, for `file.failed`.
+    private static String failureDetails(Throwable exception) {
+        for (var cause = exception; cause != null && cause.getCause() != cause; cause = cause.getCause()) {
+            if (cause instanceof MachineProtocolException protocolException && !protocolException.details().isEmpty()) {
+                return String.join("\n", protocolException.details().stream().limit(5).toList());
+            }
+        }
+        return null;
+    }
+
     private static MachineProtocolException rethrow(Throwable exception) {
         if (exception instanceof RuntimeException runtimeException) {
             throw runtimeException;
@@ -392,10 +420,17 @@ public final class MachineSigningService {
     }
 
     private static JsonObject failure(String code, String country) {
+        return failure(code, country, null);
+    }
+
+    private static JsonObject failure(String code, String country, String message) {
         var payload = new JsonObject();
         payload.addProperty("code", code);
         if (country != null) {
             payload.addProperty("country", country);
+        }
+        if (message != null) {
+            payload.addProperty("message", message);
         }
         return payload;
     }
@@ -420,12 +455,15 @@ public final class MachineSigningService {
         private final MachineSigningFileSystem.Workspace workspace;
         private final byte[] sourceContent;
         private final List<AttachmentContent> attachments;
+        private final ClauseAppendContent appendClause;
+        private final int clausePages;
         private Set<String> previousSignatureIds;
         private boolean cleaned;
 
         private PreparedFile(MachineFile file, Path target, MachineSigningFileSystem.RetainedFile source,
                 MachineSigningFileSystem.RetainedFile staging, MachineSigningFileSystem.Workspace workspace,
-                byte[] sourceContent, List<AttachmentContent> attachments) {
+                byte[] sourceContent, List<AttachmentContent> attachments, ClauseAppendContent appendClause,
+                int clausePages) {
             this.file = file;
             this.target = target;
             this.source = source;
@@ -433,6 +471,8 @@ public final class MachineSigningService {
             this.workspace = workspace;
             this.sourceContent = sourceContent;
             this.attachments = attachments;
+            this.appendClause = appendClause;
+            this.clausePages = clausePages;
         }
 
         private static PreparedFile prepare(ValidatedMachineFile validated, MachineSigningFileSystem fileSystem,
@@ -460,10 +500,31 @@ public final class MachineSigningService {
                 if (!attachments.isEmpty() && !hasPdfHeader(sourceContent)) {
                     throw new IOException("Attachments are signed next to a PDF, never into an existing container");
                 }
+                ClauseAppendContent appendClause = null;
+                var clausePages = 0;
+                if (validated.appendClause() != null) {
+                    if (!hasPdfHeader(sourceContent)) {
+                        throw new IOException("A clause is appended to a PDF only");
+                    }
+                    var clause = validated.appendClause();
+                    byte[] pages;
+                    try (var retained = fileSystem.openSource(clause.pages())) {
+                        pages = retained.readAll();
+                    }
+                    byte[] attachment;
+                    try (var retained = fileSystem.openSource(clause.attachment())) {
+                        attachment = retained.readAll();
+                    }
+                    // Counted here, apart from the appender, so the output check does not
+                    // take the appender's word for how many pages it added.
+                    clausePages = pageCount(pages);
+                    appendClause = new ClauseAppendContent(pages, new PdfClauseAppender.Attachment(
+                            clause.attachmentName(), clause.attachmentMimeType(), attachment));
+                }
                 workspace = fileSystem.createWorkspace(validated.target().getParent());
                 var staging = workspace.createStagingFile();
                 return new PreparedFile(file, validated.target(), source, staging, workspace, sourceContent,
-                        List.copyOf(attachments));
+                        List.copyOf(attachments), appendClause, clausePages);
             } catch (Throwable exception) {
                 boolean cleaned = true;
                 if (workspace != null) {
@@ -507,7 +568,15 @@ public final class MachineSigningService {
         }
 
         private SigningInput signingInput() {
-            return new SigningInput(file, sourceContent.clone(), source, staging, attachments);
+            return new SigningInput(file, sourceContent.clone(), source, staging, attachments, appendClause);
+        }
+
+        private ClauseAppendContent appendClause() {
+            return appendClause;
+        }
+
+        private int clausePages() {
+            return clausePages;
         }
 
         private byte[] sourceContent() {
@@ -549,16 +618,36 @@ public final class MachineSigningService {
         }
     }
 
+    /// The clause pages and the clause XDC appended to a PDF/A before its PAdES signature.
+    public record ClauseAppendContent(byte[] pages, PdfClauseAppender.Attachment attachment) {
+        public ClauseAppendContent {
+            pages = pages.clone();
+            attachment = new PdfClauseAppender.Attachment(attachment.name(), attachment.mimeType(),
+                    attachment.content().clone());
+        }
+
+        @Override
+        public byte[] pages() {
+            return pages.clone();
+        }
+    }
+
     record SigningInput(MachineFile file, byte[] sourceContent, MachineSigningFileSystem.RetainedFile source,
-            MachineSigningFileSystem.RetainedFile staging, List<AttachmentContent> attachments) {
+            MachineSigningFileSystem.RetainedFile staging, List<AttachmentContent> attachments,
+            ClauseAppendContent appendClause) {
         SigningInput {
             sourceContent = sourceContent.clone();
             attachments = List.copyOf(attachments);
         }
 
         SigningInput(MachineFile file, byte[] sourceContent, MachineSigningFileSystem.RetainedFile source,
+                MachineSigningFileSystem.RetainedFile staging, List<AttachmentContent> attachments) {
+            this(file, sourceContent, source, staging, attachments, null);
+        }
+
+        SigningInput(MachineFile file, byte[] sourceContent, MachineSigningFileSystem.RetainedFile source,
                 MachineSigningFileSystem.RetainedFile staging) {
-            this(file, sourceContent, source, staging, List.of());
+            this(file, sourceContent, source, staging, List.of(), null);
         }
 
         void writeSignedContent(byte[] content) throws IOException {
@@ -568,6 +657,12 @@ public final class MachineSigningService {
 
     private static boolean hasPdfHeader(byte[] content) {
         return content.length >= 5 && "%PDF-".equals(new String(content, 0, 5, StandardCharsets.ISO_8859_1));
+    }
+
+    private static int pageCount(byte[] pdf) throws IOException {
+        try (var document = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            return document.getNumberOfPages();
+        }
     }
 
     private static boolean hasPngHeader(byte[] content) {
@@ -744,6 +839,13 @@ public final class MachineSigningService {
                 String requestedLevel) throws Exception {
             return "OUTPUT_VALIDATION_FAILED";
         }
+
+        /// A PDF/A with its appended clause, signed. A validator that cannot prove the output is
+        /// exactly that refuses.
+        default String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
+                String requestedLevel) throws Exception {
+            return "OUTPUT_VALIDATION_FAILED";
+        }
     }
 
     static final class DefaultSessionFactory implements Function<SignRequest, SigningSession> {
@@ -855,7 +957,7 @@ public final class MachineSigningService {
         public void sign(SigningInput input, Runnable completed) throws Exception {
             var responder = new MachineFileResponder(input.staging(), completed);
             var job = signingJob(input.sourceContent(), input.file().source(), responder, settings,
-                    input.file().visibleAppearance(), input.attachments());
+                    input.file().visibleAppearance(), input.attachments(), input.appendClause());
             job.signWithKeyAndRespond(key);
         }
 
@@ -871,9 +973,22 @@ public final class MachineSigningService {
 
         static SigningJob signingJob(byte[] source, String name, MachineFileResponder responder, MachineSettings settings,
                 VisibleSignatureAppearance.Snapshot appearance, List<AttachmentContent> attachments) throws Exception {
+            return signingJob(source, name, responder, settings, appearance, attachments, null);
+        }
+
+        /// With `appendClause` the clause is appended to the PDF/A first and the result signed as
+        /// PAdES; a result veraPDF does not accept as PDF/A-3b ends here with PDFA_INVALID, before
+        /// the key is ever asked to sign.
+        static SigningJob signingJob(byte[] source, String name, MachineFileResponder responder, MachineSettings settings,
+                VisibleSignatureAppearance.Snapshot appearance, List<AttachmentContent> attachments,
+                ClauseAppendContent appendClause) throws Exception {
             var filename = Path.of(name).getFileName().toString();
+            if (appendClause != null) {
+                source = appendedClause(source, settings, appearance, attachments, appendClause);
+            }
             var document = new InMemoryDocument(source, filename, detectMimeType(filename, source));
             var parameters = signingParameters(document, settings);
+            parameters.setAppendsClause(appendClause != null);
             if (appearance != null) {
                 var field = appearance.appearance();
                 parameters.setVisiblePadesAppearance(appearance.pngBytes(), field.page(), field.originX(), field.originY(),
@@ -902,6 +1017,24 @@ public final class MachineSigningService {
                 extra.add(new InMemoryDocument(attachment.content(), attachment.name(), mime));
             }
             return SigningJob.buildFromRequest(document, parameters, responder, extra);
+        }
+
+        private static byte[] appendedClause(byte[] source, MachineSettings settings,
+                VisibleSignatureAppearance.Snapshot appearance, List<AttachmentContent> attachments,
+                ClauseAppendContent appendClause) throws IOException {
+            var level = settings.getSignatureLevel();
+            if (level == null || level.getSignatureForm() != SignatureForm.PAdES || settings.getEform() != null
+                    || settings.getContentTimestamp() || appearance != null || !attachments.isEmpty()) {
+                throw new IOException("A clause is appended only for a plain PAdES signature");
+            }
+            if (!hasPdfHeader(source)) {
+                throw new IOException("A clause is appended to a PDF only");
+            }
+            var result = PdfClauseAppender.append(source, appendClause.pages(), appendClause.attachment());
+            if (!result.pdfaCompliant()) {
+                throw MachineProtocolException.withDetails("PDFA_INVALID", result.pdfaErrors());
+            }
+            return result.pdf();
         }
 
         private static SigningParameters signingParameters(InMemoryDocument document, MachineSettings settings) throws Exception {
@@ -1226,6 +1359,93 @@ public final class MachineSigningService {
                 return failure;
             }
             return MachineInspectionService.signaturesCoverDocument(content, source) ? null : "OUTPUT_VALIDATION_FAILED";
+        }
+
+        /**
+         * The signed one-PDF output: the source bytes unchanged as its prefix, then exactly two
+         * revisions (the clause, then the signature), the source's pages plus the clause's, the
+         * clause XDC as the one embedded file the source did not have, byte for byte, and one
+         * signature of the requested level (Baseline T with its intact timestamp) whose byte range
+         * covers the whole file. veraPDF must still accept the signed file as PDF/A-3b.
+         */
+        @Override
+        public String appendedClauseFailure(byte[] content, byte[] source, byte[] attachment, int clausePages,
+                String requestedLevel) {
+            final var failed = "OUTPUT_VALIDATION_FAILED";
+            if (content == null || source == null || attachment == null || requestedLevel == null
+                    || !requestedLevel.startsWith("PAdES_") || content.length <= source.length
+                    || !Arrays.equals(content, 0, source.length, source, 0, source.length)
+                    || !hasPdfHeaderAndEof(content) || occurrencesAfter(content, source.length, "%%EOF") != 2) {
+                return failed;
+            }
+            try (var signed = org.apache.pdfbox.Loader.loadPDF(content);
+                    var original = org.apache.pdfbox.Loader.loadPDF(source)) {
+                if (signed.getNumberOfPages() != original.getNumberOfPages() + clausePages) {
+                    return failed;
+                }
+                var signatures = signed.getSignatureDictionaries();
+                if (signatures.size() != 1) {
+                    return failed;
+                }
+                var byteRange = signatures.getFirst().getByteRange();
+                if (byteRange == null || byteRange.length != 4 || byteRange[0] != 0 || byteRange[1] <= source.length
+                        || (long) byteRange[2] + byteRange[3] != content.length) {
+                    return failed;
+                }
+                var added = new LinkedHashMap<>(embeddedFiles(signed));
+                added.keySet().removeAll(embeddedFiles(original).keySet());
+                if (added.size() != 1 || !Arrays.equals(added.values().iterator().next(), attachment)) {
+                    return failed;
+                }
+            } catch (IOException exception) {
+                return failed;
+            }
+            var signatures = inspectionService.inspect(content).getAsJsonArray("signatures");
+            if (signatures.size() != 1) {
+                return failed;
+            }
+            var signature = signatures.get(0).getAsJsonObject();
+            if (!requestedLevel.equals(string(signature, "format")) || !hasCryptographicIntegrity(signature)
+                    || requestedLevel.endsWith("_T") && !hasCryptographicallyValidTimestamp(signature)) {
+                return failed;
+            }
+            return PdfClauseAppender.pdfaErrors(content).isEmpty() ? null : failed;
+        }
+
+        private static Map<String, byte[]> embeddedFiles(org.apache.pdfbox.pdmodel.PDDocument document)
+                throws IOException {
+            var files = new LinkedHashMap<String, byte[]>();
+            var names = document.getDocumentCatalog().getNames();
+            if (names != null && names.getEmbeddedFiles() != null) {
+                collectEmbeddedFiles(names.getEmbeddedFiles(), files);
+            }
+            return files;
+        }
+
+        private static void collectEmbeddedFiles(
+                org.apache.pdfbox.pdmodel.common.PDNameTreeNode<
+                        org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification> node,
+                Map<String, byte[]> files) throws IOException {
+            if (node.getNames() != null) {
+                for (var entry : node.getNames().entrySet()) {
+                    var file = entry.getValue().getEmbeddedFile();
+                    files.put(entry.getKey(), file == null ? new byte[0] : file.toByteArray());
+                }
+            }
+            if (node.getKids() != null) {
+                for (var kid : node.getKids()) {
+                    collectEmbeddedFiles(kid, files);
+                }
+            }
+        }
+
+        private static int occurrencesAfter(byte[] content, int from, String needle) {
+            var text = new String(content, from, content.length - from, StandardCharsets.ISO_8859_1);
+            var count = 0;
+            for (var index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + needle.length())) {
+                count++;
+            }
+            return count;
         }
 
         @Override

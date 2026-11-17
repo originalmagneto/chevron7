@@ -24,6 +24,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -290,6 +291,64 @@ class MachineCliAppTest {
             assertEquals(64, code, attachments);
             assertEquals("PROTOCOL_INVALID_REQUEST", JsonParser.parseString(lines[lines.length - 1]).getAsJsonObject()
                     .getAsJsonObject("payload").get("code").getAsString(), attachments);
+        }
+    }
+
+    private static final String APPEND_CLAUSE = "{\"pages\":\"/tmp/pages.pdf\",\"attachment\":"
+            + "{\"source\":\"/tmp/dolozka.xml.xdcf\",\"name\":\"1563-261016-7.xml.xdcf\","
+            + "\"mimeType\":\"application/vnd.gov.sk.xmldatacontainer+xml\"}}";
+
+    private static com.google.gson.JsonObject signPayloadWithFile(String extraFileFields) {
+        return JsonParser.parseString("{\"driver\":\"fake\",\"certificateSerial\":\"123\",\"pin\":\"1234\","
+                + "\"signatureLevel\":\"PAdES_BASELINE_T\","
+                + "\"timestamp\":{\"required\":true,\"servers\":[\"https://tsa.example.test\"]},"
+                + "\"files\":[{\"id\":\"one\",\"source\":\"/tmp/dokument.pdf\",\"target\":\"/tmp/dokument-podpis.pdf\""
+                + extraFileFields + "}]}").getAsJsonObject();
+    }
+
+    /// ZaKo's one-PDF output: the file carries the clause pages and the clause XDC to append before signing.
+    @Test
+    void parsesAppendClause() {
+        var request = MachineCliApp.requiredSignRequest(signPayloadWithFile(",\"appendClause\":" + APPEND_CLAUSE));
+
+        var file = request.files().getFirst();
+        assertEquals(new ClauseAppend("/tmp/pages.pdf", "/tmp/dolozka.xml.xdcf", "1563-261016-7.xml.xdcf",
+                "application/vnd.gov.sk.xmldatacontainer+xml"), file.appendClause());
+        assertTrue(file.attachments().isEmpty());
+        assertEquals(null, MachineCliApp.requiredSignRequest(signPayloadWithFile("")).files().getFirst().appendClause());
+    }
+
+    @Test
+    void refusesAppendClauseWithAttachments() {
+        var payload = signPayloadWithFile(",\"attachments\":[\"/tmp/a.xml.xdcf\"],\"appendClause\":" + APPEND_CLAUSE);
+
+        assertEquals("PROTOCOL_INVALID_REQUEST", assertThrows(MachineProtocolException.class,
+                () -> MachineCliApp.requiredSignRequest(payload)).getMessage());
+    }
+
+    @Test
+    void refusesUnknownAppendClauseKeys() {
+        var attachment = "{\"source\":\"/tmp/d.xdcf\",\"name\":\"d.xdcf\",\"mimeType\":\"application/xml\"}";
+        var cases = List.of(
+                "{\"pages\":\"/tmp/p.pdf\",\"attachment\":" + attachment + ",\"extra\":true}",
+                "{\"pages\":\"/tmp/p.pdf\"}",
+                "{\"pages\":\"/tmp/p.pdf\",\"attachments\":" + attachment + "}",
+                "{\"pages\":\"\",\"attachment\":" + attachment + "}",
+                "{\"pages\":1,\"attachment\":" + attachment + "}",
+                "{\"pages\":\"/tmp/p.pdf\",\"attachment\":\"/tmp/d.xdcf\"}",
+                "{\"pages\":\"/tmp/p.pdf\",\"attachment\":{\"source\":\"/tmp/d.xdcf\",\"name\":\"d.xdcf\"}}",
+                "{\"pages\":\"/tmp/p.pdf\",\"attachment\":{\"source\":\"/tmp/d.xdcf\",\"name\":\"d.xdcf\","
+                        + "\"mimeType\":\"application/xml\",\"size\":3}}",
+                "{\"pages\":\"/tmp/p.pdf\",\"attachment\":{\"source\":\"/tmp/d.xdcf\",\"name\":\" \","
+                        + "\"mimeType\":\"application/xml\"}}",
+                "{\"pages\":\"/tmp/\\u0000.pdf\",\"attachment\":" + attachment + "}",
+                "\"/tmp/p.pdf\"",
+                "null");
+        for (var clause : cases) {
+            var payload = signPayloadWithFile(",\"appendClause\":" + clause);
+
+            assertEquals("PROTOCOL_INVALID_REQUEST", assertThrows(MachineProtocolException.class,
+                    () -> MachineCliApp.requiredSignRequest(payload), clause).getMessage(), clause);
         }
     }
 

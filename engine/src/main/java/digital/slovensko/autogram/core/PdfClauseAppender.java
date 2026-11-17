@@ -24,6 +24,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -79,10 +80,14 @@ public final class PdfClauseAppender {
     }
 
     public static void main(String[] args) {
+        System.exit(run(args, System.err));
+    }
+
+    /** The command line's answer as its exit code; reasons go to {@code errors}, nothing is written. */
+    static int run(String[] args, PrintStream errors) {
         if (args.length != 5) {
-            System.err.println("Usage: PdfClauseAppender <source.pdf> <pages.pdf> <attachment> <name> <mimeType>");
-            System.exit(1);
-            return;
+            errors.println("Usage: PdfClauseAppender <source.pdf> <pages.pdf> <attachment> <name> <mimeType>");
+            return 1;
         }
         Result result;
         try {
@@ -90,20 +95,17 @@ public final class PdfClauseAppender {
                     Files.readAllBytes(new File(args[1]).toPath()),
                     new Attachment(args[3], args[4], Files.readAllBytes(new File(args[2]).toPath())));
         } catch (IOException exception) {
-            System.err.println("PdfClauseAppender: " + exception.getClass().getSimpleName());
-            System.exit(2);
-            return;
+            errors.println("PdfClauseAppender: " + exception.getClass().getSimpleName());
+            return 2;
         } catch (Exception exception) {
-            System.err.println("PdfClauseAppender: " + exception.getClass().getSimpleName());
-            System.exit(1);
-            return;
+            errors.println("PdfClauseAppender: " + exception.getClass().getSimpleName());
+            return 1;
         }
         if (!result.pdfaCompliant()) {
-            result.pdfaErrors().stream().limit(5).forEach(System.err::println);
-            System.exit(3);
-            return;
+            result.pdfaErrors().stream().limit(5).forEach(errors::println);
+            return 3;
         }
-        System.exit(0);
+        return 0;
     }
 
     public static Result append(byte[] source, byte[] clausePages, Attachment attachment) throws IOException {
@@ -146,16 +148,31 @@ public final class PdfClauseAppender {
         if (output.length <= source.length || !Arrays.equals(output, 0, source.length, source, 0, source.length)) {
             throw new IOException("The incremental update did not keep the source as its prefix");
         }
-        var check = new PDFAStructureValidator().validate(new InMemoryDocument(output));
+        var errors = pdfaErrors(output);
+        return new Result(output, addedPages, errors.isEmpty(), errors);
+    }
+
+    /**
+     * Why veraPDF does not accept {@code pdf} as PDF/A-3b; empty when it does. The same check
+     * runs on the appended document before it is signed and on the signed output.
+     */
+    public static List<String> pdfaErrors(byte[] pdf) {
+        var check = new PDFAStructureValidator().validate(new InMemoryDocument(pdf));
+        var profileMatches = PDFA_PROFILE.equals(check.getProfileId());
+        if (check.isCompliant() && profileMatches) {
+            return List.of();
+        }
         var errors = new ArrayList<String>();
         if (check.getErrorMessages() != null) {
             errors.addAll(check.getErrorMessages());
         }
-        var profileMatches = PDFA_PROFILE.equals(check.getProfileId());
         if (!profileMatches) {
             errors.add("veraPDF validated the result as " + check.getProfileId() + ", not " + PDFA_PROFILE);
         }
-        return new Result(output, addedPages, check.isCompliant() && profileMatches, List.copyOf(errors));
+        if (errors.isEmpty()) {
+            errors.add("veraPDF did not accept the result as " + PDFA_PROFILE);
+        }
+        return List.copyOf(errors);
     }
 
     /**

@@ -25,7 +25,7 @@ public final class MachineErrorMapper {
             "TOKEN_NOT_PRESENT", "TOKEN_NOT_RECOGNIZED");
     private static final Set<String> INTERNAL_CODES = Set.of(
             "OUTPUT_CLEANUP_FAILED", "OUTPUT_TARGET_EXISTS", "OUTPUT_VALIDATION_FAILED", "OUTPUT_WRITE_FAILED",
-            "SIGNING_FAILED");
+            "PDFA_INVALID", "SIGNING_FAILED");
     private static final Set<String> PIN_CODES = Set.of("PIN_INCORRECT", "PIN_LOCKED", "OPERATION_CANCELLED");
 
     public MachineError map(Throwable exception) {
