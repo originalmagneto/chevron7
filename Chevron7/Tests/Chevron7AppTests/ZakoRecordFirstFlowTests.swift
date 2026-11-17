@@ -247,6 +247,173 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertNil(store.recordFirstPending)
     }
 
+    // MARK: - One PDF (AppSettings.ZakoClientOutput.singlePDF)
+
+    /// The PDF/A check of the appended clause runs before the record is signed, so a result that
+    /// would not be PDF/A-3b costs no signature, no row and no number.
+    func testRecordFirstChecksPdfaBeforeRecord() async throws {
+        try requireXMLLint()
+        let (settingsStore, transport) = makeTestModeSettingsStore()
+        let provider = SinglePDFRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF)
+        let renderer = StubClausePageRenderer()
+        store.clausePageRenderer = renderer
+        let check = CheckRecorder(status: 3, stderr: "6.8-1 embedded file\n")
+        store.pdfClauseCheckRunner = check.runner
+        let directory = makeTemporaryDirectory("record-first-single-pdf-check")
+        store.outputDirectoryOverride = directory
+        let number = seedNumber(store: store, settingsStore: settingsStore)
+        // Should the check be skipped, the wait ends at once instead of after 30 minutes.
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
+        store.recordFirstWaitLimit = 0.05
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.lastError,
+                       PdfClauseCheckRunner.Failure.notCompliant(["6.8-1 embedded file"]).errorDescription)
+        XCTAssertEqual(check.calls, 1)
+        XCTAssertEqual(renderer.renderedXML.count, 1)
+        XCTAssertTrue(provider.requests.isEmpty, "no record is signed")
+        XCTAssertTrue(settingsStore.evidenceStore.records.isEmpty, "no row")
+        XCTAssertNil(store.recordFirstPending)
+        XCTAssertEqual(settingsStore.evidenceNumberPool.reusable(mode: .test, at: Date(), excluding: [])?.number, number)
+        XCTAssertEqual(transport.operations, ["GetOptions"], "nothing but the server time reaches EZZK")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
+    func testRecordFirstSinglePDFRequestShape() async throws {
+        try requireXMLLint()
+        let settingsStore = makeSettingsStore()
+        let provider = SinglePDFRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF)
+        let renderer = StubClausePageRenderer()
+        store.clausePageRenderer = renderer
+        let check = CheckRecorder(status: 0, stderr: "", provider: provider)
+        store.pdfClauseCheckRunner = check.runner
+        let directory = makeTemporaryDirectory("record-first-single-pdf-shape")
+        store.outputDirectoryOverride = directory
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(provider.requests.map(\.signsAsRecordContainer), [true, false], "the record is signed first")
+        XCTAssertEqual(check.requestsBeforeCheck, [0], "the PDF/A check runs before the record is signed")
+        let request = try XCTUnwrap(provider.clientRequests.first)
+        XCTAssertEqual(request.outputFormat, .embeddedPAdES)
+        XCTAssertEqual(request.filename, "Zmluva o dielo.pdf")
+        XCTAssertTrue(request.extraFiles.isEmpty)
+        XCTAssertFalse(request.signsExtraFilesAsDataObjects)
+        let clause = try XCTUnwrap(request.appendedClause)
+        let renderedXML = try XCTUnwrap(renderer.renderedXML.first)
+        XCTAssertEqual(renderer.renderedForms, [.clause_1_3])
+        XCTAssertEqual(clause.pages, StubClausePageRenderer.pages)
+        XCTAssertEqual(clause.attachment, XMLDataContainerBuilder.build(formXML: renderedXML, form: .clause_1_3),
+                       "the pages are rendered from the very clause that is attached")
+        XCTAssertTrue(renderedXML.contains("PDF/A-3"), "the clause names the delivered PDF/A-3")
+        XCTAssertEqual(check.sources, [request.pdfData], "the check ran on the very PDF/A that is signed")
+        XCTAssertEqual(check.attachments, [clause.attachment])
+        XCTAssertNil(try XCTUnwrap(provider.recordRequests.first).appendedClause)
+
+        let row = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
+        XCTAssertEqual(row.status, .processed)
+        XCTAssertEqual(row.formPack?.recordVersion, "1.2")
+        XCTAssertTrue(row.attestationXML.contains(#"<ItemCode>3</ItemCode><ItemName Language="sk">PDF/A-3</ItemName>"#),
+                      "record 1.2 names the delivered PDF/A-3")
+        XCTAssertEqual(row.clientOutput, .singlePDF)
+        XCTAssertEqual(row.revisionOneLength, request.pdfData.count)
+        XCTAssertEqual(row.pdfFileName, "Zmluva o dielo.pdf")
+        XCTAssertEqual(row.deliveredFileName, "Zmluva o dielo.pdf")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["Zmluva o dielo.pdf"])
+        XCTAssertNil(store.recordFirstPending)
+    }
+
+    /// "Dokončiť konverziu" finishes with the output chosen when the conversion started, the
+    /// clause rendered then and the name the record carries.
+    func testResumeSignsStoredClauseAndKeepsRecordedName() async throws {
+        try requireXMLLint()
+        let (settingsStore, _) = makeTestModeSettingsStore()
+        let provider = SinglePDFRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF)
+        let renderer = StubClausePageRenderer()
+        store.clausePageRenderer = renderer
+        let check = CheckRecorder(status: 0, stderr: "")
+        store.pdfClauseCheckRunner = check.runner
+        let directory = makeTemporaryDirectory("record-first-single-pdf-resume")
+        store.outputDirectoryOverride = directory
+        seedNumber(store: store, settingsStore: settingsStore)
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
+        store.recordFirstWaitLimit = 0.05
+
+        await store.authorizeAndSign()
+
+        XCTAssertNotEqual(store.step, .done)
+        let pending = try XCTUnwrap(store.recordFirstPending, store.lastError ?? "")
+        XCTAssertEqual(pending.clientOutput, .singlePDF)
+        let storedClause = try XCTUnwrap(pending.appendedClause)
+        let fixedTarget = try XCTUnwrap(pending.fixedTarget)
+        XCTAssertEqual(fixedTarget, directory.appendingPathComponent("Zmluva o dielo.pdf"))
+        XCTAssertTrue(provider.clientRequests.isEmpty)
+        let recordRequest = try XCTUnwrap(provider.recordRequests.first)
+        XCTAssertEqual(recordRequest.timestampServers, TimestampAuthority.zakoQualifiedURLs.map(\.absoluteString),
+                       "the record keeps the XAdES order")
+
+        // Meanwhile the setting changes and a file takes the fixed name; EZZK processes the record.
+        settingsStore.settings.zakoClientOutput = .asicContainer
+        try Data("earlier".utf8).write(to: fixedTarget)
+        var row = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
+        row.status = .processed
+        row.updatedAt = Date()
+        settingsStore.evidenceStore.upsert(row)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(provider.recordRequests.count, 1, "the record is never signed twice")
+        XCTAssertEqual(renderer.renderedXML.count, 1, "the clause pages are not rendered again")
+        XCTAssertEqual(check.calls, 1)
+        let request = try XCTUnwrap(provider.clientRequests.first)
+        XCTAssertEqual(provider.clientRequests.count, 1)
+        XCTAssertEqual(request.outputFormat, .embeddedPAdES)
+        XCTAssertEqual(request.appendedClause, storedClause)
+        XCTAssertTrue(request.extraFiles.isEmpty)
+        XCTAssertTrue(request.includeTimestamp, "outside Demo the one PDF is always Baseline T")
+        XCTAssertEqual(request.timestampServers, TimestampAuthority.zakoPAdESQualifiedURLs.map(\.absoluteString))
+        XCTAssertEqual(request.tsaURL, TimestampAuthority.zakoPAdESQualifiedURLs.first?.absoluteString)
+        XCTAssertEqual(try Data(contentsOf: fixedTarget), Data("earlier".utf8), "an existing file is never replaced")
+        let outputs = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+        XCTAssertEqual(outputs, ["Zmluva o dielo.pdf", "Zmluva o dielo (2).pdf"])
+        let finished = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
+        XCTAssertEqual(finished.pdfFileName, "Zmluva o dielo.pdf", "the name the record carries")
+        XCTAssertEqual(finished.deliveredFileName, "Zmluva o dielo (2).pdf")
+        XCTAssertEqual(finished.clientOutput, .singlePDF)
+        XCTAssertEqual(finished.revisionOneLength, request.pdfData.count)
+        XCTAssertNil(store.recordFirstPending)
+    }
+
+    func testRecordFirstSignedResultThatChangedThePDFAKeepsThePendingConversion() async throws {
+        try requireXMLLint()
+        let settingsStore = makeSettingsStore()
+        let provider = SinglePDFRecordingProvider()
+        provider.changesPrefix = true
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore, output: .singlePDF)
+        store.clausePageRenderer = StubClausePageRenderer()
+        store.pdfClauseCheckRunner = CheckRecorder(status: 0, stderr: "").runner
+        let directory = makeTemporaryDirectory("record-first-single-pdf-prefix")
+        store.outputDirectoryOverride = directory
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.lastError,
+                       SigningError.signingFailed(ZakoSessionStore.recordFirstSinglePDFPrefixChangedMessage).errorDescription)
+        XCTAssertNotEqual(store.step, .done)
+        XCTAssertEqual(store.recordFirstPending?.stage, .signingClientContainer, "the conversion can be finished later")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
     // MARK: - Fixtures
 
     private static let optionsReply = #"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing">"#
@@ -258,11 +425,34 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         }
     }
 
-    private func makeReadyStore(settingsStore: AppSettingsStore, preview: Bool = true) throws -> ZakoSessionStore {
+    /// Testovacia evidencia: the server time comes from the script; sending the record finds no
+    /// credentials, so the record stays signed and the conversion waits.
+    private func makeTestModeSettingsStore() -> (AppSettingsStore, ScriptedTransport) {
+        let transport = ScriptedTransport([Self.optionsReply])
+        let controller = EZZKAccountController(mode: .test, credentialStore: MemoryCredentialStore(),
+                                               transportFactory: { _ in transport }, productionPolicy: .refused)
+        return (makeSettingsStore(ezzkAccountController: controller), transport)
+    }
+
+    /// A number this app allocated earlier in Testovacia evidencia, kept in the pool.
+    @discardableResult
+    private func seedNumber(store: ZakoSessionStore, settingsStore: AppSettingsStore) -> String {
+        let number = "1563-261117-8"
+        let allocatedAt = Date()
+        settingsStore.evidenceNumberPool.add(.init(number: number, mode: .test, allocatedAt: allocatedAt))
+        store.attestation.evidenceNumber = number
+        store.attestation.evidenceNumberAllocatedAt = allocatedAt
+        store.attestation.evidenceNumberMode = .test
+        return number
+    }
+
+    private func makeReadyStore(settingsStore: AppSettingsStore, preview: Bool = true,
+                                output: AppSettings.ZakoClientOutput? = nil) throws -> ZakoSessionStore {
         let original = settingsStore.settings
         addTeardownBlock { await MainActor.run { settingsStore.settings = original } }
         settingsStore.settings.learnFromReviews = false
         settingsStore.settings.zakoRecordFirstPreview = preview
+        if let output { settingsStore.settings.zakoClientOutput = output }
         let a4 = CGSize(width: 595, height: 842)
         let data = TestPDFBuilderApp.build(pages: [
             (a4, { ctx, size in TestPDFBuilderApp.text("Zmluva o dielo", at: CGPoint(x: 60, y: size.height - 90), size: 16)(ctx, size) }),
@@ -325,5 +515,44 @@ private final class OrderRecordingProvider: QualifiedSigningProviding, @unchecke
         var local = request
         local.includeTimestamp = false
         return try await demo.sign(local)
+    }
+}
+
+/// Stands in for the engine's PDF/A check of the appended clause: answers with a fixed exit
+/// status and remembers what it was asked to check.
+private final class CheckRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var checkedSources: [Data] = []
+    private var checkedAttachments: [Data] = []
+    private var signedBefore: [Int] = []
+    private let status: Int32
+    private let stderr: String
+    private let provider: SinglePDFRecordingProvider?
+
+    init(status: Int32, stderr: String, provider: SinglePDFRecordingProvider? = nil) {
+        self.status = status
+        self.stderr = stderr
+        self.provider = provider
+    }
+
+    var calls: Int { lock.withLock { checkedSources.count } }
+    var sources: [Data] { lock.withLock { checkedSources } }
+    var attachments: [Data] { lock.withLock { checkedAttachments } }
+    /// How many signing requests the provider had received when each check ran.
+    var requestsBeforeCheck: [Int] { lock.withLock { signedBefore } }
+
+    var runner: PdfClauseCheckRunner {
+        PdfClauseCheckRunner(launch: { [self] arguments in
+            // PdfClauseAppender <source> <pages> <attachment> <name> <mime>
+            let source = (try? Data(contentsOf: URL(fileURLWithPath: arguments[1]))) ?? Data()
+            let attachment = (try? Data(contentsOf: URL(fileURLWithPath: arguments[3]))) ?? Data()
+            let before = provider?.requests.count ?? 0
+            lock.withLock {
+                checkedSources.append(source)
+                checkedAttachments.append(attachment)
+                signedBefore.append(before)
+            }
+            return (status, stderr)
+        })
     }
 }

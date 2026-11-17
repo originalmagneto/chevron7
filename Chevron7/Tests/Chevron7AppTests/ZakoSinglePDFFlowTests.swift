@@ -318,53 +318,6 @@ final class ZakoSinglePDFFlowTests: XCTestCase {
     }
 }
 
-/// Stands in for the WebKit renderer and remembers the clause XML it was given.
-@MainActor
-private final class StubClausePageRenderer: ClausePageRendering, @unchecked Sendable {
-    static let pages = Data("%PDF-1.7 clause pages".utf8)
-    private(set) var renderedXML: [String] = []
-    private(set) var renderedForms: [OfficialForm] = []
-
-    func render(clauseXML: Data, form: OfficialForm) async throws -> Data {
-        renderedXML.append(String(decoding: clauseXML, as: UTF8.self))
-        renderedForms.append(form)
-        return Self.pages
-    }
-}
-
-/// Plays the engine for the one-PDF request (the source plus a fake revision) and signs the
-/// record and any container with the Demo provider. Records every request.
-private final class SinglePDFRecordingProvider: QualifiedSigningProviding, @unchecked Sendable {
-    private let lock = NSLock()
-    private var received: [SigningRequest] = []
-    private let demo = DemoSigningProvider()
-    nonisolated(unsafe) var refusesClient = false
-    nonisolated(unsafe) var changesPrefix = false
-
-    var supportsAppendedClause: Bool { true }
-    var clientRequests: [SigningRequest] { lock.withLock { received.filter { !$0.signsAsRecordContainer } } }
-    var recordRequests: [SigningRequest] { lock.withLock { received.filter(\.signsAsRecordContainer) } }
-
-    func availableIdentities() async -> [SigningIdentityInfo] { [] }
-
-    func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
-        lock.withLock { received.append(request) }
-        if !request.signsAsRecordContainer, refusesClient {
-            throw SigningError.signingFailed("Karta bola vybratá počas podpisu.")
-        }
-        if !request.signsAsRecordContainer, request.appendedClause != nil {
-            var source = request.pdfData
-            if changesPrefix { source[source.startIndex + 10] ^= 0xFF }
-            return SignedConversionResult(pdfData: source + Data("\n% clause and signature\n%%EOF\n".utf8),
-                                          asicData: nil, signedAt: Date(),
-                                          signatureLabel: "Test", isLegallyBinding: false)
-        }
-        var local = request
-        local.includeTimestamp = false
-        return try await demo.sign(local)
-    }
-}
-
 /// A provider without the engine's one-PDF support (as the Demo signer).
 private final class ContainerOnlyProvider: QualifiedSigningProviding, @unchecked Sendable {
     private let demo = DemoSigningProvider()

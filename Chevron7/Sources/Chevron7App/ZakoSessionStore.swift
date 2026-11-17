@@ -165,6 +165,14 @@ final class ZakoSessionStore {
     static let singlePDFPrefixChangedMessage =
         "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka. Nič sa neuložilo ani neodoslalo; skúste autorizáciu znova."
 
+    /// One PDF: the signed file must begin with exactly the fingerprinted PDF/A (revision 1) and
+    /// carry the clause and the signature after it, with no container beside it.
+    static func singlePDFKeepsSource(_ signed: SignedConversionResult, source: Data) -> Bool {
+        signed.asicData == nil
+            && signed.pdfData.count > source.count
+            && signed.pdfData.prefix(source.count) == source
+    }
+
     /// Writes `data` at `preferred`, or under `ConversionOutputNaming.uniqueURL` of that name when
     /// a file holds it, and never replaces an existing file: the bytes go to a temporary file in
     /// the same folder first, which is then moved, and a move never overwrites.
@@ -312,6 +320,9 @@ final class ZakoSessionStore {
     @ObservationIgnored var middlewareInput: any MiddlewareInputHandoff = EIDKeyboardHandoff.shared
     /// Renders the clause's readable pages for the one-PDF output; tests stub it.
     @ObservationIgnored var clausePageRenderer: any ClausePageRendering = ClausePresentationRenderer()
+    /// The 2027 order checks the appended clause for PDF/A-3b before the record is signed;
+    /// tests replace the engine.
+    @ObservationIgnored var pdfClauseCheckRunner = PdfClauseCheckRunner()
     var sourceAccessIsActive = false
     var outputDirectoryOverride: URL?
     var sourceNameOverride: String?
@@ -1515,8 +1526,7 @@ final class ZakoSessionStore {
                 lastError = Self.recordFirstMobileMessage
                 return
             }
-            // The order of 1. 1. 2027 still delivers the container.
-            let deliversSinglePDF = output == .singlePDF && regime.regime == .clauseFirst
+            let deliversSinglePDF = output == .singlePDF
             serverTimeUsed = conversionTime
             attestation.conversionExecutionDateTime = conversionTime
             selectedFormPack = try formPackRepository.pack(
@@ -1605,6 +1615,16 @@ final class ZakoSessionStore {
                     renderer: clausePageRenderer)
             } else {
                 appendedClause = nil
+            }
+            // Under the order of 1. 1. 2027 the client PDF is signed only after EZZK processed the
+            // record, which spends the number, so the engine's PDF/A-3b check of the appended clause
+            // runs now, before the record is signed: a failure leaves no row and an unused number.
+            if regime.regime == .recordFirst, let appendedClause {
+                analysisProgressText = "Kontrolujem PDF/A s doložkou…"
+                let runner = pdfClauseCheckRunner
+                try await Task.detached(priority: .userInitiated) {
+                    try runner.check(source: finalPDF, clause: appendedClause)
+                }.value
             }
 
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"
@@ -1699,7 +1719,12 @@ final class ZakoSessionStore {
                     stampsSignatures: stampsSignatures,
                     timestampServers: timestampServers,
                     tsaURL: tsaURL,
-                    attestation: attestation)
+                    attestation: attestation,
+                    clientOutput: deliversSinglePDF ? .singlePDF : .asicContainer,
+                    appendedClause: appendedClause,
+                    fixedTarget: singlePDFTarget,
+                    clientTimestampServers: clientTimestampServers,
+                    clientTSAURL: clientTSAURL)
                 try await startRecordFirst(pending, recordDelivery: recordDelivery,
                                            formPack: selectedFormPack, identityID: identityID,
                                            securityReview: securityReviewSnapshot,
@@ -1764,9 +1789,7 @@ final class ZakoSessionStore {
             if deliversSinglePDF {
                 // The clause fingerprints the PDF/A, so the signed file must begin with exactly
                 // those bytes (revision 1) and carry the clause and signature after them.
-                guard signed.asicData == nil,
-                      signed.pdfData.count > finalPDF.count,
-                      signed.pdfData.prefix(finalPDF.count) == finalPDF else {
+                guard Self.singlePDFKeepsSource(signed, source: finalPDF) else {
                     throw SigningError.signingFailed(Self.singlePDFPrefixChangedMessage)
                 }
             }
