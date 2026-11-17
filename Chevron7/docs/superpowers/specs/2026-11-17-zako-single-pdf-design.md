@@ -18,7 +18,9 @@ Verbatim where it decides something.
 - **§ 5 ods. 2** (and § 6 ods. 2): QES with the mandate certificate or a qualified seal, with a qualified timestamp covering the signature object; certificate data must match the clause. A PAdES Baseline T signature with the mandate certificate meets this.
 - **§ 5 ods. 3**: insertion "do podpisového kontajnera" per vyhláška 78/2020. For the clause inside the document, § 37 ods. 4 and the later, specific § 2 ods. 3 govern; the PAdES PDF is the signed document itself.
 - **Annex 6 písm. b)** (E→E record) and **annex 4 písm. c)** (P→E record): when the clause is a separate part of the new document, the new document is described only "v rozsahu podľa prílohy č. 2 písm. a) prvého bodu", i.e. name, kind and format, with no fingerprint. The clause annexes (1, 3, 5) do not ask for the new document's fingerprint either. The official forms (clause 1.3, record 1.0, record E→E 1.0, record 1.2) predate this and still require `ElectronicFingerprintValue`; see 5.2.
-- **§ 46 ods. 2 písm. h) vyhlášky 78/2020** accepts signed documents "ak neobsahujú vnorené súbory". § 2 ods. 3 vyhlášky 70/2021 requires exactly such an attachment for this case; whether ORSR's intake follows the special rule is unknown (section 9, precondition in 5.8).
+- **§ 46 ods. 2 vyhlášky 78/2020** (read on Slov-Lex 2026-11-17): písm. h) accepts signed documents "ak neobsahujú vnorené súbory", but písm. k) makes this very case a standard of its own: "formátu elektronických dokumentov podľa písmena c) zahrnutých vo formáte elektronických dokumentov podľa písmena a) prvého bodu vo formáte prílohy typu EmbeddedFile, ak sú vytvorené v rámci zaručenej konverzie ... a vyžaduje sa automatizované spracovanie údajov vyplnených podľa elektronického formulára". Písm. c) is the "kontajner XML údajov" (XDC) and písm. a) bod 1 the directly signed PDF/A-1, A-2 or A-3. So a PAdES-signed PDF/A carrying the clause XDC as an EmbeddedFile is itself a reception standard every public authority must accept; there is no conflict with písm. h). Whether ORSR's intake does so in practice is still unverified (precondition in 5.8).
+- **Annex 4 písm. c)** (P→E record, read verbatim from the Slov-Lex text): "novovzniknutom elektronickom dokumente v rozsahu podľa prílohy č. 2 písm. a); ak je osvedčovacia doložka vyhotovená ako samostatná časť novovzniknutého elektronického dokumentu, údaje o novovzniknutom elektronickom dokumente sa uvádzajú v rozsahu podľa prílohy č. 2 písm. a) prvého bodu".
+- **Draft decree LP/2026/337** (replaces 70/2021 on 1. 1. 2027; `02_vlastný_ materiál.docx` read 2026-11-17): its § 2 keeps the same rule for § 37 ods. 3 and adds "a obsah osvedčovacej doložky musí byť vizualizovaný spolu s novovzniknutým dokumentom". The readable clause pages of this design become mandatory then; the draft's record annexes keep the "prvého bodu" rule (no new-document fingerprint).
 
 ## 3. Goals, non-goals, anti-goals
 
@@ -78,7 +80,7 @@ revision 3   PAdES Baseline T signature (DSS), invisible, covering revisions 1 a
 - **Fingerprint.** The forms still require `ElectronicFingerprintValue` for the new document; it is the SHA-256 of revision 1. These are exactly the bytes hashed today (`finalPDF` after `normalizeForDelivery` in P→E, `newDocument` in E→E), so the models, renderers, `RecordFirstPending` and the 2027 record are unchanged. A reader verifies it by cutting the file at revision 1's length, which the Register row stores (`revisionOneLength`). Annexes 4 and 6 do not even ask for this value when the clause is inside the document, so filling it with the content's hash is the most faithful use of a field the form makes mandatory.
 - **Format.** `NewDocumentFormat` names the delivered file: PDF/A-3 has no item in codelist 53, so the clause uses `Iny` with `NewDocumentFormatOther` "PDF/A-3" (as the E→E design already does for a kept PDF/A-3) and the records the string "PDF/A-3"; record 1.2 (2027 P→E) uses its codelist's PDF/A-3 item if it has one, else its "other" route (builder checks the codelist).
 - **Separation "bez akýchkoľvek pochybností":** the clause is its own revision, its own attachment, its own pages after all content pages under the form's title, and the outline names it.
-- **Name:** the delivered file's final name (after `uniqueURL` in the output folder) is fixed **before** the clause XML is built, and that name is `NewDocumentName`, so clause, record and file always agree.
+- **Name:** the delivered file's final name is fixed **before** the clause XML is built, and that name is `NewDocumentName`, so clause, record and file always agree. The default name for a `.pdf` source would equal the source in the same folder, so when `containerDocumentName` is taken the name becomes `<stem>-konvertovane.pdf` (the existing naming precedent), and only if that is taken too `uniqueURL` adds " (2)".
 
 ### 5.3 Rendering the clause pages (app side)
 
@@ -147,8 +149,8 @@ Before the production gate opens, the owner gets from the advocate (or a test fi
 
 ## 9. Risks
 
-- **ORSR and attachments:** § 46 ods. 2 písm. h) vyhlášky 78/2020 versus § 2 ods. 3 vyhlášky 70/2021; ORSR's intake is unverified (5.8).
+- **ORSR in practice:** the format is a reception standard (§ 46 ods. 2 písm. k) vyhlášky 78/2020), but ORSR's intake is unverified (5.8).
 - **Fingerprint over revision 1:** a reader hashing the whole file gets another value; the annexes do not ask for it in this case, the forms do. Goes to MIRRI with the pending 2027 questions.
 - **Clause 1.3 (P→E) and record 1.0 wording** of `NewDocumentName` ("uložený v podpisovom kontajneri spolu s osvedčovacou doložkou") assumes a container. Same MIRRI question.
-- **2027 decree:** LP/2026/337 replaces 70/2021 on 1. 1. 2027; whether it keeps § 2 ods. 3 is unchecked (its text was not found on 2026-11-17). Check before the 2027 order ships with this output.
+- **2027 decree:** LP/2026/337 is still a draft; its text of 2026-11-17 keeps the rule and requires visualization (section 2). Re-read the published decree before the 2027 order ships with this output.
 - **WebKit output and PDF/A-3b** is unproven until the spike.

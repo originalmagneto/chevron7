@@ -162,7 +162,8 @@ Execution order: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11. Task 1's fixtures feed Task 
   }
   struct ZakoSinglePDFDelivery {
       static let mobileRefusal = "Jeden PDF s doložkou autorizujte kartou s mandátnym certifikátom."
-      /// Final file name in `directory` for `containerDocumentName`, unique, fixed before the clause.
+      /// Final file name in `directory`, fixed before the clause: `containerDocumentName` when free,
+      /// else `<stem>-konvertovane.pdf`, else `uniqueURL` of that.
       static func fixedTarget(in directory: URL, containerDocumentName: String) -> URL
       /// Renders the pages from `clauseXML` and pairs them with the XDC.
       @MainActor static func appendedClause(clauseXML: Data, clauseXDCF: Data, clauseFileName: String,
@@ -172,7 +173,7 @@ Execution order: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11. Task 1's fixtures feed Task 
   ```
   `refusal` returns the production message for `.production` while `SinglePDFProductionPolicy.enabled` is false, `mobileRefusal` for the phone, and "Jeden PDF s doložkou vyžaduje podpisový engine Chevron7." when `!provider.supportsAppendedClause`.
 
-- [ ] **Step 1: Write failing tests**: `fixedTargetAvoidsExistingFile` (existing `Zmluva.pdf` → `Zmluva (2).pdf`), `refusesProductionWhilePolicyOff`, `refusesPhone`, `refusesProviderWithoutAppend`, `allowsDemoAndTest`, `appendedClauseCarriesXdcBytesAndName` (renderer stub; `attachment == clauseXDCF`, `attachmentName == clauseFileName`, `attachmentMimeType == AppendedClause.xdcMimeType`).
+- [ ] **Step 1: Write failing tests**: `fixedTargetKeepsFreeName` (empty folder → `Zmluva.pdf`), `fixedTargetAvoidsSourceName` (existing `Zmluva.pdf` → `Zmluva-konvertovane.pdf`), `fixedTargetFallsBackToUnique` (both exist → `Zmluva-konvertovane (2).pdf`), `refusesProductionWhilePolicyOff`, `refusesPhone`, `refusesProviderWithoutAppend`, `allowsDemoAndTest`, `appendedClauseCarriesXdcBytesAndName` (renderer stub; `attachment == clauseXDCF`, `attachmentName == clauseFileName`, `attachmentMimeType == AppendedClause.xdcMimeType`).
 - [ ] **Step 2: Run** `swift test --filter ZakoSinglePDFDeliveryTests`; expected FAIL.
 - [ ] **Step 3: Implement.** `ClausePresentationRenderer` is injected (protocol `ClausePageRendering` with the Task 1 signature, so tests stub it; `ZakoSessionStore` holds one, default the real renderer).
 - [ ] **Step 4: Run**; expected PASS.
@@ -236,10 +237,10 @@ Execution order: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11. Task 1's fixtures feed Task 
 
 **Files:**
 - Modify: `CLAUDE.md` and `AGENTS.md` (identical): a ZaKo bullet for the one-PDF output (choice, structure, `appendClause`, `PdfClauseAppender`, `SinglePDFProductionPolicy`, spec link)
-- Create: `docs/releases/changes/feat-zaruka-jeden-pdf.md` (one Slovak paragraph for the advocate: what the option does and that ORSR is the reason; no signing or notarization talk)
+- Create: `docs/releases/changes/feat-zaruka-jeden-pdf.md` (one Slovak paragraph for the advocate: the option exists in Skúšobný režim and Testovacia evidencia, Ostrá evidencia follows after verification; ORSR is the reason; no signing or notarization talk). The paragraph that announces it for Ostrá evidencia belongs to the later commit that sets `SinglePDFProductionPolicy.enabled`.
 - Modify: `Chevron7/docs/ZAKO-SINGLE-PDF-FINDINGS-2026-11-17.md`
 
-- [ ] **Step 1: Full test runs**: `swift test` (all) from `Chevron7/`, engine `./mvnw ... test` (all). Expected: all green; any pre-existing failure noted with its name.
+- [ ] **Step 1: Full test runs**: `swift test` (all) from `Chevron7/`, engine `./mvnw ... test` (all), and `Chevron7/scripts/check-rename-boundary.sh --strict` (new engine files must not carry the Chevron7 name). Expected: all green; any pre-existing failure noted with its name.
 - [ ] **Step 2: Demo run** in the built app: P→E and E→E with `.singlePDF`; open the delivered PDF in Preview (clause pages, outline, attachment present) and check the Done screen's signature banner validates it; record the results in the findings note.
 - [ ] **Step 3: Testovacia evidencia run** with a card (owner's Mac): one P→E and one E→E `.singlePDF` conversion accepted and processed by EZZK; upload one delivered PDF to the slovensko.sk validator and record whether the BOSA timestamp shows. Record in the findings note. This step needs the owner; leave it unchecked if not done and say so.
 - [ ] **Step 4: Commit** `docs(zako): one-PDF output` and open the PR. `SinglePDFProductionPolicy.enabled` stays false in this PR; flipping it for P→E is a separate commit after Step 3 and the ORSR answer (spec 5.8).
