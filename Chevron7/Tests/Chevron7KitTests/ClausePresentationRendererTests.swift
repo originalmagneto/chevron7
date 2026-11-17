@@ -105,14 +105,43 @@ final class ClausePresentationRendererTests: XCTestCase {
     @MainActor
     func testHungLoadFailsAfterTheTimeout() async throws {
         let stages = ClausePrintStages(load: { _, _ in }, print: ClausePrintStages.webKit.print)
-        try await assertTimesOut(ClausePresentationRenderer(timeout: .milliseconds(300), stages: stages))
+        try await assertTimesOut(ClausePresentationRenderer(loadTimeout: .milliseconds(300), stages: stages))
     }
 
     @MainActor
     func testHungPrintFailsAfterTheTimeout() async throws {
-        // The print operation never calls back, as when the web content process dies mid-print.
+        // The real load keeps the default 60 s, so only the print stage can time out; the print
+        // operation never calls back, as when the web content process dies mid-print.
         let stages = ClausePrintStages(load: ClausePrintStages.webKit.load, print: { _, _, _ in })
-        try await assertTimesOut(ClausePresentationRenderer(timeout: .seconds(2), stages: stages))
+        try await assertTimesOut(ClausePresentationRenderer(printTimeout: .milliseconds(500), stages: stages))
+    }
+
+    @MainActor
+    func testLateCallbackAfterTimeoutFindsItsPrintAliveAndReleasesIt() async throws {
+        final class Captured: @unchecked Sendable {
+            weak var completion: PrintCompletion?
+            weak var window: NSWindow?
+        }
+        let captured = Captured()
+        let stages = ClausePrintStages(load: ClausePrintStages.webKit.load, print: { _, window, completion in
+            captured.completion = completion
+            captured.window = window
+        })
+        try await assertTimesOut(ClausePresentationRenderer(printTimeout: .milliseconds(300), stages: stages))
+
+        // The render gave up, yet everything the print thread may still touch is alive.
+        let completion = try XCTUnwrap(captured.completion)
+        XCTAssertNotNil(captured.window)
+        XCTAssertTrue(completion.holdsPrint)
+
+        // A late callback is safe and releases the print once the main queue tears the window down.
+        completion.printOperationDidRun(NSPrintOperation(view: NSView()), success: true, contextInfo: nil)
+        XCTAssertFalse(completion.holdsPrint)
+        await Task.yield()
+        let drained = expectation(description: "main queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 5)
+        XCTAssertNil(captured.window)
     }
 
     func testFileErrorsBecomeTransformFailures() throws {

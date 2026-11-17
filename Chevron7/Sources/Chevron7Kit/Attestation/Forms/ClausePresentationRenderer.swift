@@ -39,16 +39,21 @@ public struct ClausePresentationRenderer: Sendable {
     static let defaultTimeout: Duration = .seconds(60)
 
     private let xsltproc: URL
-    private let timeout: Duration
+    private let loadTimeout: Duration
+    private let printTimeout: Duration
     private let stages: ClausePrintStages
 
     public init(xsltproc: URL = URL(fileURLWithPath: "/usr/bin/xsltproc")) {
-        self.init(xsltproc: xsltproc, timeout: Self.defaultTimeout, stages: .webKit)
+        self.init(xsltproc: xsltproc, loadTimeout: Self.defaultTimeout, printTimeout: Self.defaultTimeout,
+                  stages: .webKit)
     }
 
-    init(xsltproc: URL = URL(fileURLWithPath: "/usr/bin/xsltproc"), timeout: Duration, stages: ClausePrintStages) {
+    init(xsltproc: URL = URL(fileURLWithPath: "/usr/bin/xsltproc"),
+         loadTimeout: Duration = Self.defaultTimeout, printTimeout: Duration = Self.defaultTimeout,
+         stages: ClausePrintStages = .webKit) {
         self.xsltproc = xsltproc
-        self.timeout = timeout
+        self.loadTimeout = loadTimeout
+        self.printTimeout = printTimeout
         self.stages = stages
     }
 
@@ -68,7 +73,7 @@ public struct ClausePresentationRenderer: Sendable {
         }.value
         let output = work.appendingPathComponent("clause.pdf")
         do {
-            try await ClausePagePrinter(timeout: timeout, stages: stages)
+            try await ClausePagePrinter(loadTimeout: loadTimeout, printTimeout: printTimeout, stages: stages)
                 .print(html: Self.injectingPrintStyle(into: html), to: output,
                        ruleStore: work.appendingPathComponent("rules", isDirectory: true))
         } catch {
@@ -87,22 +92,27 @@ public struct ClausePresentationRenderer: Sendable {
         let xslt = directory.appendingPathComponent("form.xslt")
         let html = directory.appendingPathComponent("clause.html")
         let log = directory.appendingPathComponent("xsltproc.log")
-        let process = Process()
         let logHandle: FileHandle
         do {
             try clauseXML.write(to: xml)
             try stylesheet.write(to: xslt)
             FileManager.default.createFile(atPath: log.path, contents: nil)
             logHandle = try FileHandle(forWritingTo: log)
-            process.executableURL = xsltproc
-            process.arguments = ["--nonet", "-o", html.path, xslt.path, xml.path]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = logHandle
-            try process.run()
         } catch {
             throw ClausePresentationError.transformFailed(error.localizedDescription)
         }
         defer { try? logHandle.close() }
+
+        let process = Process()
+        process.executableURL = xsltproc
+        process.arguments = ["--nonet", "-o", html.path, xslt.path, xml.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = logHandle
+        do {
+            try process.run()
+        } catch {
+            throw ClausePresentationError.transformFailed(error.localizedDescription)
+        }
         process.waitUntilExit()
         let message = (try? String(contentsOf: log, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -141,12 +151,14 @@ struct ClausePrintStages: Sendable {
 /// Loads the HTML into an offscreen `WKWebView` that can reach no URL and prints it to a PDF file.
 @MainActor
 private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
-    private let timeout: Duration
+    private let loadTimeout: Duration
+    private let printTimeout: Duration
     private let stages: ClausePrintStages
     private var loaded: OneShot<Void>?
 
-    init(timeout: Duration, stages: ClausePrintStages) {
-        self.timeout = timeout
+    init(loadTimeout: Duration, printTimeout: Duration, stages: ClausePrintStages) {
+        self.loadTimeout = loadTimeout
+        self.printTimeout = printTimeout
         self.stages = stages
     }
 
@@ -169,16 +181,15 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
         window.isReleasedWhenClosed = false
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
         window.contentView = webView
-        defer {
-            webView.navigationDelegate = nil
-            window.contentView = nil
-            window.close()
-        }
+        let held = HeldPrint(webView: webView, window: window)
+        // Until the print starts the printer owns the window; from then on the print callback does.
+        var handedOver = false
+        defer { if !handedOver { held.tearDown() } }
 
         let load = OneShot<Void>()
         loaded = load
         stages.load(webView, html)
-        try await load.value(within: timeout)
+        try await load.value(within: loadTimeout)
 
         let info = NSPrintInfo(dictionary: [
             .jobDisposition: NSPrintInfo.JobDisposition.save,
@@ -200,8 +211,10 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
         operation.showsProgressPanel = false
         operation.view?.frame = webView.bounds
         let completion = PrintCompletion()
+        completion.hold(held, operation: operation)
+        handedOver = true
         stages.print(operation, window, completion)
-        guard try await completion.result.value(within: timeout) else {
+        guard try await completion.result.value(within: printTimeout) else {
             throw ClausePresentationError.printFailed
         }
     }
@@ -231,15 +244,61 @@ private final class ClausePagePrinter: NSObject, WKNavigationDelegate {
     }
 }
 
+/// The offscreen window and web view of one render.
+struct HeldPrint: @unchecked Sendable {
+    let webView: WKWebView
+    let window: NSWindow
+
+    @MainActor
+    func tearDown() {
+        webView.navigationDelegate = nil
+        window.contentView = nil
+        window.close()
+    }
+}
+
 /// Receives `runModal(for:delegate:didRun:contextInfo:)`'s callback, which AppKit sends from the
-/// print operation's own thread when no panel is shown.
-final class PrintCompletion: NSObject, Sendable {
+/// print operation's own thread when no panel is shown. AppKit does not retain the delegate, and a
+/// render that timed out has already returned, so the completion keeps itself, the operation, the
+/// web view and the window alive until the callback arrives and only then closes the window.
+final class PrintCompletion: NSObject, @unchecked Sendable {
     let result = OneShot<Bool>()
+    private let lock = NSLock()
+    private var held: HeldPrint?
+    private var operation: NSPrintOperation?
+    private var keepAlive: PrintCompletion?
+
+    func hold(_ print: HeldPrint, operation: NSPrintOperation) {
+        lock.withLock {
+            held = print
+            self.operation = operation
+            keepAlive = self
+        }
+    }
+
+    /// Whether a print (its operation, web view and window) is still waiting for its callback.
+    var holdsPrint: Bool { lock.withLock { held != nil && operation != nil && keepAlive != nil } }
 
     @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool,
                                     contextInfo: UnsafeMutableRawPointer?) {
         result.resume(with: .success(success))
+        let released = lock.withLock { () -> (HeldPrint?, NSPrintOperation?, PrintCompletion?) in
+            defer { held = nil; self.operation = nil; keepAlive = nil }
+            return (held, self.operation, keepAlive)
+        }
+        guard let print = released.0 else { return }
+        let rest = UncheckedSendable((released.1, released.2))
+        // The callback runs on the print thread; the window belongs to the main thread.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { print.tearDown() }
+            _ = rest
+        }
     }
+}
+
+private struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
 }
 
 /// A value delivered at most once, from any thread, before or after someone waits for it; later
