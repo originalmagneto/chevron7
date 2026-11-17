@@ -1635,9 +1635,15 @@ final class ZakoSessionStore {
             if regime.regime == .recordFirst, let appendedClause {
                 analysisProgressText = "Kontrolujem PDF/A s doložkou…"
                 let runner = pdfClauseCheckRunner
-                try await Task.detached(priority: .userInitiated) {
-                    try runner.check(source: finalPDF, clause: appendedClause)
-                }.value
+                do {
+                    try await Task.detached(priority: .userInitiated) {
+                        try runner.check(source: finalPDF, clause: appendedClause)
+                    }.value
+                } catch PdfClauseCheckRunner.Failure.notCompliant(let lines) {
+                    // The advocate sees the Slovak summary; veraPDF's rules go to the system log.
+                    Self.logPDFACheckFailure(lines)
+                    throw PdfClauseCheckRunner.Failure.notCompliant(lines)
+                }
             }
 
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"

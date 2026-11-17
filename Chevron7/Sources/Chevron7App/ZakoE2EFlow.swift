@@ -484,6 +484,17 @@ extension ZakoSessionStore {
     static let rasterOfferMessage = "Prevod do PDF/A nevytvoril platné PDF/A (zvyčajne pre písma, ktoré dokument nevkladá). Môžete použiť rastrový PDF/A: strany sa uložia ako obrázky a text sa nebude dať označiť."
     static let e2eLogger = Logger(subsystem: "app.slovensko.chevron7", category: "ZaKo")
 
+    /// veraPDF's rules behind a refused PDF/A-3b check of the appended clause, paths removed,
+    /// under the ZaKo category (`log show --predicate 'category == "ZaKo"'`). Returns what it logged.
+    @discardableResult
+    static func logPDFACheckFailure(_ lines: [String]) -> [String] {
+        let loggable = EngineDiagnosticText.loggableLines(lines.joined(separator: "\n"))
+        for line in loggable {
+            e2eLogger.error("PDF/A-3b check of the clause failed: \(line, privacy: .public)")
+        }
+        return loggable
+    }
+
     /// The clause and the record rendered and schema-validated with a placeholder number and
     /// the Mac's clock: nil when both pass, else the advice for the advocate.
     func dryRunE2EForms(original: ElectronicOriginal, newDocument: Data,

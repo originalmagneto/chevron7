@@ -749,7 +749,8 @@ struct RecordDetailView: View {
     private func fingerprintRow(_ record: EvidenceRecord) -> some View {
         let short = String(record.fingerprintSHA256Hex.prefix(24)) + "…"
         GridRow {
-            Text("SHA-256 odtlačok")
+            Text(UXLabels.fingerprintLabel(clientOutput: record.clientOutput,
+                                           revisionOneLength: record.revisionOneLength))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 Text(short)

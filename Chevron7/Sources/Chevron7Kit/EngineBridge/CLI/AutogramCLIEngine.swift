@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import Chevron7Identity
 import Foundation
+import os
 
 final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
     private let runner: CLIProcessRunner
@@ -304,6 +306,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                                 completedFileIDs.append(fileID)
                                 qualifications[fileID] = Self.timestampQualification(in: event.payload)
                             case .fileFailed:
+                                Self.logFailureDetails(in: event.payload)
                                 if let fileID = event.fileID {
                                     let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
                                     let message = Self.fileFailureMessage(
@@ -434,6 +437,7 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
                     qualifications[fileID] = Self.timestampQualification(in: event.payload)
                 }
             case .fileFailed:
+                Self.logFailureDetails(in: event.payload)
                 if let fileID = event.fileID {
                     let code = string(in: event.payload["code"]) ?? "SIGNING_FAILED"
                     let message = Self.fileFailureMessage(code: code, country: string(in: event.payload["country"]))
@@ -726,6 +730,24 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         }()
         guard case .string(let value)? = payload["timestampQualification"] else { return nil }
         return TimestampQualification(engineValue: value, country: country)
+    }
+
+    private static let logger = Logger(subsystem: ProductIdentity.bundleIdentifier, category: "EngineBridge")
+
+    /// veraPDF's reasons the engine gives in `file.failed`'s `message` for PDFA_INVALID (at most
+    /// five rules, one per line), paths removed; empty for any other failure.
+    static func pdfaFailureDetails(in payload: [String: JSONValue]) -> [String] {
+        guard case .string(let code)? = payload["code"], code == "PDFA_INVALID",
+              case .string(let message)? = payload["message"] else { return [] }
+        return EngineDiagnosticText.loggableLines(message)
+    }
+
+    /// The app shows only the Slovak summary of a PDFA_INVALID, so the rules behind it go to the
+    /// system log (`log show --predicate 'category == "EngineBridge"'`).
+    private static func logFailureDetails(in payload: [String: JSONValue]) {
+        for line in pdfaFailureDetails(in: payload) {
+            logger.error("PDFA_INVALID: \(line, privacy: .public)")
+        }
     }
 
     static func fileFailureMessage(code: String, country: String? = nil) -> String {

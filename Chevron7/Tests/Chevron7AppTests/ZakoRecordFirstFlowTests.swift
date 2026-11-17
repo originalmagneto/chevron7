@@ -282,6 +282,15 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
     }
 
+    /// The rules behind a refused PDF/A-3b check go to the ZaKo log without the temporary paths.
+    func testPDFACheckFailureIsLoggedWithoutPaths() {
+        let logged = ZakoSessionStore.logPDFACheckFailure([
+            "6.8-1 embedded file",
+            "6.2.11.4.1-1 font not embedded in /private/var/folders/x1/T/pdf-clause-check-1/source.pdf"
+        ])
+        XCTAssertEqual(logged, ["6.8-1 embedded file", "6.2.11.4.1-1 font not embedded in <cesta>"])
+    }
+
     func testRecordFirstSinglePDFRequestShape() async throws {
         try requireXMLLint()
         let settingsStore = makeSettingsStore()
