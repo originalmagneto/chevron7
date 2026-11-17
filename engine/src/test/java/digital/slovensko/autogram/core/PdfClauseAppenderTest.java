@@ -328,6 +328,28 @@ class PdfClauseAppenderTest {
         assertTrue(result.pdfaCompliant(), () -> String.join("\n", result.pdfaErrors()));
     }
 
+    /** A source that already carries an associated file keeps it beside the clause. */
+    @Test
+    void sourceEmbeddedFileAndAssociatedFilesSurvive() throws Exception {
+        var source = withEmbeddedFile(finalPdf());
+
+        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+
+        assertTrue(Arrays.equals(result.pdf(), 0, source.length, source, 0, source.length));
+        try (var document = Loader.loadPDF(result.pdf())) {
+            var catalog = document.getDocumentCatalog();
+            var entries = catalog.getNames().getEmbeddedFiles().getNames();
+            assertEquals(java.util.Set.of("priloha.xml", CLAUSE_NAME), entries.keySet());
+            assertArrayEquals("<priloha/>".getBytes(StandardCharsets.UTF_8),
+                    entries.get("priloha.xml").getEmbeddedFile().toByteArray());
+            var associated = (COSArray) catalog.getCOSObject().getDictionaryObject(COSName.AF);
+            assertEquals(2, associated.size());
+            assertSame(entries.get("priloha.xml").getCOSObject(), associated.getObject(0));
+            assertSame(entries.get(CLAUSE_NAME).getCOSObject(), associated.getObject(1));
+        }
+        assertTrue(result.pdfaCompliant(), () -> String.join("\n", result.pdfaErrors()));
+    }
+
     /** Pages with fonts that are not embedded: veraPDF says no, and says why. */
     @Test
     void unembeddedFontPagesAreNotCompliant() throws Exception {
@@ -410,6 +432,38 @@ class PdfClauseAppenderTest {
             names.getCOSObject().setItem(COSName.DESTS, destinations);
             catalog.setNames(names);
 
+            var buffer = new ByteArrayOutputStream();
+            document.save(buffer, CompressParameters.NO_COMPRESSION);
+            return buffer.toByteArray();
+        }
+    }
+
+    private static byte[] withEmbeddedFile(byte[] pdf) throws IOException {
+        try (var document = Loader.loadPDF(pdf)) {
+            var catalog = document.getDocumentCatalog();
+            var now = java.util.Calendar.getInstance();
+            var file = new org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile(document,
+                    new java.io.ByteArrayInputStream("<priloha/>".getBytes(StandardCharsets.UTF_8)));
+            file.setSubtype("application/xml");
+            file.setSize(10);
+            file.setCreationDate(now);
+            file.setModDate(now);
+            var specification = new PDComplexFileSpecification();
+            specification.setFile("priloha.xml");
+            specification.setFileUnicode("priloha.xml");
+            specification.setFileDescription("Príloha");
+            specification.setEmbeddedFile(file);
+            specification.setEmbeddedFileUnicode(file);
+            specification.getCOSObject().setItem(COSName.AF_RELATIONSHIP, COSName.getPDFName("Data"));
+            specification.getCOSObject().setDirect(false);
+            var tree = new org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode();
+            tree.setNames(Map.of("priloha.xml", specification));
+            var names = new PDDocumentNameDictionary(catalog);
+            names.setEmbeddedFiles(tree);
+            catalog.setNames(names);
+            var associated = new COSArray();
+            associated.add(specification.getCOSObject());
+            catalog.getCOSObject().setItem(COSName.AF, associated);
             var buffer = new ByteArrayOutputStream();
             document.save(buffer, CompressParameters.NO_COMPRESSION);
             return buffer.toByteArray();

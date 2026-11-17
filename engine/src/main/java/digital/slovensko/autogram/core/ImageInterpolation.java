@@ -145,6 +145,14 @@ final class ImageInterpolation {
             }
         }
         if (changed > 0) {
+            // createOutputStream replaces /Filter but keeps the old filter's parameters; a kept
+            // PNG predictor would garble the rewritten content, so they go with the old filter,
+            // as does any external-file reference (/F, /FFilter, /FDecodeParms): the rewritten
+            // data lives in the stream itself.
+            for (var key : List.of(COSName.DECODE_PARMS, COSName.DP, COSName.DL,
+                    COSName.F, COSName.F_FILTER, COSName.F_DECODE_PARMS)) {
+                stream.removeItem(key);
+            }
             try (var output = stream.createOutputStream(COSName.FLATE_DECODE)) {
                 new ContentStreamWriter(output).writeTokens(tokens);
             }

@@ -170,6 +170,7 @@ public final class PdfClauseAppender {
         };
         PDPage first = null;
         for (var page : pages.getPages()) {
+            // Annotations are deliberately not copied: the rendered clause has none.
             var copy = new PDPage(page.getMediaBox());
             if (page.getCOSObject().containsKey(COSName.CROP_BOX)) {
                 copy.setCropBox(page.getCropBox());
