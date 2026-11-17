@@ -125,6 +125,43 @@ class PdfaNormalizeTest {
         assertTrue(check.getProfileId().replace("-", "").toUpperCase().contains("2B"), check.getProfileId());
     }
 
+    /**
+     * A client PDF on the E→E route may hold a content stream that does not decode. Looking for
+     * inline images must not turn that into a failed normalization: veraPDF judges the result.
+     */
+    @Test
+    void normalizeSurvivesAContentStreamThatDoesNotDecode() throws Exception {
+        byte[] pdf;
+        try (var document = new PDDocument()) {
+            var page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            var form = new PDFormXObject(document);
+            form.setBBox(new PDRectangle(100, 100));
+            try (var raw = form.getCOSObject().createRawOutputStream()) {
+                raw.write("not really encoded".getBytes(StandardCharsets.ISO_8859_1));
+            }
+            form.getCOSObject().setItem(COSName.FILTER, COSName.getPDFName("UnknownDecode"));
+            var resources = new PDResources();
+            page.setResources(resources);
+            var formName = resources.add(form).getName();
+            var stream = new org.apache.pdfbox.pdmodel.common.PDStream(document);
+            try (var out = stream.createOutputStream()) {
+                out.write(("/" + formName + " Do\n").getBytes(StandardCharsets.ISO_8859_1));
+            }
+            page.setContents(stream);
+            var output = new ByteArrayOutputStream();
+            document.save(output);
+            pdf = output.toByteArray();
+        }
+        var source = temporaryDirectory.resolve("undecodable.pdf");
+        Files.write(source, pdf);
+
+        var output = temporaryDirectory.resolve("normalized.pdf");
+        PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+
+        assertTrue(Files.size(output) > 0);
+    }
+
     /** One page: an image XObject, the same kind of image inside a form XObject, an inline image. */
     private static byte[] interpolatingImagesPdf() throws Exception {
         try (var document = new PDDocument()) {

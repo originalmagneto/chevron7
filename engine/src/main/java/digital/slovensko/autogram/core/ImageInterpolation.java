@@ -117,10 +117,20 @@ final class ImageInterpolation {
         }
     }
 
+    /**
+     * A stream that does not decode or parse is left as it is: the source may be any client PDF,
+     * and veraPDF judges the result afterwards, so this must never be what fails a conversion.
+     */
     private static int clearInlineImages(COSStream stream) throws IOException {
         List<Object> tokens;
         try (var input = stream.createInputStream()) {
-            tokens = new PDFStreamParser(input.readAllBytes()).parse();
+            var content = input.readAllBytes();
+            if (!mayHoldInlineImage(content)) {
+                return 0;
+            }
+            tokens = new PDFStreamParser(content).parse();
+        } catch (IOException | RuntimeException unreadable) {
+            return 0;
         }
         var changed = 0;
         for (var token : tokens) {
@@ -140,5 +150,15 @@ final class ImageInterpolation {
             }
         }
         return changed;
+    }
+
+    /** Every inline image starts with the operator BI; most content streams have none. */
+    private static boolean mayHoldInlineImage(byte[] content) {
+        for (var index = 0; index + 1 < content.length; index++) {
+            if (content[index] == 'B' && content[index + 1] == 'I') {
+                return true;
+            }
+        }
+        return false;
     }
 }

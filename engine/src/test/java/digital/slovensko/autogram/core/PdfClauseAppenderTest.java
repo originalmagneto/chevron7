@@ -141,11 +141,9 @@ class PdfClauseAppenderTest {
                 assertEquals(pageText(expected, index), pageText(document, sourcePages + index),
                         "clause page " + (index + 1) + " keeps its text");
             }
-            var clauseText = new StringBuilder();
-            for (var index = sourcePages; index < sourcePages + clausePages; index++) {
-                clauseText.append(pageText(document, index));
-            }
-            assertTrue(clauseText.toString().contains(PdfClauseAppender.OUTLINE_TITLE));
+            // The form prints its title at the top of its first page, not on the last one.
+            assertTrue(pageText(document, sourcePages).contains(PdfClauseAppender.OUTLINE_TITLE),
+                    "the first clause page carries the clause's title");
             assertFalse(pageText(document, 0).contains(PdfClauseAppender.OUTLINE_TITLE),
                     "the content page stays without the clause");
         }

@@ -90,8 +90,7 @@ public final class PdfClauseAppender {
                     Files.readAllBytes(new File(args[1]).toPath()),
                     new Attachment(args[3], args[4], Files.readAllBytes(new File(args[2]).toPath())));
         } catch (IOException exception) {
-            System.err.println("PdfClauseAppender: " + exception.getClass().getSimpleName()
-                    + ": " + exception.getMessage());
+            System.err.println("PdfClauseAppender: " + exception.getClass().getSimpleName());
             System.exit(2);
             return;
         } catch (Exception exception) {
