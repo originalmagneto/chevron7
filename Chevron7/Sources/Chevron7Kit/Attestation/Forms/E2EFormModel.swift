@@ -33,7 +33,8 @@ public struct E2EFormModel: Sendable, Equatable {
     /// `newDocumentData` is exactly what the client receives inside the container: the original
     /// PDF when it is kept, else the converted PDF/A-2b.
     public static func make(original: ElectronicOriginal, attestation d: AttestationData, newDocumentName: String,
-                            newDocumentData: Data, usedDevice: String, qualifiedReport: Data?) throws -> E2EFormModel {
+                            newDocumentData: Data, usedDevice: String, qualifiedReport: Data?,
+                            deliveredAsSinglePDF: Bool = false) throws -> E2EFormModel {
         let evidenceNumber = (d.evidenceNumber ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !evidenceNumber.isEmpty else { throw AttestationGenerationError.missingEvidenceNumber }
         let names = ConversionFormModel.nameParts(d.performingPerson.fullName)
@@ -41,9 +42,13 @@ public struct E2EFormModel: Sendable, Equatable {
         let typeLabel = d.originalDocumentTypeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         let office = d.performingPerson.officeName.trimmingCharacters(in: .whitespacesAndNewlines)
         let format: (ZakoCodelistItem, String?)
-        switch original.plan {
-        case .keep(let item, let other): format = (item, other)
-        case .convert: format = (E2ECodelists.pdfa2Format, nil)
+        if deliveredAsSinglePDF {
+            format = (E2ECodelists.otherFormat, "PDF/A-3")
+        } else {
+            switch original.plan {
+            case .keep(let item, let other): format = (item, other)
+            case .convert: format = (E2ECodelists.pdfa2Format, nil)
+            }
         }
         return E2EFormModel(
             original: original,

@@ -57,6 +57,20 @@ final class E2EFormRendererTests: XCTestCase {
         XCTAssertTrue(xml.contains("<Mandant>MANDANT Kancelária &amp; synovia s.r.o.</Mandant>"))
     }
 
+    func testE2ESinglePDFFormats() throws {
+        let original = try original([signature()])
+        let single = try E2EFormModel.make(original: original, attestation: attestation(), newDocumentName: "zmluva.pdf",
+                                           newDocumentData: Data("%PDF-converted".utf8), usedDevice: "Chevron7 1.5.0",
+                                           qualifiedReport: nil, deliveredAsSinglePDF: true)
+        let clause = try E2EDeliveryBuilder().clause(single)
+        XCTAssertNoThrow(clause)
+        let clauseXML = ConversionCertificateE2ERenderer().render(single)
+        XCTAssertTrue(clauseXML.contains("<ItemCode>Iny</ItemCode>"))
+        XCTAssertTrue(clauseXML.contains("<NewDocumentFormatOther>PDF/A-3</NewDocumentFormatOther>"))
+        let record = try E2EDeliveryBuilder().record(single)
+        XCTAssertTrue(record.recordXML.contains("<NewDocumentFormat>PDF/A-3</NewDocumentFormat>"))
+    }
+
     func testRecordForOneSignatureValidates() throws {
         let model = try model(try original([signature()]))
         let delivery = try E2EDeliveryBuilder().record(model)

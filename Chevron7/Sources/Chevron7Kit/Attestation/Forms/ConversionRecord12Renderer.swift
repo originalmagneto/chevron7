@@ -43,7 +43,7 @@ public struct ConversionRecord12Renderer: Sendable {
         x += element("NewDocumentName", m.newDocumentName)
         x += element("NewDocumentType", m.newDocumentType)
         x += element("ContentType", "application/pdf")
-        x += "<NewDocumentFormat>\(codelist(ZakoCodelists.record12NewDocumentFormatCode, ZakoCodelists.record12PDFA2Item))</NewDocumentFormat>"
+        x += "<NewDocumentFormat>\(codelist(ZakoCodelists.record12NewDocumentFormatCode, m.newDocumentFormatOther == nil ? ZakoCodelists.record12PDFA2Item : ZakoCodelists.record12PDFA3Item))</NewDocumentFormat>"
         x += element("ElectronicFingerprintValue", m.fingerprintHex)
         x += "<ElectronicFingerprintCalculationMethod>\(codelist(ZakoCodelists.record12FingerprintMethodCode, ZakoCodelists.record12SHA256Item))</ElectronicFingerprintCalculationMethod>"
         x += "</NewDocumentInfo>"

@@ -35,6 +35,7 @@ public struct ConversionCertificateRenderer: Sendable {
         x += "<NewDocumentInfo>"
         x += element("NewDocumentName", m.newDocumentName)
         x += "<NewDocumentFormat>\(codelist(ZakoCodelists.newDocumentFormat, m.newDocumentFormat))</NewDocumentFormat>"
+        if let other = m.newDocumentFormatOther { x += element("NewDocumentFormatOther", other) }
         x += element("ElectronicFingerprintValue", m.fingerprintBase64)
         x += "<ElectronicFingerprintCalculationMethod>\(codelist(ZakoCodelists.fingerprintMethod, m.fingerprintMethod))</ElectronicFingerprintCalculationMethod>"
         x += "</NewDocumentInfo>"
