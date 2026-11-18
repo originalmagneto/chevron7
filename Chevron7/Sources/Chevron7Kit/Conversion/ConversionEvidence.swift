@@ -227,6 +227,9 @@ extension ConversionEvidence {
             var widthPx: Int?
             var heightPx: Int?
             var evidence: RawNested?
+            /// The nested `evidence` is present but its JSON does not decode (a missing or
+            /// wrongly typed key): only this data object degrades, never the whole evidence.
+            var evidenceUnreadable = false
             var pdf: RawPDF?
 
             private enum CodingKeys: String, CodingKey {
@@ -246,7 +249,10 @@ extension ConversionEvidence {
                 embeddedFileNames = try container.decodeIfPresent([String].self, forKey: .embeddedFileNames)
                 widthPx = try container.decodeIfPresent(Int.self, forKey: .widthPx)
                 heightPx = try container.decodeIfPresent(Int.self, forKey: .heightPx)
-                evidence = try container.decodeIfPresent(RawNested.self, forKey: .evidence)
+                if container.contains(.evidence) {
+                    evidence = try? container.decode(RawNested.self, forKey: .evidence)
+                    evidenceUnreadable = evidence == nil
+                }
                 pdf = (kind == "pdf") ? try RawPDF(from: decoder) : nil
             }
         }
@@ -310,6 +316,9 @@ extension ConversionEvidence {
             }
             var nested: NestedEvidence?
             var problem = raw.problem
+            if raw.evidenceUnreadable {
+                problem = problem ?? "NESTED_UNREADABLE"
+            }
             if let item = raw.evidence {
                 // One unreadable nested validation degrades this data object only, as in the engine.
                 if let time = parseDate(item.validationTime), let report = Data(base64Encoded: item.etsiReportBase64),

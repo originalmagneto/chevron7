@@ -156,6 +156,36 @@ final class ConversionEvidenceTests: XCTestCase {
         XCTAssertEqual(inner.documentTimestamps, [])
     }
 
+    func testMalformedNestedDocumentTimestampDegradesOnlyItsDataObject() throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.signatureFilename = "META-INF/signatures001.xml"
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [E2EEvidenceFixtures.Signature()]
+        object.nestedDocumentTimestamps = [E2EEvidenceFixtures.DocumentTimestamp()]
+        let other = E2EEvidenceFixtures.DataObject(name: "druha.pdf")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [signature], dataObjects: [object, other])) as? [String: Any])
+        var evidence = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var pdf = try XCTUnwrap(evidence["pdf"] as? [String: Any])
+        var objects = try XCTUnwrap(pdf["dataObjects"] as? [[String: Any]])
+        var nested = try XCTUnwrap(objects[0]["evidence"] as? [String: Any])
+        var stamps = try XCTUnwrap(nested["documentTimestamps"] as? [[String: Any]])
+        stamps[0].removeValue(forKey: "id")
+        nested["documentTimestamps"] = stamps
+        objects[0]["evidence"] = nested
+        pdf["dataObjects"] = objects
+        evidence["pdf"] = pdf
+        json["evidence"] = evidence
+
+        let decoded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.signatures.first?.signatureFilename, "META-INF/signatures001.xml")
+        let list = try XCTUnwrap(decoded.pdf?.dataObjects)
+        XCTAssertNil(list[0].nested)
+        XCTAssertEqual(list[0].problem, "NESTED_UNREADABLE")
+        XCTAssertEqual(list[0].kind, .pdf)
+        XCTAssertNil(list[1].problem)
+    }
+
     func testTolerantOfUnknownKeys() throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
             signatures: [E2EEvidenceFixtures.Signature()])) as? [String: Any])
