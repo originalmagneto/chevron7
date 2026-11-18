@@ -423,4 +423,135 @@ class PdfaFromSignedTest {
         }
         assertFalse(hasSignatureField(output()));
     }
+
+    /// A grey PNG: 8-bit, 16-bit, or 8-bit with alpha. The left half is grey 128, opaque; with
+    /// alpha the right half is fully transparent, else grey 128 too.
+    private static byte[] greyPng(int width, int height, int bits, boolean alpha) throws Exception {
+        var colorModel = new java.awt.image.ComponentColorModel(
+                java.awt.color.ColorSpace.getInstance(java.awt.color.ColorSpace.CS_GRAY), alpha, false,
+                alpha ? java.awt.Transparency.TRANSLUCENT : java.awt.Transparency.OPAQUE,
+                bits == 16 ? java.awt.image.DataBuffer.TYPE_USHORT : java.awt.image.DataBuffer.TYPE_BYTE);
+        var raster = colorModel.createCompatibleWritableRaster(width, height);
+        var max = (1 << bits) - 1;
+        for (var y = 0; y < height; y++) {
+            for (var x = 0; x < width; x++) {
+                raster.setSample(x, y, 0, 128 * max / 255);
+                if (alpha) {
+                    raster.setSample(x, y, 1, x < width / 2 ? max : 0);
+                }
+            }
+        }
+        var image = new BufferedImage(colorModel, raster, false, null);
+        var output = new ByteArrayOutputStream();
+        assertTrue(ImageIO.write(image, "png", output));
+        return output.toByteArray();
+    }
+
+    /// The rendered colour at a point given in page space (points from the bottom left).
+    private static java.awt.Color renderedAt(PDDocument document, float x, float y) throws Exception {
+        var rendered = new PDFRenderer(document).renderImageWithDPI(0, 72);
+        return new java.awt.Color(rendered.getRGB(Math.round(x), rendered.getHeight() - Math.round(y)));
+    }
+
+    private void assertGreyTone(byte[] png, int leftTone, int rightTone) throws Exception {
+        var result = merge(false, "sken.png", png);
+
+        assertTrue(result.compliant(), result.errors().toString());
+        try (var document = Loader.loadPDF(output())) {
+            var placement = imagePlacements(onlyPage(document)).getFirst();
+            var middle = placement[1] + placement[3] / 2;
+            var left = renderedAt(document, placement[0] + placement[2] / 4, middle);
+            var right = renderedAt(document, placement[0] + placement[2] * 3 / 4, middle);
+            for (var channel : new int[] {left.getRed(), left.getGreen(), left.getBlue()}) {
+                assertEquals(leftTone, channel, 3, left.toString());
+            }
+            for (var channel : new int[] {right.getRed(), right.getGreen(), right.getBlue()}) {
+                assertEquals(rightTone, channel, 3, right.toString());
+            }
+        }
+    }
+
+    @Test
+    void greyPngKeepsItsTone() throws Exception {
+        assertGreyTone(greyPng(400, 300, 8, false), 128, 128);
+    }
+
+    @Test
+    void sixteenBitGreyPngKeepsItsTone() throws Exception {
+        assertGreyTone(greyPng(400, 300, 16, false), 128, 128);
+    }
+
+    @Test
+    void greyPngWithAlphaKeepsItsToneOnWhite() throws Exception {
+        assertGreyTone(greyPng(400, 300, 8, true), 128, 255);
+    }
+
+    /// Inserts an EXIF APP1 segment carrying only `orientation` right after the JFIF APP0.
+    private static byte[] withExifOrientation(byte[] jpeg, int orientation) {
+        var tiff = new byte[] {'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1,
+                0, (byte) orientation, 0, 0, 0, 0, 0, 0};
+        var payload = new ByteArrayOutputStream();
+        payload.writeBytes(new byte[] {'E', 'x', 'i', 'f', 0, 0});
+        payload.writeBytes(tiff);
+        var length = payload.size() + 2;
+        assertEquals((byte) 0xE0, jpeg[3], "the fixture starts with a JFIF APP0");
+        var afterApp0 = 4 + (((jpeg[4] & 0xFF) << 8) | (jpeg[5] & 0xFF));
+        var output = new ByteArrayOutputStream();
+        output.write(jpeg, 0, afterApp0);
+        output.writeBytes(new byte[] {(byte) 0xFF, (byte) 0xE1, (byte) (length >> 8), (byte) length});
+        output.writeBytes(payload.toByteArray());
+        output.write(jpeg, afterApp0, jpeg.length - afterApp0);
+        return output.toByteArray();
+    }
+
+    /// A landscape RGB JPEG whose stored left half is red and right half blue.
+    private static byte[] redLeftBlueRightJpeg(int width, int height) throws Exception {
+        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        var graphics = image.createGraphics();
+        graphics.setColor(java.awt.Color.RED);
+        graphics.fillRect(0, 0, width / 2, height);
+        graphics.setColor(java.awt.Color.BLUE);
+        graphics.fillRect(width / 2, 0, width - width / 2, height);
+        graphics.dispose();
+        var output = new ByteArrayOutputStream();
+        assertTrue(ImageIO.write(image, "jpeg", output));
+        return output.toByteArray();
+    }
+
+    @Test
+    void jpegExifOrientationSixIsShownUpright() throws Exception {
+        // Orientation 6: the stored pixels are turned 90 degrees clockwise for display, so the
+        // stored left edge becomes the top.
+        var result = merge(false, "foto.jpg", withExifOrientation(redLeftBlueRightJpeg(600, 400), 6));
+
+        assertTrue(result.compliant(), result.errors().toString());
+        try (var document = Loader.loadPDF(output())) {
+            var page = onlyPage(document);
+            assertEquals(A4_SHORT, page.getMediaBox().getWidth(), 0.01);
+            assertEquals(A4_LONG, page.getMediaBox().getHeight(), 0.01);
+            var centerX = A4_SHORT / 2;
+            var centerY = A4_LONG / 2;
+            // Displayed 400 x 600 px at 150 dpi: 192 x 288 pt, centered.
+            var top = renderedAt(document, centerX, centerY + 100);
+            var bottom = renderedAt(document, centerX, centerY - 100);
+            assertTrue(top.getRed() > 200 && top.getBlue() < 60, top.toString());
+            assertTrue(bottom.getBlue() > 200 && bottom.getRed() < 60, bottom.toString());
+            assertEquals(new java.awt.Color(255, 255, 255), renderedAt(document, centerX + 110, centerY));
+            assertTrue(renderedAt(document, centerX + 90, centerY).getRed() < 255);
+        }
+    }
+
+    @Test
+    void jpegExifOrientationEightIsShownUpright() throws Exception {
+        // Orientation 8: turned 90 degrees counter-clockwise, so the stored left edge becomes the bottom.
+        merge(false, "foto.jpg", withExifOrientation(redLeftBlueRightJpeg(600, 400), 8));
+
+        try (var document = Loader.loadPDF(output())) {
+            assertEquals(A4_SHORT, onlyPage(document).getMediaBox().getWidth(), 0.01);
+            var top = renderedAt(document, A4_SHORT / 2, A4_LONG / 2 + 100);
+            var bottom = renderedAt(document, A4_SHORT / 2, A4_LONG / 2 - 100);
+            assertTrue(top.getBlue() > 200 && top.getRed() < 60, top.toString());
+            assertTrue(bottom.getRed() > 200 && bottom.getBlue() < 60, bottom.toString());
+        }
+    }
 }

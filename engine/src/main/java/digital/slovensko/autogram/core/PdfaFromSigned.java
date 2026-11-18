@@ -25,6 +25,7 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.util.Matrix;
 
 import org.w3c.dom.Element;
 
@@ -361,7 +362,8 @@ public final class PdfaFromSigned {
      * One PNG or JPEG on an A4 page of its own: portrait unless the image is wider than tall,
      * scaled to fit inside {@link #IMAGE_MARGIN} margins but never drawn larger than its stated
      * resolution ({@link #DEFAULT_IMAGE_DPI} when it states none), and centered. An 8-bit RGB or
-     * grey JPEG keeps its bytes; a CMYK JPEG and any PNG are redrawn into 8-bit sRGB (a PNG's
+     * grey JPEG keeps its bytes, turned upright by its EXIF orientation through the image matrix;
+     * a CMYK JPEG and any PNG are redrawn into 8-bit sRGB (a PNG's
      * transparency onto white), because PDF/A with an sRGB output intent takes no DeviceCMYK
      * and a 16-bit or transparent image is a needless risk.
      */
@@ -381,8 +383,11 @@ public final class PdfaFromSigned {
                 throw new IOException("Unreadable image", exception);
             }
             var resolution = resolution(bytes);
-            var naturalWidth = image.getWidth() / resolution[0] * 72;
-            var naturalHeight = image.getHeight() / resolution[1] * 72;
+            var orientation = MergeInputKind.of(bytes) == MergeInputKind.JPEG ? exifOrientation(bytes) : 1;
+            // Orientations 5 to 8 turn the stored pixels a quarter, so width and height swap on display.
+            var turned = orientation >= 5;
+            var naturalWidth = (turned ? image.getHeight() / resolution[1] : image.getWidth() / resolution[0]) * 72;
+            var naturalHeight = (turned ? image.getWidth() / resolution[0] : image.getHeight() / resolution[1]) * 72;
             var landscape = naturalWidth > naturalHeight;
             var box = landscape
                     ? new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth())
@@ -394,9 +399,106 @@ public final class PdfaFromSigned {
             var page = new PDPage(box);
             target.addPage(page);
             try (var content = new PDPageContentStream(target, page)) {
-                content.drawImage(image, (box.getWidth() - width) / 2, (box.getHeight() - height) / 2, width, height);
+                content.drawImage(image, placement(orientation,
+                        (box.getWidth() - width) / 2, (box.getHeight() - height) / 2, width, height));
             }
             return page;
+        }
+
+        /**
+         * The image matrix that shows the stored pixels upright in the box (x, y, width, height)
+         * for an EXIF orientation, so a JPEG keeps its bytes. In image space the stored column
+         * u runs left to right and the stored row runs from v = 1 (top) down to v = 0; each
+         * orientation maps the stored top-left based (column, row) to the displayed one.
+         */
+        static Matrix placement(int orientation, float x, float y, float width, float height) {
+            float[][] corners = {{0, 0}, {1, 0}, {0, 1}};
+            var mapped = new float[3][2];
+            for (var index = 0; index < 3; index++) {
+                var column = corners[index][0];
+                var row = 1 - corners[index][1];
+                float shownColumn;
+                float shownRow;
+                switch (orientation) {
+                    case 2 -> { shownColumn = 1 - column; shownRow = row; }
+                    case 3 -> { shownColumn = 1 - column; shownRow = 1 - row; }
+                    case 4 -> { shownColumn = column; shownRow = 1 - row; }
+                    case 5 -> { shownColumn = row; shownRow = column; }
+                    case 6 -> { shownColumn = 1 - row; shownRow = column; }
+                    case 7 -> { shownColumn = 1 - row; shownRow = 1 - column; }
+                    case 8 -> { shownColumn = row; shownRow = 1 - column; }
+                    default -> { shownColumn = column; shownRow = row; }
+                }
+                mapped[index][0] = x + width * shownColumn;
+                mapped[index][1] = y + height * (1 - shownRow);
+            }
+            return new Matrix(mapped[1][0] - mapped[0][0], mapped[1][1] - mapped[0][1],
+                    mapped[2][0] - mapped[0][0], mapped[2][1] - mapped[0][1], mapped[0][0], mapped[0][1]);
+        }
+
+        /**
+         * The EXIF orientation (1 to 8) of a JPEG's APP1 segment, else 1. Read by hand from the
+         * TIFF header and the first IFD, because ImageIO does not expose it.
+         */
+        static int exifOrientation(byte[] jpeg) {
+            var position = 2;
+            while (position + 4 <= jpeg.length && (jpeg[position] & 0xFF) == 0xFF) {
+                var marker = jpeg[position + 1] & 0xFF;
+                if (marker == 0xDA || marker == 0xD9) {
+                    return 1;
+                }
+                var length = ((jpeg[position + 2] & 0xFF) << 8) | (jpeg[position + 3] & 0xFF);
+                var start = position + 4;
+                if (length < 2 || start + length - 2 > jpeg.length) {
+                    return 1;
+                }
+                if (marker == 0xE1 && length >= 8 && jpeg[start] == 'E' && jpeg[start + 1] == 'x'
+                        && jpeg[start + 2] == 'i' && jpeg[start + 3] == 'f' && jpeg[start + 4] == 0
+                        && jpeg[start + 5] == 0) {
+                    return tiffOrientation(jpeg, start + 6, start + length - 2);
+                }
+                position = start + length - 2;
+            }
+            return 1;
+        }
+
+        private static int tiffOrientation(byte[] data, int tiff, int end) {
+            if (tiff + 8 > end) {
+                return 1;
+            }
+            boolean bigEndian;
+            if (data[tiff] == 'M' && data[tiff + 1] == 'M') {
+                bigEndian = true;
+            } else if (data[tiff] == 'I' && data[tiff + 1] == 'I') {
+                bigEndian = false;
+            } else {
+                return 1;
+            }
+            var ifd = tiff + (int) read(data, tiff + 4, 4, bigEndian);
+            if (ifd < tiff || ifd + 2 > end) {
+                return 1;
+            }
+            var entries = (int) read(data, ifd, 2, bigEndian);
+            for (var entry = 0; entry < entries; entry++) {
+                var offset = ifd + 2 + entry * 12;
+                if (offset + 12 > end) {
+                    return 1;
+                }
+                if (read(data, offset, 2, bigEndian) == 0x0112 && read(data, offset + 2, 2, bigEndian) == 3) {
+                    var value = (int) read(data, offset + 8, 2, bigEndian);
+                    return value >= 1 && value <= 8 ? value : 1;
+                }
+            }
+            return 1;
+        }
+
+        private static long read(byte[] data, int offset, int length, boolean bigEndian) {
+            long value = 0;
+            for (var index = 0; index < length; index++) {
+                var octet = data[offset + (bigEndian ? index : length - 1 - index)] & 0xFF;
+                value = (value << 8) | octet;
+            }
+            return value;
         }
 
         private static PDImageXObject jpeg(PDDocument target, byte[] bytes) throws IOException {
@@ -412,7 +514,37 @@ public final class PdfaFromSigned {
             if (decoded == null) {
                 throw new IOException("Unreadable PNG");
             }
-            return LosslessFactory.createFromImage(target, onWhite(decoded));
+            var colorSpace = decoded.getColorModel().getColorSpace();
+            var rgb = colorSpace.getType() == java.awt.color.ColorSpace.TYPE_GRAY ? greyOnWhite(decoded) : onWhite(decoded);
+            return LosslessFactory.createFromImage(target, rgb);
+        }
+
+        /**
+         * Redraws a grey PNG, with or without alpha and of any depth, into 8-bit sRGB by hand.
+         * PNG grey samples are encoded like sRGB, but Java2D takes the decoder's CS_GRAY as
+         * linear and lightened grey with alpha (128 became 188); here every sample is scaled to
+         * 8 bits as it is and blended onto white by its alpha.
+         */
+        static BufferedImage greyOnWhite(BufferedImage image) {
+            var raster = image.getRaster();
+            var colorModel = image.getColorModel();
+            var greyMax = (1 << colorModel.getComponentSize(0)) - 1;
+            var alpha = colorModel.hasAlpha();
+            var alphaMax = alpha ? (1 << colorModel.getComponentSize(colorModel.getNumComponents() - 1)) - 1 : 1;
+            var alphaBand = raster.getNumBands() - 1;
+            var rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+            for (var y = 0; y < image.getHeight(); y++) {
+                for (var x = 0; x < image.getWidth(); x++) {
+                    var grey = raster.getSample(x, y, 0) * 255.0 / greyMax;
+                    if (alpha) {
+                        var coverage = raster.getSample(x, y, alphaBand) / (double) alphaMax;
+                        grey = grey * coverage + 255 * (1 - coverage);
+                    }
+                    var tone = (int) Math.max(0, Math.min(255, Math.round(grey)));
+                    rgb.setRGB(x, y, (tone << 16) | (tone << 8) | tone);
+                }
+            }
+            return rgb;
         }
 
         /** Redraws any image into 8-bit sRGB, transparency composed onto white. */
