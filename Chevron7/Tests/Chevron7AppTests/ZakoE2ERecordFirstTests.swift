@@ -378,6 +378,31 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    /// A content timestamp inside the client's PAdES signature (CAdES signed attribute) has no
+    /// container carrier: record 1.2 cannot list it, so the dry run refuses before any number.
+    func testE2EPAdESContentTimestampRefusedBeforeNumber() async throws {
+        var stamp = E2EEvidenceFixtures.ContentTimestamp()
+        stamp.type = "CONTENT_TIMESTAMP"
+        stamp.signatureID = E2EEvidenceFixtures.Signature().id
+        stamp.coveredDataObjects = ["Full PDF"]
+        let (store, provider, source, _) = try makeStore(contentTimestamps: [stamp])
+        let calls = ConversionCount()
+        store.pdfaFromSignedRunner = PdfaFromSignedRunner(launch: { arguments in
+            calls.increment()
+            try Data("%PDF-1.7 converted".utf8).write(to: URL(fileURLWithPath: arguments[2]))
+            return (0, "")
+        })
+        await store.loadElectronicOriginal(at: source)
+        if case .needsConfirmation = store.e2eDecision { store.confirmUndetermined() }
+        prepareForAuthorization(store)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.lastError, E2EDeliveryBuilder.Failure.unresolvedContentTimestamp.errorDescription)
+        XCTAssertNil(store.attestation.evidenceNumber, "no number is spent on a refusal")
+        XCTAssertTrue(provider.requests.isEmpty)
+    }
+
     func testE2EPhoneRefusedInNewOrder() async throws {
         let (store, provider, source, settingsStore) = try makeStore()
         settingsStore.settings.mobileSigningEnabled = true
@@ -504,13 +529,15 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
     private func makeStore(output: AppSettings.ZakoClientOutput = .asicContainer,
                            signature: E2EEvidenceFixtures.Signature = E2EEvidenceFixtures.Signature(),
                            facts: E2EEvidenceFixtures.PDF = E2EEvidenceFixtures.PDF(),
+                           contentTimestamps: [E2EEvidenceFixtures.ContentTimestamp] = [],
                            preview: Bool = true) throws
         -> (ZakoSessionStore, E2ERecordFirstProvider, URL, AppSettingsStore) {
         let settingsStore = makeSettingsStore()
         let (source, data) = try writeClientPDF()
         var signature = signature
         signature.signedRevisionLength = data.count
-        let provider = E2ERecordFirstProvider(payload: E2EEvidenceFixtures.payload(signatures: [signature], pdf: facts))
+        let provider = E2ERecordFirstProvider(payload: E2EEvidenceFixtures.payload(
+            signatures: [signature], pdf: facts, contentTimestamps: contentTimestamps))
         let store = configure(settingsStore, provider: provider, output: output, preview: preview)
         return (store, provider, source, settingsStore)
     }

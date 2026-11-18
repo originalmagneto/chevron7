@@ -30,8 +30,9 @@ public enum E2EEvidenceFixtures {
         public init() {}
     }
 
-    /// A XAdES content timestamp (DSS `ALL_DATA_OBJECTS_TIMESTAMP`) of a container signature,
-    /// as the engine lists it under `contentTimestamps`.
+    /// A content timestamp in a signature's signed data (DSS `ALL_DATA_OBJECTS_TIMESTAMP` by
+    /// default, or `CONTENT_TIMESTAMP` for CAdES and PAdES), as the engine lists it under
+    /// `contentTimestamps`.
     public struct ContentTimestamp {
         public var id = "T-CONTENT-1"
         public var signatureID = "C-1"
@@ -103,6 +104,8 @@ public enum E2EEvidenceFixtures {
         public var nestedPDF: PDF? = nil
         /// The PDF's own document timestamps, listed in the nested `evidence`.
         public var nestedDocumentTimestamps: [DocumentTimestamp] = []
+        /// Content timestamps inside the PDF's own PAdES signatures, listed in the nested `evidence`.
+        public var nestedContentTimestamps: [ContentTimestamp] = []
         /// The nested evidence's own validation time.
         public var nestedValidationTime = E2EEvidenceFixtures.validationTime
         /// Whether the tree lists the nested signatures under this data object, as the engine does.
@@ -232,6 +235,7 @@ public enum E2EEvidenceFixtures {
             if !object.nestedSignatures.isEmpty || !object.nestedDocumentTimestamps.isEmpty {
                 json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: [],
                                                 documentTimestamps: object.nestedDocumentTimestamps,
+                                                contentTimestamps: object.nestedContentTimestamps,
                                                 validationTime: object.nestedValidationTime).1
             }
         }

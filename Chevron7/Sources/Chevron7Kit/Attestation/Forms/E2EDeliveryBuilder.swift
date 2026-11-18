@@ -62,6 +62,13 @@ public struct E2EDeliveryBuilder: Sendable {
             if model.original.contentTimestamps.contains(where: { !$0.isResolved }) {
                 throw Failure.unresolvedContentTimestamp
             }
+            // A content timestamp inside a PDF data object's own PAdES signature has no place the
+            // renderer can tie it to yet: refused, never left out.
+            if let object = model.original.evidence.pdf?.dataObjects.first(where: {
+                !($0.nested?.contentTimestamps.isEmpty ?? true)
+            }) {
+                throw Failure.nestedContentTimestamp(name: ElectronicOriginal.displayName(object.name))
+            }
             xml = try ConversionRecordE2E12Renderer().render(model)
         default:
             throw Failure.notAnE2ERecordForm
@@ -82,6 +89,8 @@ public struct E2EDeliveryBuilder: Sendable {
         case missingSignatureValue(signer: String)
         /// A content timestamp the record cannot tie to the original's documents.
         case unresolvedContentTimestamp
+        /// A content timestamp inside the PAdES signature of a container's PDF.
+        case nestedContentTimestamp(name: String)
         /// A timestamp the record 1.2 renderer has no name for (an internal inconsistency).
         case unnamedTimestamp
         case notAnE2ERecordForm
@@ -98,6 +107,8 @@ public struct E2EDeliveryBuilder: Sendable {
                 return "Hodnotu podpisu \(signer) sa nepodarilo prečítať. Podľa postupu od 1. 1. 2027 ju záznam musí obsahovať. Skúste overenie znova."
             case .unresolvedContentTimestamp:
                 return "Časovú pečiatku údajov v kontajneri sa nepodarilo priradiť k jeho súborom. Podľa postupu od 1. 1. 2027 ju nemožno zapísať do záznamu. Skúste overenie znova."
+            case .nestedContentTimestamp(let name):
+                return "Súbor \(name) obsahuje časovú pečiatku údajov vo vnútri podpisu. Podľa postupu od 1. 1. 2027 ju zatiaľ nevieme zapísať do záznamu."
             case .unnamedTimestamp:
                 return "Časovú pečiatku pôvodného dokumentu nemožno pomenovať v zázname podľa postupu od 1. 1. 2027. Pošlite nám prosím túto chybu."
             case .notAnE2ERecordForm:

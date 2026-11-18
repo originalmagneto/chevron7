@@ -40,8 +40,9 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var coveredRevisionLength: Int?
     }
 
-    /// A XAdES content timestamp (DSS `ALL_DATA_OBJECTS_TIMESTAMP` or
-    /// `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`) in a container signature's signed properties.
+    /// A content timestamp in a signature's signed data: XAdES (DSS `ALL_DATA_OBJECTS_TIMESTAMP`
+    /// or `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`) or the CAdES and PAdES signed attribute
+    /// `id-aa-ets-contentTimestamp` (DSS `CONTENT_TIMESTAMP`).
     public struct ContentTimestamp: Sendable, Equatable {
         public var id: String
         /// The signature that carries it.
@@ -132,6 +133,9 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var pdf: PDFFacts
         /// The PDF's own document timestamps; empty for an old payload.
         public var documentTimestamps: [DocumentTimestamp] = []
+        /// Content timestamps inside the PDF's own PAdES signatures (DSS `CONTENT_TIMESTAMP`);
+        /// empty for an old payload.
+        public var contentTimestamps: [ContentTimestamp] = []
     }
 
     public var tree: SignatureTree
@@ -142,7 +146,8 @@ public struct ConversionEvidence: Sendable, Equatable {
     public var pdf: PDFFacts?
     /// Document timestamps of a PDF original; empty for a container or an old payload.
     public var documentTimestamps: [DocumentTimestamp]
-    /// XAdES content timestamps of the container's signatures; empty for a PDF or an old payload.
+    /// Content timestamps in the signatures' signed data: XAdES and CAdES ones of a container's
+    /// signatures, a PAdES one of a PDF original's signatures; empty for an old payload.
     public var contentTimestamps: [ContentTimestamp]
 
     public init(tree: SignatureTree, validationTime: Date, dssVersion: String, etsiReport: Data,
@@ -247,6 +252,7 @@ extension ConversionEvidence {
             var signatures: [RawSignature]
             var pdf: RawPDF?
             var documentTimestamps: [RawDocumentTimestamp]?
+            var contentTimestamps: [RawContentTimestamp]?
         }
 
         /// A data object's JSON carries the PDF facts flat beside its own keys.
@@ -370,7 +376,8 @@ extension ConversionEvidence {
                    let pdf = item.pdf, let signatures = try? item.signatures.map(signature),
                    let pdfFacts = try? facts(pdf) {
                     nested = NestedEvidence(validationTime: time, etsiReport: report, signatures: signatures,
-                                            pdf: pdfFacts, documentTimestamps: documentTimestamps(item.documentTimestamps))
+                                            pdf: pdfFacts, documentTimestamps: documentTimestamps(item.documentTimestamps),
+                                            contentTimestamps: contentTimestamps(item.contentTimestamps))
                 } else {
                     problem = problem ?? "NESTED_UNREADABLE"
                 }

@@ -70,6 +70,41 @@ public final class ConversionTestContainers {
         return signed(entries, new Date(), authority, covered);
     }
 
+    /// One CAdES Baseline B signature (ASiC-E with `META-INF/ASiCManifest*.xml`) over every
+    /// entry, its CMS carrying a content timestamp from `authority` as the signed attribute
+    /// `id-aa-ets-contentTimestamp` (DSS `CONTENT_TIMESTAMP`).
+    public static byte[] cadesAsiceWithContentTimestamp(List<Entry> entries,
+            eu.europa.esig.dss.spi.x509.tsp.TSPSource authority) throws Exception {
+        try (var token = new Pkcs12SignatureToken(
+                Objects.requireNonNull(ConversionTestContainers.class
+                        .getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
+                new KeyStore.PasswordProtection("".toCharArray()))) {
+            var key = token.getKeys().get(0);
+            var parameters = new eu.europa.esig.dss.asic.cades.ASiCWithCAdESSignatureParameters();
+            parameters.aSiC().setContainerType(ASiCContainerType.ASiC_E);
+            parameters.setSignatureLevel(SignatureLevel.CAdES_BASELINE_B);
+            parameters.setSignaturePackaging(SignaturePackaging.DETACHED);
+            parameters.setDigestAlgorithm(DigestAlgorithm.SHA256);
+            parameters.setSigningCertificate(key.getCertificate());
+            parameters.setCertificateChain(key.getCertificateChain());
+            var verifier = new CommonCertificateVerifier();
+            // The engine's test key expired in 2024, as in SigningJob's own verifier setup.
+            verifier.setAlertOnExpiredCertificate(new LogOnStatusAlert());
+            var service = new eu.europa.esig.dss.asic.cades.signature.ASiCWithCAdESService(verifier);
+            service.setTspSource(authority);
+            var documents = new ArrayList<DSSDocument>();
+            for (var entry : entries) {
+                documents.add(new InMemoryDocument(entry.bytes(), entry.name(), mimeType(entry.name())));
+            }
+            parameters.setContentTimestamps(List.of(service.getContentTimestamp(documents, parameters)));
+            var toSign = service.getDataToSign(documents, parameters);
+            var value = token.sign(toSign, parameters.getDigestAlgorithm(), key);
+            try (var stream = service.signDocument(documents, parameters, value).openStream()) {
+                return stream.readAllBytes();
+            }
+        }
+    }
+
     /// Signs only the named entries of `asice` and adds that signature to it as the next
     /// `META-INF/signaturesN.xml`; everything else in the container stays as it was.
     public static byte[] addSignatureCovering(byte[] asice, List<String> names) throws Exception {

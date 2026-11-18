@@ -55,9 +55,11 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
     }
 
     private func pdfOriginal(_ signatures: [E2EEvidenceFixtures.Signature], facts: E2EEvidenceFixtures.PDF = .init(),
-                             documentTimestamps: [E2EEvidenceFixtures.DocumentTimestamp] = []) throws -> ElectronicOriginal {
+                             documentTimestamps: [E2EEvidenceFixtures.DocumentTimestamp] = [],
+                             contentTimestamps: [E2EEvidenceFixtures.ContentTimestamp] = []) throws -> ElectronicOriginal {
         let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
-            signatures: signatures, pdf: facts, documentTimestamps: documentTimestamps))
+            signatures: signatures, pdf: facts, documentTimestamps: documentTimestamps,
+            contentTimestamps: contentTimestamps))
         return try ElectronicOriginal.make(sourceName: "zmluva.pdf", sourceData: pdf, evidence: evidence)
     }
 
@@ -591,6 +593,114 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
             // Today's record does not list timestamps and is built as before.
             XCTAssertNoThrow(try E2EDeliveryBuilder().record(try model(original)))
         }
+    }
+
+    // MARK: CAdES and PAdES content timestamps (signed attribute id-aa-ets-contentTimestamp)
+
+    private func cadesStamp(_ id: String, signature: String, covering files: [String]) -> E2EEvidenceFixtures.ContentTimestamp {
+        var stamp = contentStamp(id, signature: signature, covering: files)
+        stamp.type = "CONTENT_TIMESTAMP"
+        return stamp
+    }
+
+    /// An ASiC-E with one CAdES signature over both files, in the shape the engine writes for it
+    /// (`ConversionEvidenceServiceTest.cadesContainerContentTimestampNamesTheDataObjectsItCovers`):
+    /// the signature file `META-INF/signature001.p7s`, and DSS scoping the content timestamp as
+    /// the ASiC manifest plus the files the manifest names.
+    private func cadesContainer(_ contentTimestamps: [E2EEvidenceFixtures.ContentTimestamp]) throws -> ElectronicOriginal {
+        let objects = [object("a.pdf", pdfBytes(0x5A, count: 400), coveredBy: ["C-1"]),
+                       object("b.png", png, kind: "png", coveredBy: ["C-1"])]
+        let data = try ASiCEPackager().package(files: objects.map { .init(path: $0.name, data: $0.bytes) })
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = objects.count
+        facts.asicDataObjectName = "a.pdf"
+        var signature = containerSignature("C-1", file: "META-INF/signature001.p7s")
+        signature.format = "CAdES-BASELINE-B"
+        signature.timestamps = []
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [signature], pdf: facts, dataObjects: objects, contentTimestamps: contentTimestamps))
+        return try ElectronicOriginal.make(sourceName: "spis.asice", sourceData: data, evidence: evidence)
+    }
+
+    func testCAdESContainerContentTimestampIsListedWithTheFilesItsManifestNames() throws {
+        let original = try cadesContainer([cadesStamp("T-CMS", signature: "C-1",
+                                                      covering: ["META-INF/ASiCManifest001.xml", "a.pdf", "b.png"])])
+        XCTAssertEqual(original.contentTimestamps.map(\.documentNames), [["a.pdf", "b.png"]])
+        XCTAssertEqual(original.contentTimestamps.map(\.fileEntryNames), [["a.pdf", "b.png"]])
+        let xml = try record12(try model(original))
+        XCTAssertTrue(xml.contains("<OriginalDocumentTimestamp><TimeStampName>Elektronicka casova peciatka</TimeStampName><OriginalDocumentInfo><OriginalDocumentName>a.pdf</OriginalDocumentName></OriginalDocumentInfo><OriginalDocumentInfo><OriginalDocumentName>b.png</OriginalDocumentName></OriginalDocumentInfo>"))
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: try block(named: "signature001.p7s", in: xml)),
+                       ["Elektronicka casova peciatka"])
+        assertCrossReferencesResolve(xml)
+    }
+
+    func testCAdESContentTimestampItCannotTieToTheFilesIsRefused() throws {
+        let cases: [E2EEvidenceFixtures.ContentTimestamp] = [
+            // Another META-INF file is no data object.
+            cadesStamp("T-X", signature: "C-1", covering: ["META-INF/manifest.xml", "a.pdf", "b.png"]),
+            // The manifest alone names no file.
+            cadesStamp("T-X", signature: "C-1", covering: ["META-INF/ASiCManifest001.xml"]),
+            cadesStamp("T-X", signature: "C-1", covering: ["META-INF/sub/ASiCManifest001.xml", "a.pdf"]),
+            cadesStamp("T-X", signature: "C-9", covering: ["META-INF/ASiCManifest001.xml", "a.pdf"]),
+            // Only a CAdES content timestamp covers a manifest: a XAdES one naming it stays unresolved.
+            contentStamp("T-X", signature: "C-1", covering: ["META-INF/ASiCManifest001.xml", "a.pdf"]),
+        ]
+        for stamp in cases {
+            let original = try cadesContainer([stamp])
+            XCTAssertEqual(original.contentTimestamps.map(\.isResolved), [false], "\(stamp.coveredDataObjects)")
+            XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(original), form: .recordE2E_1_2)) { error in
+                XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, .unresolvedContentTimestamp)
+            }
+            XCTAssertEqual(try E2EDeliveryBuilder().record(try model(original)).recordXML,
+                           try E2EDeliveryBuilder().record(try model(try cadesContainer([]))).recordXML)
+        }
+    }
+
+    func testPAdESContentTimestampOfAPdfOriginalIsRefusedOnlyByRecord12() throws {
+        let signatures = [signature("S-1", revision: pdf.count)]
+        let stamped = try pdfOriginal(signatures, contentTimestamps: [cadesStamp("T-CMS", signature: "S-1",
+                                                                                 covering: ["Full PDF"])])
+        // A PAdES signature has no container carrier: the timestamp is listed but tied to nothing.
+        XCTAssertEqual(stamped.contentTimestamps.map(\.isResolved), [false])
+        XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(stamped), form: .recordE2E_1_2)) { error in
+            XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, .unresolvedContentTimestamp)
+        }
+        // Record 1.0 and the clause are byte for byte those of the same PDF without it.
+        let plain = try pdfOriginal(signatures)
+        XCTAssertEqual(try E2EDeliveryBuilder().record(try model(stamped)).recordXML,
+                       try E2EDeliveryBuilder().record(try model(plain)).recordXML)
+        XCTAssertEqual(try E2EDeliveryBuilder().clause(try model(stamped)).xml,
+                       try E2EDeliveryBuilder().clause(try model(plain)).xml)
+    }
+
+    func testContentTimestampInsideAContainerPdfSignatureIsRefusedOnlyByRecord12() throws {
+        func original(nested: [E2EEvidenceFixtures.ContentTimestamp]) throws -> ElectronicOriginal {
+            var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
+            a.nestedSignatures = [signature("P-1", revision: 600)]
+            a.nestedContentTimestamps = nested
+            let b = object("b.png", png, kind: "png", coveredBy: ["C-1"])
+            let data = try ASiCEPackager().package(files: [a, b].map { .init(path: $0.name, data: $0.bytes) })
+            var facts = E2EEvidenceFixtures.PDF()
+            facts.asicDataObjectCount = 2
+            facts.asicDataObjectName = "a.pdf"
+            let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+                signatures: [containerSignature("C-1", file: "META-INF/signatures001.xml")], pdf: facts,
+                dataObjects: [a, b]))
+            return try ElectronicOriginal.make(sourceName: "spis.asice", sourceData: data, evidence: evidence)
+        }
+        let stamped = try original(nested: [cadesStamp("T-CMS", signature: "P-1", covering: ["Full PDF"])])
+        XCTAssertEqual(stamped.evidence.pdf?.dataObjects.first?.nested?.contentTimestamps.map(\.type),
+                       ["CONTENT_TIMESTAMP"])
+        let failure = E2EDeliveryBuilder.Failure.nestedContentTimestamp(name: "a.pdf")
+        XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(stamped), form: .recordE2E_1_2)) { error in
+            XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, failure)
+        }
+        XCTAssertEqual(failure.errorDescription,
+                       "Súbor a.pdf obsahuje časovú pečiatku údajov vo vnútri podpisu. Podľa postupu od 1. 1. 2027 ju zatiaľ nevieme zapísať do záznamu.")
+        let plain = try original(nested: [])
+        XCTAssertNoThrow(try record12(try model(plain)))
+        XCTAssertEqual(try E2EDeliveryBuilder().record(try model(stamped)).recordXML,
+                       try E2EDeliveryBuilder().record(try model(plain)).recordXML)
     }
 
     // MARK: Refusals

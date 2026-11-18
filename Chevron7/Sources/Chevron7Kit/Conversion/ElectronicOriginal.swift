@@ -164,8 +164,9 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var documentName: String
     }
 
-    /// A XAdES content timestamp of a container signature (`AllDataObjectsTimeStamp` or
-    /// `IndividualDataObjectsTimeStamp`) with the whole-file document of each file it covers.
+    /// A content timestamp in a signature's signed data (XAdES `AllDataObjectsTimeStamp` or
+    /// `IndividualDataObjectsTimeStamp`, CAdES or PAdES `id-aa-ets-contentTimestamp`) with the
+    /// whole-file document of each file it covers.
     public struct ContentTimestamp: Sendable, Equatable {
         public var id: String
         /// The container signature that carries it.
@@ -206,7 +207,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
     /// Document timestamps of the PDF original or of the container's PDFs, in file order; a
     /// timestamp without a time or a covered length is left out.
     public var documentTimestamps: [DocumentTimestamp] = []
-    /// XAdES content timestamps of the container's signatures, in the engine's order.
+    /// Content timestamps in the signatures' signed data, in the engine's order.
     public var contentTimestamps: [ContentTimestamp] = []
 
     public static func make(sourceName: String, sourceData: Data,
@@ -601,9 +602,13 @@ public struct ElectronicOriginal: Sendable, Equatable {
         }
     }
 
-    /// The container signatures' XAdES content timestamps, each with the whole-file document of
-    /// every file it covers. Fails closed per timestamp: one that cannot be tied to the original's
-    /// documents and to a container signature covering those files keeps no document names.
+    /// The content timestamps in the signatures' signed data, each with the whole-file document
+    /// of every file it covers. A CAdES container signature's one (DSS `CONTENT_TIMESTAMP`)
+    /// covers the ASiC manifest its CMS signs, which names the files: DSS scopes it as that
+    /// manifest plus those files, so the manifest is set aside and the files are resolved as for
+    /// XAdES. Fails closed per timestamp: one that cannot be tied to the original's documents and
+    /// to a container signature covering those files (a PAdES one of a PDF original has no
+    /// container carrier) keeps no document names.
     static func contentTimestamps(of original: ElectronicOriginal) -> [ContentTimestamp] {
         let wholeFile: [String: String]
         switch original.kind {
@@ -618,7 +623,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
         let coverage = Dictionary((original.evidence.pdf?.dataObjects ?? []).map { ($0.name, $0.coveredBy) },
                                   uniquingKeysWith: { first, _ in first })
         return original.evidence.contentTimestamps.map { stamp in
-            let files = stamp.coveredDataObjects
+            let files = stamp.type == "CONTENT_TIMESTAMP"
+                ? stamp.coveredDataObjects.filter { !isASiCManifest($0) } : stamp.coveredDataObjects
             let names = files.compactMap { wholeFile[$0] }
             let resolved = stamp.productionTime != nil && !files.isEmpty && names.count == files.count
                 && Set(files).count == files.count && carriers.contains(stamp.signatureID)
@@ -630,6 +636,12 @@ public struct ElectronicOriginal: Sendable, Equatable {
             return ContentTimestamp(id: stamp.id, signatureID: stamp.signatureID, timestamp: timestamp,
                                     fileEntryNames: files, documentNames: resolved ? names : [])
         }
+    }
+
+    /// `META-INF/ASiCManifest*.xml`, the manifest a CAdES signature of an ASiC-E signs.
+    static func isASiCManifest(_ name: String) -> Bool {
+        guard name.hasPrefix("META-INF/ASiCManifest"), name.hasSuffix(".xml") else { return false }
+        return !name.dropFirst("META-INF/".count).contains("/")
     }
 
     /// Codelist 53: PDF/A-1 and A-2 have items, A-3 is `Iny` with its name, anything else `PDF`.

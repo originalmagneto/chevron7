@@ -230,10 +230,13 @@ public final class ConversionEvidenceService {
         return timestamps;
     }
 
-    /// XAdES content timestamps (DSS `ALL_DATA_OBJECTS_TIMESTAMP`, `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`)
-    /// in the signed properties of each signature, with the signature that carries them
-    /// (`signatureId`) and the data objects they cover (`coveredDataObjects`, DSS's timestamp
-    /// scope names, which name the data objects as the signature scopes do).
+    /// Content timestamps in the signed data of each signature: XAdES (DSS
+    /// `ALL_DATA_OBJECTS_TIMESTAMP`, `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`) and the CAdES or PAdES
+    /// signed attribute `id-aa-ets-contentTimestamp` (DSS `CONTENT_TIMESTAMP`), which DSS never
+    /// counts among the timestamps produced after the signature. Each comes with the signature
+    /// that carries it (`signatureId`) and the data objects it covers (`coveredDataObjects`,
+    /// DSS's timestamp scope names, which name the data objects as the signature scopes do), so
+    /// the app can list it or refuse what it cannot tie to the documents, never leave it out.
     private static JsonArray contentTimestamps(DiagnosticData diagnostic, SimpleReport simple) {
         var timestamps = new JsonArray();
         for (var signatureId : simple.getSignatureIdList()) {
@@ -241,7 +244,8 @@ public final class ConversionEvidenceService {
             if (signature == null) continue;
             for (var timestamp : signature.getTimestampList()) {
                 if (timestamp.getType() != TimestampType.ALL_DATA_OBJECTS_TIMESTAMP
-                        && timestamp.getType() != TimestampType.INDIVIDUAL_DATA_OBJECTS_TIMESTAMP) {
+                        && timestamp.getType() != TimestampType.INDIVIDUAL_DATA_OBJECTS_TIMESTAMP
+                        && timestamp.getType() != TimestampType.CONTENT_TIMESTAMP) {
                     continue;
                 }
                 var entry = new JsonObject();

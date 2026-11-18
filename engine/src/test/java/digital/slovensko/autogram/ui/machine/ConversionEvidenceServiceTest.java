@@ -744,4 +744,65 @@ class ConversionEvidenceServiceTest {
 
         assertEquals(0, evidenceOfContainer(base).getAsJsonArray("contentTimestamps").size());
     }
+    /// A content timestamp carried as the CAdES signed attribute `id-aa-ets-contentTimestamp`
+    /// inside a PAdES signature (DSS `CONTENT_TIMESTAMP`) is listed with its carrier, never left
+    /// out: DSS does not count it among the timestamps produced after the signature, and it is
+    /// no document timestamp revision. Nested in a container's PDF it is listed the same way.
+    @Test
+    void padesContentTimestampSignedAttributeIsListed() throws Exception {
+        var signed = ConversionTestPdfs.signWithContentTimestamp(ConversionTestPdfs.samplePdf(),
+                ContentTimestampTest.authority());
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("signed.pdf"), signed);
+
+        var evidence = new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
+                .getAsJsonObject("evidence");
+
+        var content = evidence.getAsJsonArray("contentTimestamps");
+        assertEquals(1, content.size(), content.toString());
+        var timestamp = content.get(0).getAsJsonObject();
+        assertEquals("CONTENT_TIMESTAMP", timestamp.get("type").getAsString());
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+        assertEquals(signature.get("id").getAsString(), timestamp.get("signatureId").getAsString());
+        assertEquals("Test TSA", timestamp.get("producerCommonName").getAsString());
+        assertNotNull(timestamp.get("productionTime"));
+        assertNotNull(timestamp.get("indication"));
+        assertNotNull(timestamp.get("coveredDataObjects"));
+        assertEquals(0, signature.getAsJsonArray("timestamps").size(), signature.toString());
+        assertEquals(0, evidence.getAsJsonArray("documentTimestamps").size());
+
+        var container = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", signed), new Entry("b.pdf", ConversionTestPdfs.withText("B")))));
+        var nested = dataObject(container, "zmluva.pdf").getAsJsonObject("evidence");
+        assertNotNull(nested, container.toString());
+        var nestedContent = nested.getAsJsonArray("contentTimestamps");
+        assertEquals(1, nestedContent.size(), nestedContent.toString());
+        assertEquals("CONTENT_TIMESTAMP", nestedContent.get(0).getAsJsonObject().get("type").getAsString());
+    }
+
+    /// The CAdES signed attribute `id-aa-ets-contentTimestamp` of an ASiC-E CAdES signature is
+    /// listed with the data objects DSS's timestamp scopes name, as for XAdES.
+    @Test
+    void cadesContainerContentTimestampNamesTheDataObjectsItCovers() throws Exception {
+        var a = ConversionTestPdfs.withText("A");
+        var b = ConversionTestPdfs.withText("B");
+        var evidence = evidenceOfContainer(ConversionTestContainers.cadesAsiceWithContentTimestamp(
+                List.of(new Entry("a.pdf", a), new Entry("dir/b c.pdf", b)), ContentTimestampTest.authority()));
+        var content = evidence.getAsJsonArray("contentTimestamps");
+        assertEquals(1, content.size(), content.toString());
+        var timestamp = content.get(0).getAsJsonObject();
+        assertEquals("CONTENT_TIMESTAMP", timestamp.get("type").getAsString());
+        // The CMS signs the ASiC manifest, which names the files: DSS scopes it as all three.
+        assertEquals("[\"META-INF/ASiCManifest001.xml\",\"a.pdf\",\"dir/b c.pdf\"]",
+                timestamp.getAsJsonArray("coveredDataObjects").toString());
+        var carrier = timestamp.get("signatureId").getAsString();
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+        assertEquals(carrier, signature.get("id").getAsString());
+        assertEquals("META-INF/signature001.p7s", signature.get("signatureFilename").getAsString());
+        assertEquals(0, signature.getAsJsonArray("timestamps").size(), signature.toString());
+        assertEquals("Test TSA", timestamp.get("producerCommonName").getAsString());
+        for (var name : List.of("a.pdf", "dir/b c.pdf")) {
+            var coveredBy = dataObject(evidence.getAsJsonObject("pdf"), name).getAsJsonArray("coveredBy");
+            assertTrue(coveredBy.contains(new com.google.gson.JsonPrimitive(carrier)), coveredBy.toString());
+        }
+    }
 }
