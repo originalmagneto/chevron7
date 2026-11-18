@@ -10,6 +10,7 @@ import eu.europa.esig.dss.diagnostic.DiagnosticData;
 import eu.europa.esig.dss.diagnostic.SignatureWrapper;
 import eu.europa.esig.dss.enumerations.Indication;
 import eu.europa.esig.dss.enumerations.QCTypeEnum;
+import eu.europa.esig.dss.enumerations.TimestampType;
 import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.model.InMemoryDocument;
@@ -138,6 +139,7 @@ public final class ConversionEvidenceService {
             signatures.add(signatureFacts(diagnostic, simple, id, etsi, unavailable));
         }
         evidence.add("signatures", signatures);
+        evidence.add("documentTimestamps", documentTimestamps(diagnostic, simple));
         var pdf = pdfFacts(content, diagnostic, knownPdfFacts);
         if (pdf != null) {
             evidence.add("pdf", pdf);
@@ -150,6 +152,11 @@ public final class ConversionEvidenceService {
         var facts = new JsonObject();
         facts.addProperty("id", id);
         var signature = diagnostic.getSignatureById(id);
+        // The container's signature file (`META-INF/signatures...xml`). For PAdES DSS names the
+        // PDF itself, which is no signature file, so it is left out there.
+        if (signature.getPDFRevision() == null && signature.getFilename() != null) {
+            facts.addProperty("signatureFilename", signature.getFilename());
+        }
         if (signature.getSignatureValue() != null) {
             facts.addProperty("signatureValueBase64", Base64.getEncoder().encodeToString(signature.getSignatureValue()));
         }
@@ -190,6 +197,33 @@ public final class ConversionEvidenceService {
             if (indication != null) entry.addProperty("indication", indication.name());
             var qualification = simple.getTimestampQualification(timestamp.getId());
             if (qualification != null) entry.addProperty("qualification", qualification.name());
+            timestamps.add(entry);
+        }
+        return timestamps;
+    }
+
+    /// The PDF's document timestamps (DSS `DOCUMENT_TIMESTAMP`), each with the end of its
+    /// `/ByteRange` as `coveredRevisionLength`: the revision it covers is that prefix.
+    private static JsonArray documentTimestamps(DiagnosticData diagnostic, SimpleReport simple) {
+        var timestamps = new JsonArray();
+        for (var timestamp : diagnostic.getTimestampList()) {
+            if (timestamp.getType() != TimestampType.DOCUMENT_TIMESTAMP) continue;
+            var entry = new JsonObject();
+            entry.addProperty("id", timestamp.getId());
+            if (timestamp.getProductionTime() != null) {
+                entry.addProperty("productionTime", timestamp.getProductionTime().toInstant().toString());
+            }
+            var certificate = timestamp.getSigningCertificate();
+            if (certificate != null) entry.addProperty("producerCommonName", certificate.getCommonName());
+            var indication = simple.getIndication(timestamp.getId());
+            if (indication != null) entry.addProperty("indication", indication.name());
+            var qualification = simple.getTimestampQualification(timestamp.getId());
+            if (qualification != null) entry.addProperty("qualification", qualification.name());
+            var revision = timestamp.getPDFRevision();
+            var range = revision == null ? null : revision.getSignatureByteRange();
+            if (range != null && range.size() == 4) {
+                entry.addProperty("coveredRevisionLength", range.get(2).add(range.get(3)));
+            }
             timestamps.add(entry);
         }
         return timestamps;

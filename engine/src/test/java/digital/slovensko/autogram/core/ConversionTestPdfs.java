@@ -72,6 +72,19 @@ public final class ConversionTestPdfs {
         }
     }
 
+    /// Adds a PDF document timestamp (PAdES-LTA style) from `authority` as a new revision.
+    public static byte[] documentTimestamp(byte[] pdf, eu.europa.esig.dss.spi.x509.tsp.TSPSource authority) {
+        var service = new PAdESService(new CommonCertificateVerifier());
+        service.setTspSource(authority);
+        var document = service.timestamp(new InMemoryDocument(pdf, "document.pdf"),
+                new eu.europa.esig.dss.pades.PAdESTimestampParameters());
+        try (var stream = document.openStream()) {
+            return stream.readAllBytes();
+        } catch (java.io.IOException exception) {
+            throw new java.io.UncheckedIOException(exception);
+        }
+    }
+
     /// Adds a sticky note to page 1 as an incremental update, after any signature.
     public static byte[] annotateIncrementally(byte[] pdf) throws Exception {
         try (PDDocument document = Loader.loadPDF(pdf)) {

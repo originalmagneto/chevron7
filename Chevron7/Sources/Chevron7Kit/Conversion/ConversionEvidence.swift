@@ -26,6 +26,20 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var qualification: String?
     }
 
+    /// A PDF document timestamp (DSS `DOCUMENT_TIMESTAMP`): it covers the revision that ends
+    /// at `coveredRevisionLength`, the end of its `/ByteRange`.
+    public struct DocumentTimestamp: Sendable, Equatable {
+        public var id: String
+        public var productionTime: Date?
+        /// Common name of the timestamp unit's certificate.
+        public var producerCommonName: String?
+        /// DSS indication: `PASSED`, `INDETERMINATE` or `FAILED`.
+        public var indication: String?
+        /// DSS timestamp qualification, `QTSA` for a qualified one.
+        public var qualification: String?
+        public var coveredRevisionLength: Int?
+    }
+
     public struct Signature: Sendable, Equatable {
         public var id: String
         public var signatureValue: Data
@@ -49,6 +63,8 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var slimReport: Data
         /// Timestamps that prove the signature existed (produced after its creation).
         public var timestamps: [Timestamp]
+        /// The container's signature file, e.g. `META-INF/signatures001.xml`; nil for PAdES.
+        public var signatureFilename: String? = nil
     }
 
     public struct PDFFacts: Sendable, Equatable {
@@ -95,6 +111,8 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var etsiReport: Data
         public var signatures: [Signature]
         public var pdf: PDFFacts
+        /// The PDF's own document timestamps; empty for an old payload.
+        public var documentTimestamps: [DocumentTimestamp] = []
     }
 
     public var tree: SignatureTree
@@ -103,15 +121,18 @@ public struct ConversionEvidence: Sendable, Equatable {
     public var etsiReport: Data
     public var signatures: [Signature]
     public var pdf: PDFFacts?
+    /// Document timestamps of a PDF original; empty for a container or an old payload.
+    public var documentTimestamps: [DocumentTimestamp]
 
     public init(tree: SignatureTree, validationTime: Date, dssVersion: String, etsiReport: Data,
-                signatures: [Signature], pdf: PDFFacts?) {
+                signatures: [Signature], pdf: PDFFacts?, documentTimestamps: [DocumentTimestamp] = []) {
         self.tree = tree
         self.validationTime = validationTime
         self.dssVersion = dssVersion
         self.etsiReport = etsiReport
         self.signatures = signatures
         self.pdf = pdf
+        self.documentTimestamps = documentTimestamps
     }
 
     public func signature(id: String) -> Signature? {
@@ -150,6 +171,16 @@ extension ConversionEvidence {
             var trustServiceTypes: [String]?
             var etsiSignatureReportBase64: String?
             var timestamps: [RawTimestamp]?
+            var signatureFilename: String?
+        }
+
+        struct RawDocumentTimestamp: Decodable {
+            var id: String
+            var productionTime: String?
+            var producerCommonName: String?
+            var indication: String?
+            var qualification: String?
+            var coveredRevisionLength: Int?
         }
 
         struct RawTimestamp: Decodable {
@@ -180,6 +211,7 @@ extension ConversionEvidence {
             var etsiReportBase64: String
             var signatures: [RawSignature]
             var pdf: RawPDF?
+            var documentTimestamps: [RawDocumentTimestamp]?
         }
 
         /// A data object's JSON carries the PDF facts flat beside its own keys.
@@ -224,6 +256,7 @@ extension ConversionEvidence {
         var etsiReportBase64: String
         var signatures: [RawSignature]
         var pdf: RawPDF?
+        var documentTimestamps: [RawDocumentTimestamp]?
 
         private static func parseDate(_ text: String?) -> Date? {
             let formatter = ISO8601DateFormatter()
@@ -248,7 +281,16 @@ extension ConversionEvidence {
                                  Timestamp(id: $0.id, type: $0.type, productionTime: parseDate($0.productionTime),
                                            producerCommonName: $0.producerCommonName, indication: $0.indication,
                                            qualification: $0.qualification)
-                             })
+                             },
+                             signatureFilename: raw.signatureFilename)
+        }
+
+        private static func documentTimestamps(_ raw: [RawDocumentTimestamp]?) -> [DocumentTimestamp] {
+            (raw ?? []).map {
+                DocumentTimestamp(id: $0.id, productionTime: parseDate($0.productionTime),
+                                  producerCommonName: $0.producerCommonName, indication: $0.indication,
+                                  qualification: $0.qualification, coveredRevisionLength: $0.coveredRevisionLength)
+            }
         }
 
         private static func facts(_ raw: RawPDF) throws -> PDFFacts {
@@ -274,7 +316,7 @@ extension ConversionEvidence {
                    let pdf = item.pdf, let signatures = try? item.signatures.map(signature),
                    let pdfFacts = try? facts(pdf) {
                     nested = NestedEvidence(validationTime: time, etsiReport: report, signatures: signatures,
-                                            pdf: pdfFacts)
+                                            pdf: pdfFacts, documentTimestamps: documentTimestamps(item.documentTimestamps))
                 } else {
                     problem = problem ?? "NESTED_UNREADABLE"
                 }
@@ -291,7 +333,8 @@ extension ConversionEvidence {
             }
             return ConversionEvidence(tree: tree, validationTime: time, dssVersion: dssVersion, etsiReport: report,
                                       signatures: try signatures.map(Self.signature),
-                                      pdf: try pdf.map(Self.facts))
+                                      pdf: try pdf.map(Self.facts),
+                                      documentTimestamps: Self.documentTimestamps(documentTimestamps))
         }
     }
 }

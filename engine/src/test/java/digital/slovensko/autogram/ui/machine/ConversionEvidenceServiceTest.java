@@ -608,4 +608,47 @@ class ConversionEvidenceServiceTest {
         var types = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject().getAsJsonArray("trustServiceTypes");
         assertTrue(types.toString().contains(QES_VALIDATION), types.toString());
     }
+
+    @Test
+    void signatureFilenameNamesTheContainerSignatureFile() throws Exception {
+        var evidence = evidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", ConversionTestPdfs.samplePdf()))));
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+        var name = signature.get("signatureFilename").getAsString();
+        assertTrue(name.startsWith("META-INF/signatures") && name.endsWith(".xml"), name);
+        assertEquals(0, evidence.getAsJsonArray("documentTimestamps").size());
+
+        var pades = evidenceOf("sample_signed.pdf", List.of()).getAsJsonArray("signatures").get(0).getAsJsonObject();
+        assertFalse(pades.has("signatureFilename"), pades.toString());
+    }
+
+    @Test
+    void pdfDocumentTimestampIsListedWithItsRevision() throws Exception {
+        var signed = ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false);
+        var timestamped = ConversionTestPdfs.documentTimestamp(signed, ContentTimestampTest.authority());
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("timestamped.pdf"), timestamped);
+
+        var evidence = new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
+                .getAsJsonObject("evidence");
+
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+        assertEquals(signed.length, signature.get("signedRevisionLength").getAsLong());
+        var timestamps = evidence.getAsJsonArray("documentTimestamps");
+        assertEquals(1, timestamps.size(), timestamps.toString());
+        var timestamp = timestamps.get(0).getAsJsonObject();
+        assertEquals(timestamped.length, timestamp.get("coveredRevisionLength").getAsLong());
+        assertEquals("Test TSA", timestamp.get("producerCommonName").getAsString());
+        assertNotNull(timestamp.get("id"));
+        assertNotNull(timestamp.get("productionTime"));
+        assertNotNull(timestamp.get("indication"));
+        assertNotNull(timestamp.get("qualification"));
+
+        var nested = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", timestamped), new Entry("b.pdf", ConversionTestPdfs.withText("B")))));
+        var inner = dataObject(nested, "zmluva.pdf").getAsJsonObject("evidence");
+        assertNotNull(inner, nested.toString());
+        var innerTimestamps = inner.getAsJsonArray("documentTimestamps");
+        assertEquals(1, innerTimestamps.size(), innerTimestamps.toString());
+        assertEquals(timestamped.length, innerTimestamps.get(0).getAsJsonObject().get("coveredRevisionLength").getAsLong());
+    }
 }
