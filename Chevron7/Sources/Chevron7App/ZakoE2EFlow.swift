@@ -90,6 +90,10 @@ extension ZakoSessionStore {
         attestation.usedDeviceDescription = E2EFormModel.defaultUsedDevice
         step = .verification
         await verifyElectronicOriginal()
+        // Several files become one new PDF named after the container (spec 2026-11-18, 7.4).
+        if electronicOriginal?.kind == .asicEMultiple, attestation.newDocumentName == stem {
+            attestation.newDocumentName = stem + ".pdf"
+        }
     }
 
     /// Validates the original against the trusted lists and reads what the clause and record
@@ -105,6 +109,8 @@ extension ZakoSessionStore {
         qualifiedReportError = nil
         rasterConversionOffered = false
         rasterConversionApproved = false
+        // The advocate's file order is session state: a new verification of the same files keeps it.
+        let chosenOrder = electronicOriginal.map { $0.files.map(\.entryName) } ?? []
         electronicOriginal = nil
         e2eDecision = nil
         do {
@@ -112,8 +118,12 @@ extension ZakoSessionStore {
                 try await signingProvider.conversionEvidence(for: sourceURL)
             }
             let data = try Data(contentsOf: sourceURL)
-            let original = try ElectronicOriginal.make(sourceName: sourceURL.lastPathComponent, sourceData: data,
+            var original = try ElectronicOriginal.make(sourceName: sourceURL.lastPathComponent, sourceData: data,
                                                        evidence: evidence)
+            if original.kind == .asicEMultiple, chosenOrder.count == original.files.count,
+               Set(chosenOrder) == Set(original.files.map(\.entryName)) {
+                original = original.reordered(entryNames: chosenOrder)
+            }
             electronicOriginal = original
             e2eDecision = E2EVerificationGate.decide(original)
         } catch {
@@ -208,8 +218,15 @@ extension ZakoSessionStore {
         } else {
             analysisProgressText = "Konvertujem do PDF/A…"
             do {
-                newDocument = try pdfaFromSignedRunner.convert(original.pdfData, title: attestation.newDocumentName,
+                if original.kind == .asicEMultiple {
+                    // Every file of the container, in the advocate's order, joined into one PDF/A.
+                    newDocument = try pdfaFromSignedRunner.merge(original.files.map { ($0.data, $0.displayName) },
+                                                                 title: attestation.newDocumentName,
                                                                  raster: rasterConversionApproved)
+                } else {
+                    newDocument = try pdfaFromSignedRunner.convert(original.pdfData, title: attestation.newDocumentName,
+                                                                     raster: rasterConversionApproved)
+                }
             } catch PdfaFromSignedRunner.Failure.notCompliant {
                 rasterConversionOffered = true
                 lastError = Self.rasterOfferMessage
@@ -414,7 +431,9 @@ extension ZakoSessionStore {
                 conversionTime: conversionTime,
                 performingPersonName: attestation.performingPerson.fullName,
                 securityElementCount: 0,
-                totalPages: document?.pageCount ?? 0,
+                totalPages: original.kind == .asicEMultiple
+                    ? PDFDocument(data: newDocument)?.pageCount ?? 0
+                    : document?.pageCount ?? 0,
                 totalSheets: 0,
                 pdfFileName: containerDocumentName,
                 deliveredFileName: deliveredTarget.lastPathComponent,

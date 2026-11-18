@@ -16,6 +16,15 @@ public enum E2ECodelists {
     public static let pdfa1Format = ZakoCodelistItem(code: "PDFA1", skName: "PDF/A-1")
     public static let pdfa2Format = ZakoCodelistItem(code: "PDFA2", skName: "PDF/A-2")
     public static let otherFormat = ZakoCodelistItem(code: "Iny", skName: "Iný")
+    /// Codelist 53 lists PNG but no JPEG item: the items PDF, PDFA1, PDFA2, PNG, TXT,
+    /// XMLDataContainer and Iny, as read from the official filler of the P→E clause 1.3
+    /// (`Content/form.2.html`, `docs/reference/security-elements/select-options.json`,
+    /// `FormatDokumentu`), and the E→E clause 1.3 schema's `OriginalDocumentFormat`
+    /// documentation names PDF, TXT, PNG and XMLDataContainer, every other format by its usual
+    /// extension or abbreviation. The E→E viewer `form.19.html2.xslt` carries no item list.
+    public static let pngFormat = ZakoCodelistItem(code: "PNG", skName: "PNG")
+    /// A JPEG is `Iny` (`otherFormat`) with this other text.
+    public static let jpegFormatOther = "JPEG"
 
     public static let qualifiedSignature = ZakoCodelistItem(code: "2", skName: "Kvalifikovaný elektronický podpis")
     public static let advancedSignature = ZakoCodelistItem(code: "3", skName: "Zdokonalený elektronický podpis")

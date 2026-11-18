@@ -53,6 +53,32 @@ final class ElectronicOriginalTests: XCTestCase {
         XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
     }
 
+    func testLegacyPayloadWithDuplicateZipEntryIsRefused() throws {
+        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf),
+                                                            .init(path: "zmluva.pdf", data: pdf)])
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 1
+        facts.asicDataObjectName = "zmluva.pdf"
+        var xades = signature()
+        xades.signedRevisionLength = nil
+        XCTAssertThrowsError(try original([xades], pdf: facts, name: "zmluva.asice", data: container)) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "zmluva.pdf"))
+        }
+    }
+
+    func testEngineFlagForDuplicateEntryNameIsRefused() throws {
+        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf)])
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 1
+        facts.asicDataObjectName = "zmluva.pdf"
+        facts.duplicateDataObjectName = "zmluva.pdf"
+        var xades = signature()
+        xades.signedRevisionLength = nil
+        XCTAssertThrowsError(try original([xades], pdf: facts, name: "zmluva.asice", data: container)) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "zmluva.pdf"))
+        }
+    }
+
     func testQualificationMapsToCodelist54() {
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESIG", qcType: "esign").item.code, "2")
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESEAL", qcType: "eseal").item.code, "5")
@@ -105,22 +131,11 @@ final class ElectronicOriginalTests: XCTestCase {
         XCTAssertThrowsError(try original([])) { XCTAssertEqual($0 as? ElectronicOriginalError, .unsigned) }
     }
 
-    func testRefusesTwoDataObjects() {
+    func testLegacyPayloadWithTwoDataObjectsIsMalformed() {
         var facts = E2EEvidenceFixtures.PDF()
         facts.asicDataObjectCount = 2
         XCTAssertThrowsError(try original([signature()], pdf: facts, name: "a.asice", data: Data("PK".utf8))) {
-            XCTAssertEqual($0 as? ElectronicOriginalError, .unsupportedContainer(dataObjects: 2))
-        }
-    }
-
-    func testRefusesSignedPDFInsideContainer() throws {
-        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf)])
-        var facts = E2EEvidenceFixtures.PDF()
-        facts.asicDataObjectCount = 1
-        facts.asicDataObjectName = "zmluva.pdf"
-        facts.asicDataObjectSigned = true
-        XCTAssertThrowsError(try original([signature()], pdf: facts, name: "a.asice", data: container)) {
-            XCTAssertEqual($0 as? ElectronicOriginalError, .signedPDFInsideContainer)
+            XCTAssertEqual($0 as? ElectronicOriginalError, .malformedEvidence)
         }
     }
 
@@ -156,6 +171,366 @@ final class ElectronicOriginalTests: XCTestCase {
 
     func testPlainPdfIsConverted() throws {
         XCTAssertEqual(try original([signature()]).plan, .convert(reason: "PDF nie je platné PDF/A"))
+    }
+
+    // MARK: Containers with several files
+
+    private typealias Object = E2EEvidenceFixtures.DataObject
+
+    private func pdfBytes(_ fill: UInt8, count: Int = 200) -> Data {
+        Data("%PDF-1.7\n".utf8) + Data(repeating: fill, count: max(0, count - 9))
+    }
+
+    private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x50, count: 40)
+    private let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0]) + Data(repeating: 0x4A, count: 40)
+
+    private func object(_ name: String, _ bytes: Data, kind: String = "pdf",
+                        coveredBy: [String] = ["C-1"]) -> Object {
+        var object = Object(name: name, bytes: bytes)
+        object.kind = kind
+        object.coveredBy = coveredBy
+        return object
+    }
+
+    private func containerSignature(_ id: String = "C-1") -> E2EEvidenceFixtures.Signature {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.id = id
+        signature.format = "XAdES-BASELINE-T"
+        signature.signatureValue = Data("container-\(id)".utf8)
+        return signature
+    }
+
+    private func pades(_ id: String, revision: Int) -> E2EEvidenceFixtures.Signature {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.id = id
+        signature.signer = "Podpisovateľ \(id)"
+        signature.signedRevisionLength = revision
+        signature.signatureValue = Data("pades-\(id)".utf8)
+        return signature
+    }
+
+    private func container(_ objects: [Object], signatures: [E2EEvidenceFixtures.Signature]? = nil,
+                           zipped: [Object]? = nil) throws -> ElectronicOriginal {
+        let data = try ASiCEPackager().package(files: (zipped ?? objects).map { .init(path: $0.name, data: $0.bytes) })
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = objects.count
+        facts.asicDataObjectName = objects.first { $0.kind == "pdf" }?.name
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: signatures ?? [containerSignature()], pdf: facts, dataObjects: objects))
+        return try ElectronicOriginal.make(sourceName: "spis.asice", sourceData: data, evidence: evidence)
+    }
+
+    private func sha(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }
+
+    func testTwoPdfsAndImagesBecomeDocumentsInContainerOrder() throws {
+        let a = pdfBytes(0x41)
+        let original = try container([object("a.pdf", a), object("b.png", png, kind: "png"),
+                                      object("c.jpg", jpeg, kind: "jpeg")])
+        XCTAssertEqual(original.kind, .asicEMultiple)
+        XCTAssertEqual(original.documents.map(\.name), ["a.pdf", "b.png", "c.jpg"])
+        XCTAssertEqual(original.documents.map(\.sha256), [sha(a), sha(png), sha(jpeg)])
+        XCTAssertEqual(original.documents.map(\.format), [E2ECodelists.pdfFormat, E2ECodelists.pngFormat,
+                                                          E2ECodelists.otherFormat])
+        XCTAssertEqual(original.documents.map(\.formatOther), [nil, nil, E2ECodelists.jpegFormatOther])
+        XCTAssertEqual(original.documents.map(\.fileEntryName), ["a.pdf", "b.png", "c.jpg"])
+        XCTAssertEqual(original.authorizations.count, 1)
+        XCTAssertEqual(original.authorizations[0].documentNames, ["a.pdf", "b.png", "c.jpg"])
+        XCTAssertNil(original.authorizations[0].fileEntryName)
+        XCTAssertEqual(original.files.map(\.entryName), ["a.pdf", "b.png", "c.jpg"])
+        XCTAssertEqual(original.files.map(\.kind), [.pdf, .png, .jpeg])
+        XCTAssertEqual(original.files[1].data, png)
+        XCTAssertEqual(original.files[2].documentNames, ["c.jpg"])
+        XCTAssertEqual(original.pdfData, a)
+        guard case .convert = original.plan else { return XCTFail("several files are always converted") }
+    }
+
+    func testImageOnlyContainerHasNoPdfData() throws {
+        let original = try container([object("b.png", png, kind: "png")])
+        XCTAssertEqual(original.pdfData, Data())
+        XCTAssertEqual(original.kind, .asicEMultiple)
+    }
+
+    func testSignatureCoveringOneFileListsOnlyIt() throws {
+        let original = try container([object("a.pdf", pdfBytes(0x41), coveredBy: ["C-1"]),
+                                      object("b.png", png, kind: "png", coveredBy: ["C-1", "C-2"])],
+                                     signatures: [containerSignature("C-1"), containerSignature("C-2")])
+        let byID = Dictionary(uniqueKeysWithValues: original.authorizations.map { ($0.signatureID, $0.documentNames) })
+        XCTAssertEqual(byID["C-1"], ["a.pdf", "b.png"])
+        XCTAssertEqual(byID["C-2"], ["b.png"])
+    }
+
+    func testUncoveredFileIsRefused() {
+        XCTAssertThrowsError(try container([object("a.pdf", pdfBytes(0x41)),
+                                            object("b.pdf", pdfBytes(0x42), coveredBy: [])])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .uncoveredDataObject(name: "b.pdf"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Súbor b.pdf nepokrýva žiadny podpis kontajnera. Neautorizovaný súbor nemožno zaručene konvertovať.")
+        }
+    }
+
+    func testCoverageBySignatureOutsideTheTreeIsRefused() {
+        XCTAssertThrowsError(try container([object("a.pdf", pdfBytes(0x41), coveredBy: ["X-9"])])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .uncoveredDataObject(name: "a.pdf"))
+        }
+    }
+
+    func testDocxIsRefusedByName() {
+        XCTAssertThrowsError(try container([object("a.pdf", pdfBytes(0x41)),
+                                            object("zmluva.docx", Data("PK docx".utf8), kind: "other")])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .unsupportedDataObject(name: "zmluva.docx"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Súbor zmluva.docx nie je PDF ani obrázok PNG alebo JPEG. Chevron7 ho do nového dokumentu nevie zahrnúť.")
+        }
+    }
+
+    func testUnreadableIsRefusedByName() {
+        var broken = object("zlomene.pdf", Data("%PDF-broken".utf8), kind: "other")
+        broken.problem = "UNREADABLE"
+        XCTAssertThrowsError(try container([object("a.pdf", pdfBytes(0x41)), broken])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .unreadableDataObject(name: "zlomene.pdf"))
+            XCTAssertEqual(error.localizedDescription, "Súbor zlomene.pdf sa nepodarilo prečítať.")
+        }
+        var large = object("velke.pdf", pdfBytes(0x43))
+        large.problem = "TOO_LARGE"
+        XCTAssertThrowsError(try container([large])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .tooLargeDataObject(name: "velke.pdf"))
+            XCTAssertEqual(error.localizedDescription, "Súbor velke.pdf je príliš veľký (viac ako 100 MB).")
+        }
+    }
+
+    func testLargeOnlyUnsignedPdfSkippedByTheTreeStaysOnTheOnePdfPath() throws {
+        var large = object("zmluva.pdf", pdfBytes(0x41))
+        large.treeSkipped = "TOO_LARGE"
+        let original = try container([large])
+        XCTAssertEqual(original.kind, .asicE(entryName: "zmluva.pdf"))
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
+    }
+
+    func testSkippedPdfAmongSeveralFilesIsStillRefused() {
+        var large = object("zmluva.pdf", pdfBytes(0x41))
+        large.treeSkipped = "TOO_LARGE"
+        XCTAssertThrowsError(try container([large, object("b.png", png, kind: "png")])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .nestedSignaturesUnreadable(name: "zmluva.pdf"))
+        }
+    }
+
+    // MARK: Names that would point at two originals
+
+    private func signedPDF(_ name: String, fill: UInt8, id: String) -> Object {
+        var file = object(name, pdfBytes(fill, count: 1000))
+        file.nestedSignatures = [pades(id, revision: 900)]
+        return file
+    }
+
+    func testSameStemInTwoCasesWithRevisionsIsRefused() {
+        XCTAssertThrowsError(try container([signedPDF("x.pdf", fill: 0x41, id: "P-1"),
+                                            signedPDF("x.PDF", fill: 0x42, id: "P-2")])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .duplicateDocumentName(name: "x-1"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Súbory v kontajneri by mali v doložke rovnaký názov (x-1). Takýto kontajner Chevron7 nekonvertuje.")
+        }
+    }
+
+    func testRevisionNameEqualToAnotherEntryIsRefused() {
+        XCTAssertThrowsError(try container([signedPDF("a.pdf", fill: 0x41, id: "P-1"),
+                                            object("a-1", png, kind: "png")])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateDocumentName(name: "a-1"))
+        }
+    }
+
+    func testLongPathsCutToOnePrefixAreRefused() {
+        let folder = String(repeating: "dlhy-priecinok/", count: 20)
+        XCTAssertGreaterThan(folder.count, 255)
+        XCTAssertThrowsError(try container([object(folder + "a/zmluva.pdf", pdfBytes(0x41)),
+                                            object(folder + "b/zmluva.pdf", pdfBytes(0x42))])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError,
+                           .duplicateDocumentName(name: String((folder + "a/zmluva.pdf").prefix(255))))
+        }
+    }
+
+    func testDuplicateEntryNamesInTheEvidenceAreRefused() {
+        let a = object("a.pdf", pdfBytes(0x41))
+        XCTAssertThrowsError(try container([a, a, object("b.png", png, kind: "png")])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Kontajner obsahuje viac súborov s rovnakým názvom (a.pdf). Takýto kontajner Chevron7 nekonvertuje.")
+        }
+    }
+
+    func testDuplicateEntryNamesInTheZipAreRefused() {
+        let a = object("dir/a.pdf", pdfBytes(0x41))
+        let b = object("b.png", png, kind: "png")
+        // Identical bytes under one name twice: the engine lists one entry, the zip holds two.
+        XCTAssertThrowsError(try container([a, b], zipped: [a, a, b])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
+        }
+        // The one-unsigned-PDF path is refused the same way.
+        XCTAssertThrowsError(try container([a], zipped: [a, a])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
+        }
+    }
+
+    func testBytesThatDifferFromTheEvidenceAreRefused() {
+        let evidenceObject = object("a.pdf", pdfBytes(0x41))
+        let zipped = object("a.pdf", pdfBytes(0x42))
+        XCTAssertThrowsError(try container([evidenceObject], zipped: [zipped])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .malformedEvidence)
+        }
+    }
+
+    func testSignedPdfWholeFileIsItsOwnDocumentWhenBytesDiffer() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var file = object("zmluva.pdf", bytes)
+        file.nestedSignatures = [pades("P-1", revision: 900)]
+        file.nestedValidationTime = "2026-10-16T09:45:00Z"
+        let original = try container([file])
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva-1", "zmluva-2"])
+        XCTAssertEqual(original.documents.map(\.sha256), [sha(bytes.prefix(900)), sha(bytes)])
+        let pades = try XCTUnwrap(original.authorizations.first { $0.signatureID == "P-1" })
+        XCTAssertEqual(pades.documentNames, ["zmluva-1"])
+        XCTAssertEqual(pades.fileEntryName, "zmluva.pdf")
+        XCTAssertEqual(pades.signerName, "Podpisovateľ P-1")
+        XCTAssertEqual(pades.signatureValue, Data("pades-P-1".utf8))
+        XCTAssertEqual(pades.slimReport, Data("<ValidationReport id=\"P-1\"/>".utf8))
+        XCTAssertEqual(pades.validationTime, ISO8601DateFormatter().date(from: "2026-10-16T09:45:00Z"))
+        XCTAssertEqual(pades.state, .valid)
+        let outer = try XCTUnwrap(original.authorizations.first { $0.signatureID == "C-1" })
+        XCTAssertEqual(outer.documentNames, ["zmluva-2"])
+        XCTAssertEqual(outer.validationTime, ISO8601DateFormatter().date(from: E2EEvidenceFixtures.validationTime))
+        XCTAssertEqual(original.files[0].documentNames, ["zmluva-1", "zmluva-2"])
+    }
+
+    func testSignedPdfCoveringWholeFileSharesOneDocument() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var file = object("zmluva.pdf", bytes)
+        file.nestedSignatures = [pades("P-1", revision: 1000)]
+        let original = try container([file])
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
+        XCTAssertEqual(original.documents[0].sha256, sha(bytes))
+        XCTAssertEqual(original.authorizations.map(\.documentNames), [["zmluva.pdf"], ["zmluva.pdf"]])
+    }
+
+    func testTwoRevisionsPlusTailGiveThreeDocuments() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var file = object("zmluva.pdf", bytes)
+        file.nestedSignatures = [pades("P-2", revision: 800), pades("P-1", revision: 500)]
+        let original = try container([file])
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva-1", "zmluva-2", "zmluva-3"])
+        XCTAssertEqual(original.documents.map(\.sha256), [sha(bytes.prefix(500)), sha(bytes.prefix(800)), sha(bytes)])
+        let byID = Dictionary(uniqueKeysWithValues: original.authorizations.map { ($0.signatureID, $0.documentNames) })
+        XCTAssertEqual(byID["P-1"], ["zmluva-1"])
+        XCTAssertEqual(byID["P-2"], ["zmluva-2"])
+        XCTAssertEqual(byID["C-1"], ["zmluva-3"])
+    }
+
+    func testSameFileNameInTwoFoldersUsesFullPaths() throws {
+        let original = try container([object("a/zmluva.pdf", pdfBytes(0x41)), object("b/zmluva.pdf", pdfBytes(0x42)),
+                                      object("prilohy/priloha.pdf", pdfBytes(0x43))])
+        XCTAssertEqual(original.documents.map(\.name), ["a/zmluva.pdf", "b/zmluva.pdf", "priloha.pdf"])
+        XCTAssertEqual(original.files.map(\.displayName), ["a/zmluva.pdf", "b/zmluva.pdf", "priloha.pdf"])
+    }
+
+    func testReorderedMovesDocumentsAndDataObjects() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var signed = object("zmluva.pdf", bytes)
+        signed.nestedSignatures = [pades("P-1", revision: 900)]
+        let original = try container([signed, object("b.png", png, kind: "png"), object("c.pdf", pdfBytes(0x43))])
+        let reordered = original.reordered(entryNames: ["c.pdf", "zmluva.pdf", "b.png"])
+        XCTAssertEqual(reordered.files.map(\.entryName), ["c.pdf", "zmluva.pdf", "b.png"])
+        XCTAssertEqual(reordered.documents.map(\.name), ["c.pdf", "zmluva-1", "zmluva-2", "b.png"])
+        XCTAssertEqual(reordered.authorizations, original.authorizations)
+    }
+
+    func testEmbeddedFilesAreNamedOnTheFile() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var file = object("zmluva.pdf", bytes)
+        file.embeddedFileNames = ["faktura.xml"]
+        file.nestedSignatures = [pades("P-1", revision: 900)]
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.changesAfterLastSignature = ["ANNOTATION"]
+        facts.hasEmbeddedFiles = true
+        file.nestedPDF = facts
+        let original = try container([file, object("b.png", png, kind: "png")])
+        XCTAssertEqual(original.files[0].embeddedFileNames, ["faktura.xml"])
+        XCTAssertEqual(original.files[0].changedAfterSignature, ["ANNOTATION"])
+        XCTAssertEqual(original.files[1].embeddedFileNames, [])
+        XCTAssertEqual(original.files[1].changedAfterSignature, [])
+    }
+
+    func testSingleUnsignedPdfContainerIsUnchanged() throws {
+        let original = try container([object("zmluva.pdf", pdf)])
+        XCTAssertEqual(original.kind, .asicE(entryName: "zmluva.pdf"))
+        XCTAssertEqual(original.pdfData, pdf)
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
+        XCTAssertEqual(original.files, [])
+        XCTAssertNil(original.documents[0].fileEntryName)
+
+        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf)])
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 1
+        facts.asicDataObjectName = "zmluva.pdf"
+        facts.declaredPdfaPart = 2
+        facts.pdfaCompliant = true
+        var only = object("zmluva.pdf", pdf)
+        only.nestedPDF = facts
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [containerSignature()], pdf: facts, dataObjects: [only]))
+        guard case .signed(.pdf, let nested)? = evidence.tree.documents.first?.content, nested.signatures.isEmpty else {
+            return XCTFail("the engine lists an unsigned PDF data object with an empty nested tree")
+        }
+        let kept = try ElectronicOriginal.make(sourceName: "zmluva.asice", sourceData: container, evidence: evidence)
+        XCTAssertEqual(kept.kind, .asicE(entryName: "zmluva.pdf"))
+        XCTAssertEqual(kept.plan, .keep(format: E2ECodelists.pdfa2Format, formatOther: nil))
+    }
+
+    func testSingleSignedPdfContainerIsNowAccepted() throws {
+        let bytes = pdfBytes(0x5A, count: 1000)
+        var file = object("zmluva.pdf", bytes)
+        file.nestedSignatures = [pades("P-1", revision: 900)]
+        let original = try container([file])
+        XCTAssertEqual(original.kind, .asicEMultiple)
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva-1", "zmluva-2"])
+        guard case .convert = original.plan else { return XCTFail("a signed PDF in a container is converted") }
+    }
+
+    func testNestedSignaturesMissingFromTheTreeAreRefused() {
+        var file = object("zmluva.pdf", pdfBytes(0x5A, count: 1000))
+        file.nestedSignatures = [pades("P-1", revision: 900)]
+        file.treeNested = false
+        XCTAssertThrowsError(try container([file])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .nestedSignaturesUnreadable(name: "zmluva.pdf"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Podpisy v súbore zmluva.pdf sa nepodarilo overiť. Skúste overenie znova.")
+        }
+    }
+
+    func testUnreadableNestedEvidenceIsRefused() {
+        var file = object("zmluva.pdf", pdfBytes(0x5A, count: 1000))
+        file.problem = "NESTED_UNREADABLE"
+        XCTAssertThrowsError(try container([file])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .nestedSignaturesUnreadable(name: "zmluva.pdf"))
+        }
+    }
+
+    func testNestedStateComesFromTheTreeAndReachesTheGate() throws {
+        var file = object("zmluva.pdf", pdfBytes(0x5A, count: 1000))
+        var nested = pades("P-1", revision: 1000)
+        nested.indication = "TOTAL_FAILED"
+        file.nestedSignatures = [nested]
+        let original = try container([file])
+        XCTAssertEqual(original.authorizations.first { $0.signatureID == "P-1" }?.state, .invalid)
+        guard case .blocked = E2EVerificationGate.decide(original) else {
+            return XCTFail("an invalid nested signature must block")
+        }
+    }
+
+    func testTooManyAuthorizationsIsRefused() {
+        let signatures = (1...100).map { signature("S-\($0)") }
+        XCTAssertThrowsError(try original(signatures)) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .tooManyAuthorizations(100))
+            XCTAssertEqual(error.localizedDescription,
+                           "Dokument má 100 autorizácií. Formulár doložky ich pripúšťa najviac 99.")
+        }
     }
 
     // MARK: Gate

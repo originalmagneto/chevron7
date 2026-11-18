@@ -468,6 +468,207 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(provider.signedKinds, [])
     }
 
+    // MARK: - Several files in one ASiC-E (spec 2026-11-18, 7.4)
+
+    func testDemoMultiFileDeliversContainerWithMergedPdf() async throws {
+        try requireXMLLint()
+        let (store, provider, source) = try makeMultiFileStore()
+        let merged = Data("%PDF-1.7 merged".utf8)
+        let calls = MergeCalls()
+        store.pdfaFromSignedRunner = Self.mergingRunner(merged, calls: calls)
+        await store.loadElectronicOriginal(at: source)
+        XCTAssertEqual(store.attestation.newDocumentName, "spis.pdf", "the container's stem names the new document")
+        prepareForAuthorization(store)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(calls.names, [["a.pdf", "b.png", "c.jpg"]])
+        XCTAssertEqual(calls.inputs.first, Self.multiFiles.map(\.bytes), "the files go in byte for byte")
+        let request = try XCTUnwrap(provider.clientRequests.first)
+        XCTAssertEqual(request.pdfData, merged)
+        let clause = try XCTUnwrap(request.extraFiles.first { $0.path.hasSuffix(".xdcf") })
+        let clauseText = String(decoding: clause.data, as: UTF8.self)
+        for name in ["a-1", "a-2", "b.png", "c.jpg"] {
+            XCTAssertTrue(clauseText.contains(name), "the clause lists \(name)")
+        }
+        let row = try XCTUnwrap(store.evidenceStore.record(id: store.currentRecordID))
+        XCTAssertEqual(row.direction, .electronicToElectronic)
+        XCTAssertEqual(row.clientOutput, .asicContainer)
+        XCTAssertEqual(row.fingerprintSHA256Hex, SHA256.hash(data: merged).map { String(format: "%02x", $0) }.joined())
+        XCTAssertNoThrow(try FormSchemaValidator().validate(Data(row.attestationXML.utf8), against: .recordE2E_1_0))
+    }
+
+    func testDemoMultiFileDeliversOnePdf() async throws {
+        try requireXMLLint()
+        let (store, provider, source) = try makeMultiFileStore(output: .singlePDF)
+        let merged = Data("%PDF-1.7 merged".utf8)
+        let calls = MergeCalls()
+        store.pdfaFromSignedRunner = Self.mergingRunner(merged, calls: calls)
+        let renderer = StubClausePageRenderer()
+        store.clausePageRenderer = renderer
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(calls.names, [["a.pdf", "b.png", "c.jpg"]])
+        let request = try XCTUnwrap(provider.clientRequests.first)
+        XCTAssertEqual(request.pdfData, merged)
+        XCTAssertNotNil(request.appendedClause)
+        let clauseText = try XCTUnwrap(renderer.renderedXML.first)
+        for name in ["a-1", "a-2", "b.png", "c.jpg"] {
+            XCTAssertTrue(clauseText.contains(name), "the clause lists \(name)")
+        }
+        let row = try XCTUnwrap(store.evidenceStore.record(id: store.currentRecordID))
+        XCTAssertEqual(row.clientOutput, .singlePDF)
+        XCTAssertEqual(row.revisionOneLength, merged.count)
+    }
+
+    func testDemoMultiFileFollowsChosenOrder() async throws {
+        try requireXMLLint()
+        let (store, _, source) = try makeMultiFileStore(output: .singlePDF)
+        let calls = MergeCalls()
+        store.pdfaFromSignedRunner = Self.mergingRunner(Data("%PDF-1.7 merged".utf8), calls: calls)
+        let renderer = StubClausePageRenderer()
+        store.clausePageRenderer = renderer
+        await store.loadElectronicOriginal(at: source)
+        store.moveE2EFile(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(store.electronicOriginal?.files.map(\.entryName), ["c.jpg", "a.pdf", "b.png"])
+        prepareForAuthorization(store)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(calls.names, [["c.jpg", "a.pdf", "b.png"]])
+        let clauseText = try XCTUnwrap(renderer.renderedXML.first)
+        let positions = try ["c.jpg", "a-1", "a-2", "b.png"].map { name in
+            try XCTUnwrap(clauseText.range(of: name)?.lowerBound, "\(name) in the clause")
+        }
+        XCTAssertEqual(positions, positions.sorted(), "the clause lists the originals in the chosen order")
+    }
+
+    func testReverificationKeepsTheChosenOrder() async throws {
+        let (store, _, source) = try makeMultiFileStore()
+        await store.loadElectronicOriginal(at: source)
+        store.moveE2EFile(from: IndexSet(integer: 0), to: 3)
+        await store.verifyElectronicOriginal()
+        XCTAssertEqual(store.electronicOriginal?.files.map(\.entryName), ["b.png", "c.jpg", "a.pdf"])
+    }
+
+    func testMultiFileNotCompliantOffersRaster() async throws {
+        try requireXMLLint()
+        let (store, provider, source) = try makeMultiFileStore()
+        let calls = MergeCalls()
+        store.pdfaFromSignedRunner = PdfaFromSignedRunner(launch: { arguments in
+            guard arguments.count > 1, arguments[1] == "--merge" else { return (1, "convert instead of merge") }
+            calls.record(arguments)
+            return (3, "font")
+        })
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(calls.names.count, 1, "the files were merged, not converted one by one")
+        XCTAssertTrue(store.rasterConversionOffered)
+        XCTAssertEqual(store.lastError, ZakoSessionStore.rasterOfferMessage)
+        XCTAssertNil(store.attestation.evidenceNumber, "no number before the PDF/A exists")
+        XCTAssertTrue(provider.requests.isEmpty)
+        XCTAssertNotEqual(store.step, .done)
+
+        store.rasterConversionApproved = true
+        store.pdfaFromSignedRunner = Self.mergingRunner(Data("%PDF-1.7 merged".utf8), calls: calls)
+        await store.authorizeAndSign()
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(calls.rasterFlags.last, true, "the approved raster conversion reaches the merge")
+    }
+
+    func testReorderIsRefusedWhileAuthorizing() async throws {
+        let (store, _, source) = try makeMultiFileStore()
+        await store.loadElectronicOriginal(at: source)
+        store.isAuthorizing = true
+        store.moveE2EFile(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(store.electronicOriginal?.files.map(\.entryName), ["a.pdf", "b.png", "c.jpg"])
+        store.isAuthorizing = false
+        store.moveE2EFile(from: IndexSet(integer: 2), to: 0)
+        XCTAssertEqual(store.electronicOriginal?.files.map(\.entryName), ["c.jpg", "a.pdf", "b.png"])
+    }
+
+    func testSingleFileKeepsItsDefaultNewDocumentName() async throws {
+        let (store, _, source) = try makeStore()
+        await store.loadElectronicOriginal(at: source)
+        XCTAssertEqual(store.attestation.newDocumentName, "zmluva")
+    }
+
+    // MARK: - Several-file fixtures
+
+    /// a.pdf with one PAdES revision of its own (so two documents, a-1 and a-2), b.png and c.jpg.
+    private static var multiFiles: [E2EEvidenceFixtures.DataObject] {
+        let pdf = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 991)
+        var a = E2EEvidenceFixtures.DataObject(name: "a.pdf", bytes: pdf)
+        a.coveredBy = ["C-1"]
+        a.pages = 2
+        a.embeddedFileNames = ["priloha.xlsx"]
+        var pades = E2EEvidenceFixtures.Signature()
+        pades.id = "P-1"
+        pades.signer = "Mária Veriteľka"
+        pades.signedRevisionLength = 900
+        pades.signatureValue = Data("pades-P-1".utf8)
+        a.nestedSignatures = [pades]
+        var b = E2EEvidenceFixtures.DataObject(name: "b.png",
+                                               bytes: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x50, count: 40))
+        b.kind = "png"
+        b.coveredBy = ["C-1"]
+        var c = E2EEvidenceFixtures.DataObject(name: "c.jpg",
+                                               bytes: Data([0xFF, 0xD8, 0xFF, 0xE0]) + Data(repeating: 0x4A, count: 40))
+        c.kind = "jpeg"
+        c.coveredBy = ["C-1"]
+        return [a, b, c]
+    }
+
+    static func multiFilePayload() -> Data {
+        var container = E2EEvidenceFixtures.Signature()
+        container.id = "C-1"
+        container.format = "XAdES-BASELINE-T"
+        container.signatureValue = Data("container-C-1".utf8)
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = multiFiles.count
+        facts.asicDataObjectName = "a.pdf"
+        return E2EEvidenceFixtures.payload(signatures: [container], pdf: facts, dataObjects: multiFiles)
+    }
+
+    /// `spis.asice` with three files on disk, the provider validating it and the output chosen.
+    private func makeMultiFileStore(output: AppSettings.ZakoClientOutput = .asicContainer)
+        throws -> (ZakoSessionStore, SinglePDFEvidenceProvider, URL) {
+        let settingsStore = makeSettingsStore()
+        let directory = makeTemporaryDirectory("e2e-multi")
+        let source = directory.appendingPathComponent("spis.asice")
+        try ASiCEPackager().package(files: Self.multiFiles.map { .init(path: $0.name, data: $0.bytes) }).write(to: source)
+        let provider = SinglePDFEvidenceProvider(payload: Self.multiFilePayload())
+        settingsStore.useRealSigningProvider(provider)
+        let original = settingsStore.settings
+        addTeardownBlock { await MainActor.run { settingsStore.settings = original } }
+        settingsStore.settings.learnFromReviews = false
+        settingsStore.settings.zakoClientOutput = output
+        let store = ZakoSessionStore(settingsStore: settingsStore,
+                                     exampleBank: ExampleBank(directory: makeTemporaryDirectory("e2e-multi-bank")))
+        store.direction = .electronicToElectronic
+        store.clausePageRenderer = StubClausePageRenderer()
+        return (store, provider, source)
+    }
+
+    /// A merge runner that refuses the single-file conversion and records each merge's inputs.
+    private static func mergingRunner(_ merged: Data, calls: MergeCalls) -> PdfaFromSignedRunner {
+        PdfaFromSignedRunner(launch: { arguments in
+            guard arguments.count > 1, arguments[1] == "--merge" else { return (1, "convert instead of merge") }
+            calls.record(arguments)
+            try merged.write(to: URL(fileURLWithPath: arguments[2]))
+            return (0, "")
+        })
+    }
+
     // MARK: - One-PDF fixtures
 
     private static var keptPdfaFacts: E2EEvidenceFixtures.PDF {
@@ -616,5 +817,38 @@ private final class SinglePDFEvidenceProvider: QualifiedSigningProviding, @unche
 
     func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
         try await signer.sign(request)
+    }
+}
+
+/// Every PdfaFromSigned --merge launch: its input names and bytes (read before the runner's
+/// temporary folder goes) and whether it rasterized.
+private final class MergeCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedNames: [[String]] = []
+    private var recordedInputs: [[Data]] = []
+    private var recordedRaster: [Bool] = []
+
+    var names: [[String]] { lock.withLock { recordedNames } }
+    var inputs: [[Data]] { lock.withLock { recordedInputs } }
+    var rasterFlags: [Bool] { lock.withLock { recordedRaster } }
+
+    /// `PdfaFromSigned --merge <out> <icc> <title> [--raster] (<in> <name>)...`
+    func record(_ arguments: [String]) {
+        var rest = Array(arguments.dropFirst(5))
+        let raster = rest.first == "--raster"
+        if raster { rest.removeFirst() }
+        var names: [String] = []
+        var inputs: [Data] = []
+        var index = 0
+        while index + 1 < rest.count {
+            inputs.append((try? Data(contentsOf: URL(fileURLWithPath: rest[index]))) ?? Data())
+            names.append(rest[index + 1])
+            index += 2
+        }
+        lock.withLock {
+            recordedNames.append(names)
+            recordedInputs.append(inputs)
+            recordedRaster.append(raster)
+        }
     }
 }

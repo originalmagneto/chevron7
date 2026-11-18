@@ -7,11 +7,18 @@ import Foundation
 public enum ElectronicOriginalError: LocalizedError, Equatable {
     case unsigned
     case notPDFOrContainer
-    case unsupportedContainer(dataObjects: Int)
     case containerWithoutPDF
-    case signedPDFInsideContainer
     case changedAfterLastSignature([String])
     case malformedEvidence
+    case unsupportedDataObject(name: String)
+    case unreadableDataObject(name: String)
+    case uncoveredDataObject(name: String)
+    case nestedSignaturesUnreadable(name: String)
+    case tooManyDocuments(Int)
+    case tooManyAuthorizations(Int)
+    case tooLargeDataObject(name: String)
+    case duplicateEntryName(name: String)
+    case duplicateDocumentName(name: String)
 
     public var errorDescription: String? {
         switch self {
@@ -19,29 +26,47 @@ public enum ElectronicOriginalError: LocalizedError, Equatable {
             return "Dokument nie je podpísaný. Zaručenú konverziu elektronického dokumentu Chevron7 zatiaľ vykoná len pre dokument, ktorý klient autorizoval."
         case .notPDFOrContainer:
             return "Pôvodný dokument musí byť PDF alebo kontajner ASiC-E."
-        case .unsupportedContainer(let count):
-            return "Kontajner obsahuje \(count) dokumentov. Chevron7 zatiaľ konvertuje len kontajner s jedným PDF."
         case .containerWithoutPDF:
-            return "Kontajner neobsahuje PDF. Chevron7 zatiaľ konvertuje len kontajner s jedným PDF."
-        case .signedPDFInsideContainer:
-            return "PDF v kontajneri má aj vlastné podpisy. Takýto dokument Chevron7 zatiaľ nekonvertuje."
+            return "Kontajner neobsahuje súbor PDF, ktorý uvádza výsledok overenia podpisov. Skúste overenie znova."
         case .changedAfterLastSignature(let changes):
             let kinds = changes.map(ElectronicOriginal.changeLabel).joined(separator: ", ")
             return "Dokument bol po poslednom podpise zmenený (\(kinds)). Tieto zmeny nikto neautorizoval, preto ho nemožno konvertovať."
         case .malformedEvidence:
             return "Výsledok overenia podpisov je neúplný. Skúste overenie znova."
+        case .unsupportedDataObject(let name):
+            return "Súbor \(name) nie je PDF ani obrázok PNG alebo JPEG. Chevron7 ho do nového dokumentu nevie zahrnúť."
+        case .unreadableDataObject(let name):
+            return "Súbor \(name) sa nepodarilo prečítať."
+        case .uncoveredDataObject(let name):
+            return "Súbor \(name) nepokrýva žiadny podpis kontajnera. Neautorizovaný súbor nemožno zaručene konvertovať."
+        case .nestedSignaturesUnreadable(let name):
+            return "Podpisy v súbore \(name) sa nepodarilo overiť. Skúste overenie znova."
+        case .tooManyDocuments(let count):
+            return "Kontajner obsahuje \(count) dokumentov. Formulár doložky ich pripúšťa najviac 999."
+        case .tooManyAuthorizations(let count):
+            return "Dokument má \(count) autorizácií. Formulár doložky ich pripúšťa najviac 99."
+        case .tooLargeDataObject(let name):
+            return "Súbor \(name) je príliš veľký (viac ako 100 MB)."
+        case .duplicateEntryName(let name):
+            return "Kontajner obsahuje viac súborov s rovnakým názvom (\(name)). Takýto kontajner Chevron7 nekonvertuje."
+        case .duplicateDocumentName(let name):
+            return "Súbory v kontajneri by mali v doložke rovnaký názov (\(name)). Takýto kontajner Chevron7 nekonvertuje."
         }
     }
 }
 
 /// The original of a guaranteed conversion of an electronic document (E→E), read from its
-/// bytes and the engine's evidence: the original documents (one per signed PAdES revision, or
-/// the container's PDF), every authorization with the values the clause and record carry, and
-/// whether the PDF stays byte for byte. Independent of the form version.
+/// bytes and the engine's evidence: the original documents (one per signed PAdES revision, the
+/// container's only PDF, or every file of a container with several), every authorization with
+/// the values the clause and record carry, and whether the PDF stays byte for byte. Every
+/// fingerprint is exactly the bytes some signature signed. Independent of the form version.
 public struct ElectronicOriginal: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
         case pdf
+        /// A container whose only data object is an unsigned PDF.
         case asicE(entryName: String)
+        /// Any other container: its PDFs (signed or not), PNG and JPEG images, in `files`.
+        case asicEMultiple
     }
 
     public struct Document: Sendable, Equatable {
@@ -49,6 +74,23 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var format: ZakoCodelistItem
         public var formatOther: String?
         public var sha256: Data
+        /// The container entry this document was read from; nil for a PDF or a one-PDF container.
+        public var fileEntryName: String? = nil
+    }
+
+    /// One data object of an `.asicEMultiple` container, in the order the new document joins them.
+    public struct File: Sendable, Equatable {
+        public var entryName: String
+        /// The entry's file name, or its full path when another entry has the same file name.
+        public var displayName: String
+        public var kind: ConversionEvidence.DataObject.Kind
+        public var data: Data
+        /// The documents read from this file: its signed revisions, then the whole file when it differs.
+        public var documentNames: [String]
+        /// Files embedded in the PDF, which the new document does not carry over.
+        public var embeddedFileNames: [String]
+        /// DSS change kinds after the PDF's last own signature, authorized by the container signatures.
+        public var changedAfterSignature: [String]
     }
 
     public enum ValidityState: String, Sendable, Equatable {
@@ -91,6 +133,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var signatureValue: Data
         public var slimReport: Data
         public var trustedListUnavailable: Bool
+        /// The container entry of a nested PAdES signature; nil for a container or a top-level signature.
+        public var fileEntryName: String? = nil
 
         public var otherInfo: String {
             "Kvalifikovaný certifikát: \(qualifiedCertificate ? "áno" : "nie")"
@@ -104,36 +148,67 @@ public struct ElectronicOriginal: Sendable, Equatable {
         case convert(reason: String)
     }
 
+    /// The clause form's limits: `OriginalDocumentInfo` and the authorizations.
+    public static let maximumDocuments = 999
+    public static let maximumAuthorizations = 99
+
     public var sourceName: String
     public var kind: Kind
-    /// The PDF that becomes the new document: the file itself, or the container's data object.
+    /// The PDF that becomes the new document: the file itself, or the container's data object;
+    /// for `.asicEMultiple` the first PDF file, empty when the container holds none.
     public var pdfData: Data
     public var documents: [Document]
     public var authorizations: [Authorization]
     public var plan: NewDocumentPlan
     public var evidence: ConversionEvidence
+    /// The files of an `.asicEMultiple` container; empty otherwise.
+    public var files: [File] = []
 
     public static func make(sourceName: String, sourceData: Data,
                             evidence: ConversionEvidence) throws -> ElectronicOriginal {
         guard let pdf = evidence.pdf else { throw ElectronicOriginalError.notPDFOrContainer }
-        let isPDF = sourceData.starts(with: Data("%PDF".utf8))
-        let kind: Kind
-        let pdfData: Data
-        if isPDF {
-            kind = .pdf
-            pdfData = sourceData
-        } else {
-            let count = pdf.asicDataObjectCount ?? 0
-            guard count == 1 else { throw ElectronicOriginalError.unsupportedContainer(dataObjects: count) }
+        if sourceData.starts(with: Data("%PDF".utf8)) {
+            return try makeSingle(sourceName: sourceName, kind: .pdf, pdfData: sourceData, evidence: evidence)
+        }
+        let objects = pdf.dataObjects
+        // Two entries under one name make "the file" ambiguous: refuse before any branch reads one.
+        if let duplicate = pdf.duplicateDataObjectName ?? firstDuplicate(objects.map(\.name))
+            ?? ASiCEContainerVerifier.readEntries(sourceData).flatMap({ firstDuplicate($0.map(\.name)) }) {
+            throw ElectronicOriginalError.duplicateEntryName(name: displayName(duplicate))
+        }
+        if objects.isEmpty {
+            // A payload without `dataObjects` describes only a container with one unsigned PDF.
+            guard pdf.asicDataObjectCount == 1, !pdf.asicDataObjectSigned else {
+                throw ElectronicOriginalError.malformedEvidence
+            }
             guard let entry = pdf.asicDataObjectName,
                   let data = ASiCEContainerVerifier.readEntries(sourceData)?.first(where: { $0.name == entry })?.data else {
                 throw ElectronicOriginalError.containerWithoutPDF
             }
-            guard !pdf.asicDataObjectSigned else { throw ElectronicOriginalError.signedPDFInsideContainer }
-            kind = .asicE(entryName: entry)
-            pdfData = data
+            return try makeSingle(sourceName: sourceName, kind: .asicE(entryName: entry), pdfData: data,
+                                  evidence: evidence)
         }
+        if objects.count == 1, let only = objects.first, !pdf.asicDataObjectSigned,
+           isUnsignedPDF(only, tree: evidence.tree) {
+            guard !Set(only.coveredBy).isDisjoint(with: evidence.tree.signatures.map(\.id)) || evidence.tree.signatures.isEmpty else {
+                throw ElectronicOriginalError.uncoveredDataObject(name: displayName(only.name))
+            }
+            let data = try bytes(of: only, in: try entries(sourceData))
+            return try makeSingle(sourceName: sourceName, kind: .asicE(entryName: only.name), pdfData: data,
+                                  evidence: evidence)
+        }
+        return try makeMultiple(sourceName: sourceName, sourceData: sourceData, facts: pdf, evidence: evidence)
+    }
+
+    /// A signed PDF, or a container with one unsigned PDF: today's path, unchanged.
+    private static func makeSingle(sourceName: String, kind: Kind, pdfData: Data,
+                                   evidence: ConversionEvidence) throws -> ElectronicOriginal {
+        guard let pdf = evidence.pdf else { throw ElectronicOriginalError.notPDFOrContainer }
+        let sourceData = pdfData
         guard !evidence.tree.signatures.isEmpty else { throw ElectronicOriginalError.unsigned }
+        guard evidence.tree.signatures.count <= maximumAuthorizations else {
+            throw ElectronicOriginalError.tooManyAuthorizations(evidence.tree.signatures.count)
+        }
         guard pdf.changesAfterLastSignature.isEmpty else {
             throw ElectronicOriginalError.changedAfterLastSignature(pdf.changesAfterLastSignature)
         }
@@ -146,7 +221,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
             documents = [Document(name: displayName(entry), format: format.item, formatOther: format.other,
                                   sha256: Data(SHA256.hash(data: pdfData)))]
             for signature in evidence.tree.signatures { documentBySignature[signature.id] = documents[0].name }
-        case .pdf:
+        case .pdf, .asicEMultiple:
             var lengths: [Int] = []
             for signature in evidence.tree.signatures {
                 guard let length = evidence.signature(id: signature.id)?.signedRevisionLength,
@@ -175,25 +250,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
                   let document = documentBySignature[signature.id] else {
                 throw ElectronicOriginalError.malformedEvidence
             }
-            let type = authorizationType(qualification: signature.certificateQualification, qcType: facts.qcType)
-            return Authorization(
-                signatureID: signature.id,
-                signerName: signature.signerDisplayName,
-                type: type.item, typeOther: type.other,
-                documentNames: [document],
-                state: state(signature.state),
-                reason: signature.state == .valid ? nil : signature.detail,
-                signingTime: signature.signingTime,
-                validationTime: evidence.validationTime,
-                location: facts.productionPlace.flatMap { $0.isEmpty ? nil : String($0.prefix(255)) } ?? "Neuvedené",
-                personID: facts.signerSerialNumber ?? facts.signerCommonName ?? signature.signerDisplayName,
-                mandant: facts.mandants.isEmpty ? nil : String(facts.mandants.joined(separator: "; ").prefix(255)),
-                mandate: facts.mandate.map { String($0.prefix(255)) },
-                timestamp: timestamp(facts.timestamps, validationTime: evidence.validationTime),
-                qualifiedCertificate: facts.qcCompliance,
-                signatureValue: facts.signatureValue,
-                slimReport: facts.slimReport,
-                trustedListUnavailable: facts.trustedListUnavailable)
+            return authorization(signature, facts: facts, documentNames: [document],
+                                 validationTime: evidence.validationTime, fileEntryName: nil)
         }
 
         let plan: NewDocumentPlan
@@ -206,6 +264,240 @@ public struct ElectronicOriginal: Sendable, Equatable {
         }
         return ElectronicOriginal(sourceName: sourceName, kind: kind, pdfData: pdfData, documents: documents,
                                   authorizations: authorizations, plan: plan, evidence: evidence)
+    }
+
+    /// A container with several files, or with one that is not an unsigned PDF (§ 7.2 of the
+    /// multi-file design): every file is refused or accepted by name before any document is built.
+    private static func makeMultiple(sourceName: String, sourceData: Data, facts: ConversionEvidence.PDFFacts,
+                                     evidence: ConversionEvidence) throws -> ElectronicOriginal {
+        let objects = facts.dataObjects
+        let containerSignatures = evidence.tree.signatures
+        guard !containerSignatures.isEmpty else { throw ElectronicOriginalError.unsigned }
+        let containerIDs = Set(containerSignatures.map(\.id))
+        let names = displayNames(objects.map(\.name))
+
+        // Refusals, by file, in container order.
+        var nestedPairs: [[(signature: DocumentSignatureInfo, facts: ConversionEvidence.Signature)]] = []
+        for (index, object) in objects.enumerated() {
+            let name = names[index]
+            switch object.problem {
+            case nil: break
+            case "NESTED_UNREADABLE": throw ElectronicOriginalError.nestedSignaturesUnreadable(name: name)
+            case "TOO_LARGE": throw ElectronicOriginalError.tooLargeDataObject(name: name)
+            default: throw ElectronicOriginalError.unreadableDataObject(name: name)
+            }
+            guard object.kind != .other else { throw ElectronicOriginalError.unsupportedDataObject(name: name) }
+            guard !containerIDs.isDisjoint(with: object.coveredBy) else {
+                throw ElectronicOriginalError.uncoveredDataObject(name: name)
+            }
+            nestedPairs.append(try nestedSignatures(of: object, name: name, tree: evidence.tree,
+                                                    onlySignedPDF: objects.count == 1 && facts.asicDataObjectSigned))
+        }
+        let authorizationCount = containerSignatures.count + nestedPairs.reduce(0) { $0 + $1.count }
+        guard authorizationCount <= maximumAuthorizations else {
+            throw ElectronicOriginalError.tooManyAuthorizations(authorizationCount)
+        }
+
+        // Signed revision lengths per file; the whole file is one more document when it is longer.
+        var lengthsByFile: [[Int]] = []
+        for (index, object) in objects.enumerated() {
+            var lengths: [Int] = []
+            for pair in nestedPairs[index] {
+                guard let length = pair.facts.signedRevisionLength, length > 0, length <= object.size else {
+                    throw ElectronicOriginalError.malformedEvidence
+                }
+                if !lengths.contains(length) { lengths.append(length) }
+            }
+            lengths.sort()
+            if lengths.last != object.size { lengths.append(object.size) }
+            lengthsByFile.append(lengths)
+        }
+        let documentCount = lengthsByFile.reduce(0) { $0 + $1.count }
+        guard documentCount <= maximumDocuments else { throw ElectronicOriginalError.tooManyDocuments(documentCount) }
+        // Every clause name must point at one document: `x.pdf` and `x.PDF` with revisions, `a.pdf`
+        // with revisions beside an entry `a-1`, or two long paths cut to one prefix would not.
+        let allDocumentNames = objects.indices.flatMap { index in
+            documentNames(fileName: names[index], count: lengthsByFile[index].count)
+        }
+        if let duplicate = firstDuplicate(allDocumentNames) {
+            throw ElectronicOriginalError.duplicateDocumentName(name: duplicate)
+        }
+
+        let entries = try entries(sourceData)
+        var files: [File] = []
+        var documents: [Document] = []
+        var nestedAuthorizations: [Authorization] = []
+        for (index, object) in objects.enumerated() {
+            let data = try bytes(of: object, in: entries)
+            let name = names[index]
+            let lengths = lengthsByFile[index]
+            let format: (item: ZakoCodelistItem, other: String?)
+            switch object.kind {
+            case .png: format = (E2ECodelists.pngFormat, nil)
+            case .jpeg: format = (E2ECodelists.otherFormat, E2ECodelists.jpegFormatOther)
+            default: format = (object.pdf ?? object.nested?.pdf).map(documentFormat) ?? (E2ECodelists.pdfFormat, nil)
+            }
+            let fileDocuments = zip(documentNames(fileName: name, count: lengths.count), lengths).map { documentName, length in
+                Document(name: documentName, format: format.item,
+                         formatOther: format.other, sha256: Data(SHA256.hash(data: data.prefix(length))),
+                         fileEntryName: object.name)
+            }
+            documents += fileDocuments
+            for pair in nestedPairs[index] {
+                guard let nested = object.nested, let length = pair.facts.signedRevisionLength,
+                      let position = lengths.firstIndex(of: length) else {
+                    throw ElectronicOriginalError.malformedEvidence
+                }
+                nestedAuthorizations.append(authorization(pair.signature, facts: pair.facts,
+                                                          documentNames: [fileDocuments[position].name],
+                                                          validationTime: nested.validationTime,
+                                                          fileEntryName: object.name))
+            }
+            files.append(File(entryName: object.name, displayName: name, kind: object.kind, data: data,
+                              documentNames: fileDocuments.map(\.name), embeddedFileNames: object.embeddedFileNames,
+                              changedAfterSignature: object.nested?.pdf.changesAfterLastSignature
+                                  ?? object.pdf?.changesAfterLastSignature ?? []))
+        }
+
+        // A container signature authorizes the whole file, so it names only the whole file's document.
+        let containerAuthorizations = try containerSignatures.map { signature -> Authorization in
+            let covered = files.indices.filter { objects[$0].coveredBy.contains(signature.id) }
+                .compactMap { files[$0].documentNames.last }
+            guard let facts = evidence.signature(id: signature.id), !covered.isEmpty else {
+                throw ElectronicOriginalError.malformedEvidence
+            }
+            return authorization(signature, facts: facts, documentNames: covered,
+                                 validationTime: evidence.validationTime, fileEntryName: nil)
+        }
+
+        let reason = files.count == 1
+            ? "Súbor kontajnera sa prevedie na nový dokument vo formáte PDF/A"
+            : "Súbory kontajnera sa spoja do jedného nového dokumentu vo formáte PDF/A"
+        var original = ElectronicOriginal(
+            sourceName: sourceName, kind: .asicEMultiple,
+            pdfData: files.first { $0.kind == .pdf }?.data ?? Data(), documents: documents,
+            authorizations: containerAuthorizations + nestedAuthorizations, plan: .convert(reason: reason),
+            evidence: evidence)
+        original.files = files
+        return original
+    }
+
+    /// The same original with its files, and their documents, in the order the advocate chose.
+    /// Authorizations keep their order. `entryNames` must name every file once.
+    public func reordered(entryNames: [String]) -> ElectronicOriginal {
+        precondition(entryNames.count == files.count && Set(entryNames) == Set(files.map(\.entryName)),
+                     "reordered(entryNames:) needs every file of the original once")
+        var copy = self
+        copy.files = entryNames.compactMap { name in files.first { $0.entryName == name } }
+        copy.documents = entryNames.flatMap { name in documents.filter { $0.fileEntryName == name } }
+        return copy
+    }
+
+    /// The only data object stays on today's path when it is a PDF without signatures of its own.
+    /// The engine's tree lists every PDF data object as `.signed` with its nested tree, empty when
+    /// the PDF has no signatures. Called only for a container's only data object that the engine
+    /// reports unsigned (`asicDataObjectSigned` false, which a failed signature probe never gives).
+    private static func isUnsignedPDF(_ object: ConversionEvidence.DataObject, tree: SignatureTree) -> Bool {
+        guard object.kind == .pdf, object.problem == nil, object.nested == nil else { return false }
+        switch tree.documents.first(where: { $0.name == object.name })?.content {
+        case nil, .plain?: return true
+        case .signed(_, let nested)?: return nested.signatures.isEmpty && nested.documents.isEmpty
+        // The tree skips a data object over its size limit, as the one-PDF path never read the
+        // tree; the evidence's own facts decide, as they did before several files were accepted.
+        case .skipped(.tooLarge)?: return true
+        case .skipped?, .failed?: return false
+        }
+    }
+
+    /// A PDF's own PAdES signatures, each paired with its tree entry (state, signer, time,
+    /// qualification) by id. Fails closed: signatures the tree shows without evidence, or
+    /// evidence without the tree's verdict, refuse the conversion.
+    private static func nestedSignatures(of object: ConversionEvidence.DataObject, name: String, tree: SignatureTree,
+                                         onlySignedPDF: Bool) throws
+        -> [(signature: DocumentSignatureInfo, facts: ConversionEvidence.Signature)] {
+        guard object.kind == .pdf else { return [] }
+        let refused = ElectronicOriginalError.nestedSignaturesUnreadable(name: name)
+        let treeSignatures: [DocumentSignatureInfo]
+        switch tree.documents.first(where: { $0.name == object.name })?.content {
+        case nil, .plain?: treeSignatures = []
+        case .signed(_, let nested)?: treeSignatures = nested.signatures
+        case .skipped?, .failed?: throw refused
+        }
+        let facts = object.nested?.signatures ?? []
+        if facts.isEmpty {
+            guard treeSignatures.isEmpty, !onlySignedPDF else { throw refused }
+            return []
+        }
+        guard treeSignatures.count == facts.count else { throw refused }
+        return try treeSignatures.map { signature in
+            guard let fact = facts.first(where: { $0.id == signature.id }) else { throw refused }
+            return (signature, fact)
+        }
+    }
+
+    /// A file's document names: the file name for one document, else `<stem>-1` ... `<stem>-n`.
+    private static func documentNames(fileName: String, count: Int) -> [String] {
+        guard count != 1 else { return [fileName] }
+        let stem = (fileName as NSString).deletingPathExtension
+        return (1...count).map { "\(stem)-\($0)" }
+    }
+
+    /// The first value that occurs more than once, in order.
+    private static func firstDuplicate(_ values: [String]) -> String? {
+        var seen = Set<String>()
+        return values.first { !seen.insert($0).inserted }
+    }
+
+    /// Entry names reduced to their file name; entries sharing one keep their full path.
+    static func displayNames(_ entries: [String]) -> [String] {
+        let short = entries.map { ($0 as NSString).lastPathComponent }
+        return entries.indices.map { index in
+            let shared = short.filter { $0 == short[index] }.count > 1
+            return String((shared ? entries[index] : short[index]).prefix(255))
+        }
+    }
+
+    private static func entries(_ container: Data) throws -> [String: Data] {
+        guard let entries = ASiCEContainerVerifier.readEntries(container) else {
+            throw ElectronicOriginalError.malformedEvidence
+        }
+        return Dictionary(entries.map { ($0.name, $0.data) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The data object's bytes, which must be the very bytes the engine examined.
+    private static func bytes(of object: ConversionEvidence.DataObject, in entries: [String: Data]) throws -> Data {
+        guard let data = entries[object.name] else {
+            throw ElectronicOriginalError.unreadableDataObject(name: displayName(object.name))
+        }
+        guard data.count == object.size, Data(SHA256.hash(data: data)) == object.sha256 else {
+            throw ElectronicOriginalError.malformedEvidence
+        }
+        return data
+    }
+
+    static func authorization(_ signature: DocumentSignatureInfo, facts: ConversionEvidence.Signature,
+                              documentNames: [String], validationTime: Date,
+                              fileEntryName: String?) -> Authorization {
+        let type = authorizationType(qualification: signature.certificateQualification, qcType: facts.qcType)
+        return Authorization(
+            signatureID: signature.id,
+            signerName: signature.signerDisplayName,
+            type: type.item, typeOther: type.other,
+            documentNames: documentNames,
+            state: state(signature.state),
+            reason: signature.state == .valid ? nil : signature.detail,
+            signingTime: signature.signingTime,
+            validationTime: validationTime,
+            location: facts.productionPlace.flatMap { $0.isEmpty ? nil : String($0.prefix(255)) } ?? "Neuvedené",
+            personID: facts.signerSerialNumber ?? facts.signerCommonName ?? signature.signerDisplayName,
+            mandant: facts.mandants.isEmpty ? nil : String(facts.mandants.joined(separator: "; ").prefix(255)),
+            mandate: facts.mandate.map { String($0.prefix(255)) },
+            timestamp: timestamp(facts.timestamps, validationTime: validationTime),
+            qualifiedCertificate: facts.qcCompliance,
+            signatureValue: facts.signatureValue,
+            slimReport: facts.slimReport,
+            trustedListUnavailable: facts.trustedListUnavailable,
+            fileEntryName: fileEntryName)
     }
 
     /// Codelist 53: PDF/A-1 and A-2 have items, A-3 is `Iny` with its name, anything else `PDF`.
@@ -268,7 +560,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         String(((name as NSString).lastPathComponent).prefix(255))
     }
 
-    static func changeLabel(_ change: String) -> String {
+    public static func changeLabel(_ change: String) -> String {
         switch change {
         case "ANNOTATION": return "poznámky alebo anotácie"
         case "SIGNATURE_OR_FORM_FILL": return "vyplnený formulár alebo nové pole"

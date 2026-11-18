@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import CryptoKit
 import Foundation
 
 /// `evidence.completed` payloads in the shape the engine's EVIDENCE operation writes, for the
@@ -51,13 +52,50 @@ public enum E2EEvidenceFixtures {
         public var asicDataObjectName: String? = nil
         public var asicDataObjectSigned = false
         public var asicDataObjectCount: Int? = nil
+        public var duplicateDataObjectName: String? = nil
 
         public init() {}
     }
 
+    /// A container file as the engine lists it. `size` and `sha256Base64` come from `bytes`.
+    public struct DataObject {
+        public var name: String
+        public var bytes: Data
+        public var kind = "pdf"
+        public var coveredBy: [String] = []
+        public var problem: String? = nil
+        public var pages: Int? = nil
+        public var embeddedFileNames: [String] = []
+        public var widthPx: Int? = nil
+        public var heightPx: Int? = nil
+        /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`.
+        public var nestedSignatures: [Signature] = []
+        public var nestedPDF: PDF? = nil
+        /// The nested evidence's own validation time.
+        public var nestedValidationTime = E2EEvidenceFixtures.validationTime
+        /// Whether the tree lists the nested signatures under this data object, as the engine does.
+        public var treeNested = true
+        /// The tree's `nestedSkipped` reason, in place of `nested`, as for a data object over the size limit.
+        public var treeSkipped: String? = nil
+
+        public init(name: String, bytes: Data = Data("%PDF-1.7".utf8)) {
+            self.name = name
+            self.bytes = bytes
+        }
+    }
+
     public static let validationTime = "2026-10-16T09:30:00Z"
 
-    public static func payload(signatures: [Signature], pdf: PDF? = PDF()) -> Data {
+    public static func payload(signatures: [Signature], pdf: PDF? = PDF(), dataObjects: [DataObject] = []) -> Data {
+        let (tree, evidence) = evidenceBody(signatures: signatures, pdf: pdf, dataObjects: dataObjects)
+        let payload: [String: Any] = ["signatures": tree, "documents": dataObjects.map(treeDocumentJSON),
+                                      "evidence": evidence]
+        return try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    }
+
+    /// The tree entries and the `evidence` object, also the shape of a data object's nested `evidence`.
+    private static func evidenceBody(signatures: [Signature], pdf: PDF?, dataObjects: [DataObject],
+                                     validationTime: String = E2EEvidenceFixtures.validationTime) -> ([[String: Any]], [String: Any]) {
         var tree: [[String: Any]] = []
         var facts: [[String: Any]] = []
         for signature in signatures {
@@ -112,9 +150,58 @@ public enum E2EEvidenceFixtures {
             if let value = pdf.declaredPdfaConformance { facts["declaredPdfaConformance"] = value }
             if let value = pdf.asicDataObjectName { facts["asicDataObjectName"] = value }
             if let value = pdf.asicDataObjectCount { facts["asicDataObjectCount"] = value }
+            if let value = pdf.duplicateDataObjectName { facts["duplicateDataObjectName"] = value }
+            if !dataObjects.isEmpty { facts["dataObjects"] = dataObjects.map(dataObjectJSON) }
             evidence["pdf"] = facts
         }
-        let payload: [String: Any] = ["signatures": tree, "documents": [Any](), "evidence": evidence]
-        return try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        return (tree, evidence)
+    }
+
+    private static func dataObjectJSON(_ object: DataObject) -> [String: Any] {
+        var json: [String: Any] = [
+            "name": object.name, "size": object.bytes.count,
+            "sha256Base64": Data(SHA256.hash(data: object.bytes)).base64EncodedString(),
+            "kind": object.kind, "coveredBy": object.coveredBy
+        ]
+        if let value = object.problem { json["problem"] = value }
+        if let value = object.pages { json["pages"] = value }
+        if object.kind == "pdf" && object.problem != "NESTED_UNREADABLE" || !object.embeddedFileNames.isEmpty {
+            json["embeddedFileNames"] = object.embeddedFileNames
+        }
+        if let value = object.widthPx { json["widthPx"] = value }
+        if let value = object.heightPx { json["heightPx"] = value }
+        if object.kind == "pdf" {
+            let own = object.nestedPDF ?? PDF()
+            for (key, value) in pdfFacts(own) { json[key] = value }
+            if !object.nestedSignatures.isEmpty {
+                json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: [],
+                                                validationTime: object.nestedValidationTime).1
+            }
+        }
+        return json
+    }
+
+    /// The tree's entry for a data object: as the engine's inspection lists them, every PDF
+    /// carries `nested` with its PAdES signatures, an empty list for an unsigned one.
+    private static func treeDocumentJSON(_ object: DataObject) -> [String: Any] {
+        var json: [String: Any] = ["name": object.name]
+        if let reason = object.treeSkipped {
+            json["nestedSkipped"] = reason
+        } else if object.treeNested && object.kind == "pdf" {
+            let tree = evidenceBody(signatures: object.nestedSignatures, pdf: nil, dataObjects: []).0
+            json["nested"] = ["kind": "PDF", "signatures": tree, "documents": [Any]()] as [String: Any]
+        }
+        return json
+    }
+
+    private static func pdfFacts(_ pdf: PDF) -> [String: Any] {
+        var facts: [String: Any] = [
+            "pdfaCompliant": pdf.pdfaCompliant, "pdfaErrors": [String](), "hasEmbeddedFiles": pdf.hasEmbeddedFiles,
+            "changesAfterLastSignature": pdf.changesAfterLastSignature,
+            "asicDataObjectSigned": pdf.asicDataObjectSigned
+        ]
+        if let value = pdf.declaredPdfaPart { facts["declaredPdfaPart"] = value }
+        if let value = pdf.declaredPdfaConformance { facts["declaredPdfaConformance"] = value }
+        return facts
     }
 }

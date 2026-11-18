@@ -73,8 +73,76 @@ final class E2EScreenSnapshotTests: XCTestCase {
         render(ZakoFlowView(store: store), named: "4-autorizacia", to: outputDirectory)
     }
 
-    private func render<V: View>(_ view: V, named name: String, to directory: URL) {
-        let size = NSSize(width: 1100, height: 720)
+    /// The verification screen of a container with three files: names, formats, pages, the
+    /// signers of each file, the embedded-files and changed-after-signing notes, and a PDF's own
+    /// signature under its file.
+    func testRenderMultiFileVerification() async throws {
+        guard let outputDirectory else { throw XCTSkip("Set CHEVRON7_SNAPSHOT_DIR to render the screens.") }
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let settingsStore = makeSettingsStore()
+        settingsStore.ezzkAccountController.setMode(.test)
+        let directory = makeTemporaryDirectory("e2e-multi-snapshots")
+        let a4 = CGSize(width: 595, height: 842)
+        let pdf = TestPDFBuilderApp.build(pages: [
+            (a4, { ctx, size in
+                TestPDFBuilderApp.text("Zmluva o pôžičke", at: CGPoint(x: 60, y: size.height - 90), size: 18)(ctx, size)
+            }),
+            (a4, { ctx, size in
+                TestPDFBuilderApp.text("Strana 2", at: CGPoint(x: 60, y: size.height - 90), size: 18)(ctx, size)
+            })
+        ])
+        var zmluva = E2EEvidenceFixtures.DataObject(name: "Zmluva o pôžičke.pdf", bytes: pdf)
+        zmluva.coveredBy = ["C-1"]
+        zmluva.pages = 2
+        zmluva.embeddedFileNames = ["splatkovy-kalendar.xlsx"]
+        var own = E2EEvidenceFixtures.PDF()
+        own.changesAfterLastSignature = ["ANNOTATION"]
+        zmluva.nestedPDF = own
+        var pades = E2EEvidenceFixtures.Signature()
+        pades.id = "P-1"
+        pades.signer = "Mária Veriteľka"
+        pades.signedRevisionLength = pdf.count - 10
+        pades.signatureValue = Data("pades-P-1".utf8)
+        zmluva.nestedSignatures = [pades]
+        var scan = E2EEvidenceFixtures.DataObject(
+            name: "Príloha 1 - sken.png",
+            bytes: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x50, count: 40))
+        scan.kind = "png"
+        scan.coveredBy = ["C-1"]
+        var photo = E2EEvidenceFixtures.DataObject(
+            name: "Príloha 2 - fotografia.jpg",
+            bytes: Data([0xFF, 0xD8, 0xFF, 0xE0]) + Data(repeating: 0x4A, count: 40))
+        photo.kind = "jpeg"
+        photo.coveredBy = ["C-1"]
+        let objects = [zmluva, scan, photo]
+        let source = directory.appendingPathComponent("Spis klienta.asice")
+        try ASiCEPackager().package(files: objects.map { .init(path: $0.name, data: $0.bytes) }).write(to: source)
+        var container = E2EEvidenceFixtures.Signature()
+        container.id = "C-1"
+        container.format = "XAdES-BASELINE-T"
+        container.signer = "Ján Klient"
+        container.signatureValue = Data("container-C-1".utf8)
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = objects.count
+        facts.asicDataObjectName = zmluva.name
+        let provider = SnapshotEvidenceProvider(payload: E2EEvidenceFixtures.payload(
+            signatures: [container], pdf: facts, dataObjects: objects))
+        settingsStore.useRealSigningProvider(provider)
+        let store = ZakoSessionStore(settingsStore: settingsStore,
+                                     exampleBank: ExampleBank(directory: makeTemporaryDirectory("e2e-multi-snapshot-bank")))
+        store.direction = .electronicToElectronic
+
+        await store.loadElectronicOriginal(at: source)
+        XCTAssertNil(store.verificationError)
+        XCTAssertEqual(store.electronicOriginal?.files.count, 3)
+        store.attestation.originalDocumentTypeLabels[scan.name] = "Iný dokument"
+        render(ZakoFlowView(store: store), named: "2c-verification-multi-file", to: outputDirectory)
+        render(ZakoFlowView(store: store), named: "2d-verification-multi-file-tall", to: outputDirectory,
+               size: NSSize(width: 1100, height: 1500))
+    }
+
+    private func render<V: View>(_ view: V, named name: String, to directory: URL,
+                                 size: NSSize = NSSize(width: 1100, height: 720)) {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)

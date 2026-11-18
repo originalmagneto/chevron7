@@ -117,6 +117,44 @@ final class QualifiedValidationReportTests: XCTestCase {
                        .matched)
     }
 
+    func testMultiFileReportMustNameEveryDocumentOrEverySignature() throws {
+        let a = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 50)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x50, count: 20)
+        let c = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x43, count: 50)
+        var outer = E2EEvidenceFixtures.Signature()
+        outer.id = "C-1"
+        outer.signatureValue = Data("container-value".utf8)
+        var nested = E2EEvidenceFixtures.Signature()
+        nested.id = "P-1"
+        nested.signedRevisionLength = c.count
+        nested.signatureValue = Data("pades-value".utf8)
+        var objects = [E2EEvidenceFixtures.DataObject(name: "a.pdf", bytes: a),
+                       E2EEvidenceFixtures.DataObject(name: "b.png", bytes: png),
+                       E2EEvidenceFixtures.DataObject(name: "c.pdf", bytes: c)]
+        objects[1].kind = "png"
+        objects[2].nestedSignatures = [nested]
+        for index in objects.indices { objects[index].coveredBy = ["C-1"] }
+        let container = try ASiCEPackager().package(files: objects.map { .init(path: $0.name, data: $0.bytes) })
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 3
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [outer], pdf: facts, dataObjects: objects))
+        let original = try ElectronicOriginal.make(sourceName: "spis.asice", sourceData: container, evidence: evidence)
+        XCTAssertEqual(original.kind, .asicEMultiple)
+
+        func hash(_ data: Data) -> String { Data(SHA256.hash(data: data)).base64EncodedString() }
+        XCTAssertFalse(QualifiedValidationReport.names(original, in: "<r><h>\(hash(a))</h></r>"))
+        XCTAssertTrue(QualifiedValidationReport.names(
+            original, in: "<r><h>\(hash(a))</h><h>\(hash(png))</h><h>\(hash(c))</h></r>"))
+        XCTAssertFalse(QualifiedValidationReport.names(
+            original, in: "<r><s>\(outer.signatureValue.base64EncodedString())</s></r>"))
+        XCTAssertTrue(QualifiedValidationReport.names(original, in: """
+            <r><s>\(outer.signatureValue.base64EncodedString())</s><s>\(nested.signatureValue.base64EncodedString())</s></r>
+            """))
+        // A single-file original keeps the any-one-hash rule.
+        XCTAssertTrue(QualifiedValidationReport.names(try self.original(), in: "<r>\(hash(pdf))</r>"))
+    }
+
     func testServicesDecodeFromSettingsWithoutKey() throws {
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(settings.qualifiedValidationServices, [])
