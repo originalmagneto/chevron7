@@ -39,7 +39,7 @@ The owner's decisions:
 
 - No client output is delivered before EZZK reports the record processed.
 - A failed record signature leaves no register row and keeps the evidence number in the pool.
-- A resume never signs a client output that differs from what the record describes: the original (its files, their order, their fingerprints), the form, the EZZK mode and the client output choice must be the ones signed into the record.
+- A resume never signs a client output that differs from what the record describes: the original (its files, their order, their fingerprints), the form and the EZZK mode must be the ones signed into the record, and the output is the one the conversion started with.
 - P→E behaviour stays byte for byte the same.
 
 ## 6. Approaches considered
@@ -69,7 +69,7 @@ From `E2EFormModel`, in the schema's element order:
 - The forms are checked with a placeholder number before EZZK's time is known, using the record form of the Mac-clock regime (`expectedRegime`), and checked again once EZZK's time decides the regime.
 - `ZakoE2EFlow.authorizeE2E`: where it refuses today, `.recordFirst` goes on: validate clause 1.3 and record 1.2, build the client output as today (ASiC-E entries, or the one PDF's fixed target and appended clause), and call the shared record-first start.
 - `startRecordFirst` and `RecordFirstPending` become direction-neutral: the register row is built by the caller (P→E as today; E→E as its current `.signed` row with validation evidence, `clientOutput`, `revisionOneLength`). `RecordFirstPending` carries the direction and, for E→E, what a resume must match (the original's document fingerprints in order).
-- `resumeRecordFirst` for E→E refuses when the original, its order, the form, the EZZK mode or the client output changed, as P→E refuses on the mode or form.
+- `resumeRecordFirst` for E→E refuses when the original, its order, the form or the EZZK mode changed, as P→E refuses on the mode or form; the client output is the one the conversion started with (kept in `RecordFirstPending`, as for P→E), since the record already names it.
 - The client signature after the wait reuses E→E's current signing code for both outputs.
 - Remove `e2eRecordFirstMessage` and its two refusals.
 
