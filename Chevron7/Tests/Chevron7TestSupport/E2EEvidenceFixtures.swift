@@ -70,6 +70,10 @@ public enum E2EEvidenceFixtures {
         /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`.
         public var nestedSignatures: [Signature] = []
         public var nestedPDF: PDF? = nil
+        /// The nested evidence's own validation time.
+        public var nestedValidationTime = E2EEvidenceFixtures.validationTime
+        /// Whether the tree lists the nested signatures under this data object, as the engine does.
+        public var treeNested = true
 
         public init(name: String, bytes: Data = Data("%PDF-1.7".utf8)) {
             self.name = name
@@ -81,13 +85,14 @@ public enum E2EEvidenceFixtures {
 
     public static func payload(signatures: [Signature], pdf: PDF? = PDF(), dataObjects: [DataObject] = []) -> Data {
         let (tree, evidence) = evidenceBody(signatures: signatures, pdf: pdf, dataObjects: dataObjects)
-        let payload: [String: Any] = ["signatures": tree, "documents": [Any](), "evidence": evidence]
+        let payload: [String: Any] = ["signatures": tree, "documents": dataObjects.map(treeDocumentJSON),
+                                      "evidence": evidence]
         return try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     }
 
     /// The tree entries and the `evidence` object, also the shape of a data object's nested `evidence`.
-    private static func evidenceBody(signatures: [Signature], pdf: PDF?,
-                                     dataObjects: [DataObject]) -> ([[String: Any]], [String: Any]) {
+    private static func evidenceBody(signatures: [Signature], pdf: PDF?, dataObjects: [DataObject],
+                                     validationTime: String = E2EEvidenceFixtures.validationTime) -> ([[String: Any]], [String: Any]) {
         var tree: [[String: Any]] = []
         var facts: [[String: Any]] = []
         for signature in signatures {
@@ -165,8 +170,19 @@ public enum E2EEvidenceFixtures {
             let own = object.nestedPDF ?? PDF()
             for (key, value) in pdfFacts(own) { json[key] = value }
             if !object.nestedSignatures.isEmpty {
-                json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: []).1
+                json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: [],
+                                                validationTime: object.nestedValidationTime).1
             }
+        }
+        return json
+    }
+
+    /// The tree's entry for a data object: its PAdES signatures nested, as the engine's inspection lists them.
+    private static func treeDocumentJSON(_ object: DataObject) -> [String: Any] {
+        var json: [String: Any] = ["name": object.name]
+        if object.treeNested && !object.nestedSignatures.isEmpty {
+            let tree = evidenceBody(signatures: object.nestedSignatures, pdf: nil, dataObjects: []).0
+            json["nested"] = ["kind": "PDF", "signatures": tree, "documents": [Any]()] as [String: Any]
         }
         return json
     }

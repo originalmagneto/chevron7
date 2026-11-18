@@ -105,17 +105,24 @@ public struct QualifiedValidationReport: Sendable, Equatable {
     }
 
     /// The report names the original when it carries one of the original's SHA-256 values
-    /// (base64 or hex, e.g. Disig's `ContentHash`) or every signature value.
+    /// (base64 or hex, e.g. Disig's `ContentHash`) or every signature value. A container with
+    /// several files is named only by every document's SHA-256 or every signature value (nested
+    /// PAdES included), so a report on one of its files never stands for all of them.
     static func names(_ original: ElectronicOriginal, in xml: String) -> Bool {
         let compact = xml.replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
-        var hashes = original.documents.map(\.sha256)
-        hashes.append(Data(SHA256.hash(data: original.pdfData)))
-        for hash in hashes {
+        func carries(_ hash: Data) -> Bool {
             let hex = hash.map { String(format: "%02x", $0) }.joined()
-            if compact.contains(hash.base64EncodedString()) || compact.lowercased().contains(hex) { return true }
+            return compact.contains(hash.base64EncodedString()) || compact.lowercased().contains(hex)
         }
         let values = original.authorizations.map { $0.signatureValue.base64EncodedString() }
-        return !values.isEmpty && values.allSatisfy { compact.contains($0) }
+        let everySignature = !values.isEmpty && values.allSatisfy { compact.contains($0) }
+        if original.kind == .asicEMultiple {
+            return (!original.documents.isEmpty && original.documents.allSatisfy { carries($0.sha256) })
+                || everySignature
+        }
+        var hashes = original.documents.map(\.sha256)
+        hashes.append(Data(SHA256.hash(data: original.pdfData)))
+        return hashes.contains(where: carries) || everySignature
     }
 
     /// Per signature value, the verdict a machine-readable report states: Disig/NASES
