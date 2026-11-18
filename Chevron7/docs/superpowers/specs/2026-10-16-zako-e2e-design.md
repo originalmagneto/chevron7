@@ -42,7 +42,7 @@ An advocate's client brings a document they authorized electronically (a PDF wit
 
 - E→P (later project).
 - The 2027 forms (`_2021.sk` 1.2) and order.
-- Originals other than a PDF or an ASiC-E with exactly one PDF data object: ASiC-E with several data objects, an XML form (XDC) data object, detached CAdES (`.p7s`), XAdES_ZEP, plain images or text. They are refused with a clear message; each is a follow-up.
+- Originals other than a PDF or an ASiC-E (several data objects are covered by `2026-11-18-zako-e2e-multi-file-design.md`): an XML form (XDC) data object, detached CAdES (`.p7s`), XAdES_ZEP, plain images or text. They are refused with a clear message; each is a follow-up.
 - Unsigned originals (see section 2).
 - PNG output.
 - Phone (AVM, eIdentita) authorization of an E→E conversion outside Demo (same rule as P→E).
