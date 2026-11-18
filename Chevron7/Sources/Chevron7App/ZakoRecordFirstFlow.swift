@@ -82,9 +82,9 @@ extension ZakoSessionStore {
     /// 305/2013 Z. z. from 1. 1. 2027). A failed record signature leaves no row and keeps the
     /// number in the pool for the next attempt. The caller builds the `.signed` register row
     /// (`makeRow`, with `pending.recordID` as its id), which is asked for only once the record
-    /// is signed.
+    /// is signed; a row that cannot be built leaves no row and keeps the number as well.
     func startRecordFirst(_ pending: RecordFirstPending, recordDelivery: ZakoRecordDelivery,
-                          identityID: String, makeRow: () -> EvidenceRecord) async throws {
+                          identityID: String, makeRow: () throws -> EvidenceRecord) async throws {
         analysisProgressText = "Podpisujem záznam o konverzii…"
         let signedRecord = try await middlewareInput.during(asksEIDForBOK) {
             try await signingProvider.sign(SigningRequest(
@@ -105,7 +105,7 @@ extension ZakoSessionStore {
             throw ComplianceValidationError(domain: "Kontajner záznamu o konverzii", issues: recordCheck.issues)
         }
 
-        var record = makeRow()
+        var record = try makeRow()
         assert(record.id == pending.recordID && record.status == .signed, "the row is the pending conversion's signed row")
         do {
             // Held from the first write until the send, so the periodic check cannot send it twice.
@@ -268,6 +268,23 @@ extension ZakoSessionStore {
         return nil
     }
 
+    /// Under the order of 1. 1. 2027 the client PDF is signed only after EZZK processed the
+    /// record, which spends the number, so the engine's PDF/A-3b check of the appended clause
+    /// runs before the record is signed: a failure leaves no row and an unused number.
+    func checkAppendedClauseBeforeRecord(source: Data, clause appendedClause: AppendedClause) async throws {
+        analysisProgressText = "Kontrolujem PDF/A s doložkou…"
+        let runner = pdfClauseCheckRunner
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try runner.check(source: source, clause: appendedClause)
+            }.value
+        } catch PdfClauseCheckRunner.Failure.notCompliant(let lines) {
+            // The advocate sees the Slovak summary; veraPDF's rules go to the system log.
+            Self.logPDFACheckFailure(lines)
+            throw PdfClauseCheckRunner.Failure.notCompliant(lines)
+        }
+    }
+
     private func signClientContainer(_ pending: RecordFirstPending) async throws {
         guard let identityID = selectedIdentityID else { throw SigningError.identityUnavailable }
         guard evidenceStore.record(id: pending.recordID) != nil else {
@@ -280,7 +297,44 @@ extension ZakoSessionStore {
         analysisProgressText = "Autorizujem kvalifikovaným podpisom…"
         let signed: SignedConversionResult
         let deliveredTarget: URL
-        if pending.clientOutput == .singlePDF {
+        if pending.direction == .electronicToElectronic {
+            // E→E signs exactly what its order of today signs (`signE2EClientOutput`): the new
+            // document with the clause XDCF in an ASiC-E (a kept PDF/A through the engine's
+            // signed-source wrapping), or the one PDF with the clause appended.
+            let appendedClause: AppendedClause?
+            let fixedTarget: URL?
+            if pending.clientOutput == .singlePDF {
+                // Never the container instead: the record already names the one PDF.
+                guard let clause = pending.appendedClause, let target = pending.fixedTarget else {
+                    throw SigningError.signingFailed(Self.recordFirstSinglePDFIncompleteMessage)
+                }
+                // A resume may run with another signer than the one the conversion started with.
+                guard signingProvider.supportsAppendedClause else {
+                    throw SigningError.signingFailed(ZakoSinglePDFDelivery.engineRefusal)
+                }
+                appendedClause = clause
+                fixedTarget = target
+            } else {
+                appendedClause = nil
+                fixedTarget = nil
+            }
+            let output = try await signE2EClientOutput(
+                newDocument: pending.finalPDF,
+                containerDocumentName: pending.containerDocumentName,
+                containerFiles: pending.containerFiles,
+                appendedClause: appendedClause,
+                identityID: identityID,
+                stamps: pending.stampsSignatures,
+                tsaURL: pending.clientTSAURL,
+                timestampServers: pending.clientTimestampServers,
+                prefixChangedMessage: Self.recordFirstSinglePDFPrefixChangedMessage)
+            signed = output.signed
+            analysisProgressText = "Ukladám a zapisujem do evidencie…"
+            try FileManager.default.createDirectory(at: pending.directory, withIntermediateDirectories: true)
+            deliveredTarget = try Self.deliverE2EClientOutput(output, singlePDFTarget: fixedTarget,
+                                                              directory: pending.directory,
+                                                              containerDocumentName: pending.containerDocumentName)
+        } else if pending.clientOutput == .singlePDF {
             // Never the container instead: the record already names the one PDF.
             guard let appendedClause = pending.appendedClause, let fixedTarget = pending.fixedTarget else {
                 throw SigningError.signingFailed(Self.recordFirstSinglePDFIncompleteMessage)

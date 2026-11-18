@@ -194,19 +194,6 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(provider.signedKinds, [])
     }
 
-    func testRecordFirstPreviewRefusesBeforeAnyNumber() async throws {
-        let (store, provider, source) = try makeStore()
-        await store.loadElectronicOriginal(at: source)
-        prepareForAuthorization(store)
-        store.settingsStore.settings.zakoRecordFirstPreview = true
-
-        await store.authorizeAndSign()
-
-        XCTAssertEqual(store.lastError, ZakoSessionStore.e2eRecordFirstMessage)
-        XCTAssertNil(store.attestation.evidenceNumber, "no number is spent on a refusal")
-        XCTAssertEqual(provider.signedKinds, [])
-    }
-
     /// The owner's first live test (1.10.0): UsedDevice was empty and the profile missing,
     /// so the record failed its schema after a number had been allocated.
     func testOpeningFillsProfileAndUsedDevice() async throws {
@@ -605,7 +592,7 @@ final class ZakoE2EFlowTests: XCTestCase {
     // MARK: - Several-file fixtures
 
     /// a.pdf with one PAdES revision of its own (so two documents, a-1 and a-2), b.png and c.jpg.
-    private static var multiFiles: [E2EEvidenceFixtures.DataObject] {
+    static var multiFiles: [E2EEvidenceFixtures.DataObject] {
         let pdf = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 991)
         var a = E2EEvidenceFixtures.DataObject(name: "a.pdf", bytes: pdf)
         a.coveredBy = ["C-1"]

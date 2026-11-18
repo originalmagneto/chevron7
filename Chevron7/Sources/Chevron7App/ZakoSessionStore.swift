@@ -1482,12 +1482,7 @@ final class ZakoSessionStore {
             return
         }
         if direction == .electronicToElectronic {
-            // E→E has no record-first path yet: refused before an evidence number is spent.
-            if expectedRegime.regime == .recordFirst {
-                lastError = Self.e2eRecordFirstMessage
-                return
-            }
-            await authorizeElectronicOriginal(viaMobile: viaMobile, ezzkMode: ezzkMode)
+            await authorizeElectronicOriginal(viaMobile: viaMobile, ezzkMode: ezzkMode, expectedRegime: expectedRegime)
             return
         }
         // The client output is read once: the whole conversion delivers what was chosen here.
@@ -1629,21 +1624,10 @@ final class ZakoSessionStore {
             } else {
                 appendedClause = nil
             }
-            // Under the order of 1. 1. 2027 the client PDF is signed only after EZZK processed the
-            // record, which spends the number, so the engine's PDF/A-3b check of the appended clause
-            // runs now, before the record is signed: a failure leaves no row and an unused number.
+            // Under the order of 1. 1. 2027 the PDF/A-3b check of the appended clause runs before
+            // the record is signed.
             if regime.regime == .recordFirst, let appendedClause {
-                analysisProgressText = "Kontrolujem PDF/A s doložkou…"
-                let runner = pdfClauseCheckRunner
-                do {
-                    try await Task.detached(priority: .userInitiated) {
-                        try runner.check(source: finalPDF, clause: appendedClause)
-                    }.value
-                } catch PdfClauseCheckRunner.Failure.notCompliant(let lines) {
-                    // The advocate sees the Slovak summary; veraPDF's rules go to the system log.
-                    Self.logPDFACheckFailure(lines)
-                    throw PdfClauseCheckRunner.Failure.notCompliant(lines)
-                }
+                try await checkAppendedClauseBeforeRecord(source: finalPDF, clause: appendedClause)
             }
 
             analysisProgressText = viaMobile ? "Čakám na podpis z mobilu…" : "Autorizujem kvalifikovaným podpisom…"

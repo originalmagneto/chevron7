@@ -23,7 +23,6 @@ enum E2EProductionPolicy {
 /// and EZZK are the P→E path. Spec: `docs/superpowers/specs/2026-10-16-zako-e2e-design.md`.
 extension ZakoSessionStore {
     static let e2eMobileMessage = "Zaručenú konverziu elektronického dokumentu autorizujte kartou s mandátnym certifikátom."
-    static let e2eRecordFirstMessage = "Zaručenú konverziu elektronického dokumentu podľa postupu od 1. 1. 2027 Chevron7 zatiaľ nevykonáva."
     static let e2eNeedsQualifiedValidationMessage = "V ostrej evidencii treba podpisy klienta overiť kvalifikovanou službou validácie (§ 3 ods. 4 vyhlášky č. 70/2021 Z. z.). Pripojte jej výsledok pri overení; službu pridáte v Nastaveniach, EZZK, Rozšírené nastavenia, Kvalifikovaná služba validácie."
 
     func resetElectronicOriginal() {
@@ -167,8 +166,10 @@ extension ZakoSessionStore {
     }
 
     /// The body of `authorizeAndSign` for E→E, after its common checks (mode, Demo provider,
-    /// register, mandate certificate, regime).
-    func authorizeElectronicOriginal(viaMobile: Bool, ezzkMode: AppSettings.EZZKMode) async {
+    /// register, mandate certificate, the phone in the new order). `expectedRegime` is the order
+    /// by the Mac's clock, used for every check before an evidence number; EZZK's time decides.
+    func authorizeElectronicOriginal(viaMobile: Bool, ezzkMode: AppSettings.EZZKMode,
+                                     expectedRegime: ZakoRegime.Resolution? = nil) async {
         if viaMobile {
             lastError = Self.e2eMobileMessage
             return
@@ -177,6 +178,8 @@ extension ZakoSessionStore {
             lastError = E2EProductionPolicy.refusalMessage
             return
         }
+        let expected = expectedRegime ?? ZakoRegime.resolve(conversionTime: Date(), mode: ezzkMode,
+                                                            preview: settings.zakoRecordFirstPreview)
         // The client output is read once: the whole conversion delivers what was chosen here.
         let deliversSinglePDF = settings.zakoClientOutput == .singlePDF
         // One PDF needs the engine and a card and is not yet run in Ostrá evidencia: refused
@@ -200,6 +203,13 @@ extension ZakoSessionStore {
         // The production gate comes before an evidence number, so none is spent on a refusal.
         if e2eNeedsQualifiedReport, qualifiedReport == nil {
             lastError = Self.e2eNeedsQualifiedValidationMessage
+            return
+        }
+        // Record 1.2 names every authorization by its type; a qualification DSS left undecided
+        // has none, so the new order refuses it before anything is converted or allocated.
+        if expected.regime == .recordFirst,
+           let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(original).first {
+            lastError = Self.e2eUndeterminedQualificationMessage(signer: unmappable.signerName)
             return
         }
         // § 36 ods. 4 písm. c): the new document, made before an evidence number is allocated so
@@ -255,10 +265,13 @@ extension ZakoSessionStore {
             singlePDFTarget = nil
         }
         // Both forms are rendered and checked against the official schemas with a placeholder
-        // number before EZZK is asked for a real one, so a form error never costs a number.
+        // number before EZZK is asked for a real one, so a form error never costs a number. The
+        // record is the form of the order the Mac's clock expects.
         if let issue = dryRunE2EForms(original: original, newDocument: newDocument,
                                       containerDocumentName: containerDocumentName,
-                                      deliveredAsSinglePDF: deliversSinglePDF) {
+                                      deliveredAsSinglePDF: deliversSinglePDF,
+                                      recordForm: FormPackRepository.recordForm(
+                                          of: FormPackRepository.e2ePack(at: expected.formPackDate))) {
             lastError = issue.advice
             if let detail = issue.technicalDetail {
                 Self.e2eLogger.error("E→E form dry run failed: \(detail, privacy: .public)")
@@ -286,12 +299,14 @@ extension ZakoSessionStore {
                 evidenceNumberError = EZZKError.evidenceNumberExpired.errorDescription
                 throw EZZKError.evidenceNumberExpired
             }
+            // The conversion time decides the order and the record's form.
             let regime = ZakoRegime.resolve(conversionTime: conversionTime, mode: ezzkMode,
                                             preview: settings.zakoRecordFirstPreview)
-            if regime.regime == .recordFirst {
-                lastError = Self.e2eRecordFirstMessage
+            if let refusal = regime.refusal {
+                lastError = refusal
                 return
             }
+            let formPack = FormPackRepository.e2ePack(at: regime.formPackDate)
             serverTimeUsed = conversionTime
             attestation.conversionExecutionDateTime = conversionTime
 
@@ -305,8 +320,11 @@ extension ZakoSessionStore {
             let clause: E2EDeliveryBuilder.Clause
             let recordDelivery: ZakoRecordDelivery
             do {
+                // The real forms in the order EZZK's time decided, checked before anything is
+                // signed: when it differs from the Mac's clock, this is the check of the forms
+                // of that order (an undecided qualification is refused here in the new one).
                 clause = try builder.clause(model)
-                recordDelivery = try builder.record(model)
+                recordDelivery = try builder.record(model, form: FormPackRepository.recordForm(of: formPack))
             } catch {
                 // Passed with the placeholder; the number stays in the pool for the next try.
                 let issue = E2EFormIssue.from(error)
@@ -316,17 +334,22 @@ extension ZakoSessionStore {
 
             // One PDF: the clause's readable pages, rendered from the very clause XML that is
             // attached, before anything is signed.
+            let clauseFileName = ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber)
             let appendedClause: AppendedClause?
             if deliversSinglePDF {
                 analysisProgressText = "Pripravujem strany osvedčovacej doložky…"
                 appendedClause = try await ZakoSinglePDFDelivery.appendedClause(
                     clauseXML: Data(clause.xml.utf8),
                     clauseXDCF: clause.xdcf,
-                    clauseFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber),
+                    clauseFileName: clauseFileName,
                     form: .clauseE2E_1_3,
                     renderer: clausePageRenderer)
             } else {
                 appendedClause = nil
+            }
+            // In the new order the one PDF is checked as PDF/A-3b before the record is signed.
+            if regime.regime == .recordFirst, let appendedClause {
+                try await checkAppendedClauseBeforeRecord(source: newDocument, clause: appendedClause)
             }
 
             analysisProgressText = "Autorizujem kvalifikovaným podpisom…"
@@ -344,113 +367,84 @@ extension ZakoSessionStore {
                 return
             }
             guard let identityID = selectedIdentityID else { throw SigningError.identityUnavailable }
-            // The record is XAdES; the one PDF is PAdES and keeps the PAdES order (BOSA first).
+            // The record and the container are XAdES; the one PDF is PAdES and keeps the PAdES
+            // order (BOSA first).
             let timestamps = try zakoTimestampChoice()
+            let clientTimestamps = deliversSinglePDF ? try zakoTimestampChoice(signsPAdES: true) : timestamps
+            let containerFiles = deliversSinglePDF ? [] : ASiCEPackager().zakoContainer(
+                pdfData: newDocument,
+                pdfFileName: containerDocumentName,
+                dolozkaXML: clause.xdcf,
+                dolozkaFileName: clauseFileName)
+            let clientOutput: AppSettings.ZakoClientOutput = deliversSinglePDF ? .singlePDF : .asicContainer
 
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let signed: SignedConversionResult
-            let asic: Data?
-            if let appendedClause {
-                // The engine appends the clause to the PDF/A and signs the whole as PAdES.
-                let clientTimestamps = try zakoTimestampChoice(signsPAdES: true)
-                signed = try await middlewareInput.during(asksEIDForBOK) {
-                    try await signingProvider.sign(SigningRequest(
-                        pdfData: newDocument,
-                        identityID: identityID,
-                        includeTimestamp: clientTimestamps.stamps,
-                        tsaURL: clientTimestamps.tsaURL,
-                        outputFormat: .embeddedPAdES,
-                        pin: signingPIN.isEmpty ? nil : signingPIN,
-                        filename: containerDocumentName,
-                        timestampServers: clientTimestamps.servers,
-                        appendedClause: appendedClause))
+            if regime.regime == .recordFirst {
+                guard let number = attestation.evidenceNumber else { throw SigningError.identityUnavailable }
+                let pending = RecordFirstPending(
+                    recordID: currentRecordID,
+                    stage: .awaitingEZZK,
+                    direction: .electronicToElectronic,
+                    originalFingerprints: original.documents.map(\.sha256),
+                    // The row is looked up in the EZZK that allocated the number.
+                    mode: attestation.evidenceNumberMode ?? ezzkMode,
+                    evidenceNumber: number,
+                    conversionTime: conversionTime,
+                    finalPDF: newDocument,
+                    fingerprint: Self.hex(model.newDocument.sha256),
+                    containerDocumentName: containerDocumentName,
+                    containerFiles: containerFiles,
+                    directory: directory,
+                    stampsSignatures: timestamps.stamps,
+                    timestampServers: timestamps.servers,
+                    tsaURL: timestamps.tsaURL,
+                    attestation: attestation,
+                    clientOutput: clientOutput,
+                    appendedClause: appendedClause,
+                    fixedTarget: singlePDFTarget,
+                    clientTimestampServers: clientTimestamps.servers,
+                    clientTSAURL: clientTimestamps.tsaURL)
+                try await startRecordFirst(pending, recordDelivery: recordDelivery, identityID: identityID) {
+                    // The PDF's name and the delivered file are written once the client output is signed.
+                    try e2eSignedRow(id: pending.recordID, original: original, newDocument: newDocument,
+                                     containerDocumentName: containerDocumentName,
+                                     fingerprint: pending.fingerprint, recordXML: recordDelivery.recordXML,
+                                     conversionTime: conversionTime, pdfFileName: nil, deliveredFileName: nil,
+                                     mode: pending.mode, formPack: formPack, clientOutput: clientOutput)
                 }
-                // The clause fingerprints the new document, so the signed file must begin with
-                // exactly those bytes (revision 1) and carry the clause and signature after them.
-                guard Self.singlePDFKeepsSource(signed, source: newDocument) else {
-                    throw SigningError.signingFailed(Self.singlePDFPrefixChangedMessage)
-                }
-                asic = nil
-            } else {
-                let containerFiles = ASiCEPackager().zakoContainer(
-                    pdfData: newDocument,
-                    pdfFileName: containerDocumentName,
-                    dolozkaXML: clause.xdcf,
-                    dolozkaFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber))
-                signed = try await middlewareInput.during(asksEIDForBOK) {
-                    try await signingProvider.sign(SigningRequest(
-                        pdfData: newDocument,
-                        identityID: identityID,
-                        includeTimestamp: timestamps.stamps,
-                        tsaURL: timestamps.tsaURL,
-                        pin: signingPIN.isEmpty ? nil : signingPIN,
-                        extraFiles: containerFiles,
-                        filename: containerDocumentName,
-                        signsExtraFilesAsDataObjects: true,
-                        timestampServers: timestamps.servers))
-                }
-                guard let container = signed.asicData else {
-                    throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
-                }
-                let containerCheck = ASiCEContainerVerifier().verify(container)
-                guard containerCheck.isValid else {
-                    throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
-                }
-                asic = container
+                return
             }
+
+            let output = try await signE2EClientOutput(
+                newDocument: newDocument,
+                containerDocumentName: containerDocumentName,
+                containerFiles: containerFiles,
+                appendedClause: appendedClause,
+                identityID: identityID,
+                stamps: clientTimestamps.stamps,
+                tsaURL: clientTimestamps.tsaURL,
+                timestampServers: clientTimestamps.servers,
+                prefixChangedMessage: Self.singlePDFPrefixChangedMessage)
+            let signed = output.signed
             if let number = attestation.evidenceNumber {
                 evidenceNumberPool.remove(number)
             }
             saveProfileFromForm()
 
             analysisProgressText = "Ukladám a zapisujem do evidencie…"
-            let deliveredTarget: URL
-            if let singlePDFTarget {
-                // The name was fixed before the clause; should a file have taken it meanwhile,
-                // the PDF goes beside it under a unique name and never replaces it.
-                deliveredTarget = try Self.writeWithoutOverwriting(signed.pdfData, preferred: singlePDFTarget)
-            } else if let asic {
-                deliveredTarget = ConversionOutputNaming.uniqueURL(
-                    in: directory,
-                    fileName: ConversionOutputNaming.asicFileName(pdfFileName: containerDocumentName))
-                try asic.write(to: deliveredTarget, options: [.atomic])
-            } else {
-                throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
-            }
+            let deliveredTarget = try Self.deliverE2EClientOutput(output, singlePDFTarget: singlePDFTarget,
+                                                                  directory: directory,
+                                                                  containerDocumentName: containerDocumentName)
             outputDirectory = directory
 
-            var record = EvidenceRecord(
-                id: currentRecordID,
-                status: .signed,
-                direction: .electronicToElectronic,
-                originalName: attestation.originalDocumentName,
-                newDocumentName: containerDocumentName,
-                evidenceNumber: attestation.evidenceNumber,
-                fingerprintSHA256Hex: model.newDocument.sha256.map { String(format: "%02x", $0) }.joined(),
-                attestationXML: recordDelivery.recordXML,
-                conversionTime: conversionTime,
-                performingPersonName: attestation.performingPerson.fullName,
-                securityElementCount: 0,
-                totalPages: original.kind == .asicEMultiple
-                    ? PDFDocument(data: newDocument)?.pageCount ?? 0
-                    : document?.pageCount ?? 0,
-                totalSheets: 0,
-                pdfFileName: containerDocumentName,
-                deliveredFileName: deliveredTarget.lastPathComponent,
-                ezzkMode: attestation.evidenceNumberMode ?? ezzkMode,
-                evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
-                clientOutput: deliversSinglePDF ? .singlePDF : .asicContainer,
-                // Revision 1 of the one PDF is the fingerprinted new document: a reader cuts it here.
-                revisionOneLength: deliversSinglePDF ? newDocument.count : nil)
-            if let qualifiedReport {
-                record.validationEvidencePath = try evidenceStore.storeValidationEvidence(
-                    qualifiedReport.data, fileExtension: qualifiedReport.fileExtension, for: record.id)
-                record.validationEvidenceSource = "Kvalifikovaná služba validácie: \(qualifiedReport.sealSubject)"
-            } else {
-                record.validationEvidencePath = try evidenceStore.storeValidationEvidence(
-                    original.evidence.etsiReport, fileExtension: "xml", for: record.id)
-                record.validationEvidenceSource = "Chevron7 (DSS \(original.evidence.dssVersion))"
-            }
+            var record = try e2eSignedRow(id: currentRecordID, original: original, newDocument: newDocument,
+                                          containerDocumentName: containerDocumentName,
+                                          fingerprint: Self.hex(model.newDocument.sha256),
+                                          recordXML: recordDelivery.recordXML, conversionTime: conversionTime,
+                                          pdfFileName: containerDocumentName,
+                                          deliveredFileName: deliveredTarget.lastPathComponent,
+                                          mode: attestation.evidenceNumberMode ?? ezzkMode,
+                                          formPack: formPack, clientOutput: clientOutput)
 
             let rowID = record.id
             let held = settingsStore.statusChecker.hold(rowID)
@@ -500,6 +494,127 @@ extension ZakoSessionStore {
         }
     }
 
+    /// The refusal of an authorization record 1.2 cannot name, in the builder's own words.
+    static func e2eUndeterminedQualificationMessage(signer: String) -> String {
+        E2EDeliveryBuilder.Failure.unmappableAuthorization(signer: signer).errorDescription ?? ""
+    }
+
+    private static func hex(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The `.signed` register row of an E→E conversion, with the verification evidence stored
+    /// beside it (the qualified service's report when attached, else Chevron7's ETSI report).
+    private func e2eSignedRow(id: UUID, original: ElectronicOriginal, newDocument: Data, containerDocumentName: String,
+                              fingerprint: String, recordXML: String, conversionTime: Date,
+                              pdfFileName: String?, deliveredFileName: String?, mode: AppSettings.EZZKMode,
+                              formPack: ConversionFormPack,
+                              clientOutput: AppSettings.ZakoClientOutput) throws -> EvidenceRecord {
+        var record = EvidenceRecord(
+            id: id,
+            status: .signed,
+            direction: .electronicToElectronic,
+            originalName: attestation.originalDocumentName,
+            newDocumentName: containerDocumentName,
+            evidenceNumber: attestation.evidenceNumber,
+            fingerprintSHA256Hex: fingerprint,
+            attestationXML: recordXML,
+            conversionTime: conversionTime,
+            performingPersonName: attestation.performingPerson.fullName,
+            securityElementCount: 0,
+            totalPages: original.kind == .asicEMultiple
+                ? PDFDocument(data: newDocument)?.pageCount ?? 0
+                : document?.pageCount ?? 0,
+            totalSheets: 0,
+            pdfFileName: pdfFileName,
+            deliveredFileName: deliveredFileName,
+            formPack: FormPackStamp(pack: formPack),
+            ezzkMode: mode,
+            evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
+            clientOutput: clientOutput,
+            // Revision 1 of the one PDF is the fingerprinted new document: a reader cuts it here.
+            revisionOneLength: clientOutput == .singlePDF ? newDocument.count : nil)
+        if let qualifiedReport {
+            record.validationEvidencePath = try evidenceStore.storeValidationEvidence(
+                qualifiedReport.data, fileExtension: qualifiedReport.fileExtension, for: record.id)
+            record.validationEvidenceSource = "Kvalifikovaná služba validácie: \(qualifiedReport.sealSubject)"
+        } else {
+            record.validationEvidencePath = try evidenceStore.storeValidationEvidence(
+                original.evidence.etsiReport, fileExtension: "xml", for: record.id)
+            record.validationEvidenceSource = "Chevron7 (DSS \(original.evidence.dssVersion))"
+        }
+        return record
+    }
+
+    /// The client output of an E→E conversion, signed the same way in both orders: the one PDF
+    /// with the clause appended (PAdES), or the new document and the clause XDCF as data objects
+    /// of one ASiC-E (a kept PDF/A goes in with the client's signatures, wrapped by the engine).
+    func signE2EClientOutput(newDocument: Data, containerDocumentName: String,
+                             containerFiles: [ASiCEPackager.Entry], appendedClause: AppendedClause?,
+                             identityID: String, stamps: Bool, tsaURL: String?, timestampServers: [String]?,
+                             prefixChangedMessage: String) async throws -> (signed: SignedConversionResult, asic: Data?) {
+        if let appendedClause {
+            // The engine appends the clause to the PDF/A and signs the whole as PAdES.
+            let signed = try await middlewareInput.during(asksEIDForBOK) {
+                try await signingProvider.sign(SigningRequest(
+                    pdfData: newDocument,
+                    identityID: identityID,
+                    includeTimestamp: stamps,
+                    tsaURL: tsaURL,
+                    outputFormat: .embeddedPAdES,
+                    pin: signingPIN.isEmpty ? nil : signingPIN,
+                    filename: containerDocumentName,
+                    timestampServers: timestampServers,
+                    appendedClause: appendedClause))
+            }
+            // The clause fingerprints the new document, so the signed file must begin with
+            // exactly those bytes (revision 1) and carry the clause and signature after them.
+            guard Self.singlePDFKeepsSource(signed, source: newDocument) else {
+                throw SigningError.signingFailed(prefixChangedMessage)
+            }
+            return (signed, nil)
+        }
+        let signed = try await middlewareInput.during(asksEIDForBOK) {
+            try await signingProvider.sign(SigningRequest(
+                pdfData: newDocument,
+                identityID: identityID,
+                includeTimestamp: stamps,
+                tsaURL: tsaURL,
+                pin: signingPIN.isEmpty ? nil : signingPIN,
+                extraFiles: containerFiles,
+                filename: containerDocumentName,
+                signsExtraFilesAsDataObjects: true,
+                timestampServers: timestampServers))
+        }
+        guard let container = signed.asicData else {
+            throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
+        }
+        let containerCheck = ASiCEContainerVerifier().verify(container)
+        guard containerCheck.isValid else {
+            throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
+        }
+        return (signed, container)
+    }
+
+    /// Writes a signed E→E client output into `directory` and returns where it went: the one PDF
+    /// at its fixed name (beside it under a unique name should a file have taken it meanwhile,
+    /// never replacing it), the container under a unique `.asice` name.
+    static func deliverE2EClientOutput(_ output: (signed: SignedConversionResult, asic: Data?),
+                                       singlePDFTarget: URL?, directory: URL,
+                                       containerDocumentName: String) throws -> URL {
+        if let singlePDFTarget {
+            return try writeWithoutOverwriting(output.signed.pdfData, preferred: singlePDFTarget)
+        }
+        guard let asic = output.asic else {
+            throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
+        }
+        let target = ConversionOutputNaming.uniqueURL(
+            in: directory,
+            fileName: ConversionOutputNaming.asicFileName(pdfFileName: containerDocumentName))
+        try asic.write(to: target, options: [.atomic])
+        return target
+    }
+
     static let rasterOfferMessage = "Prevod do PDF/A nevytvoril platné PDF/A (zvyčajne pre písma, ktoré dokument nevkladá). Môžete použiť rastrový PDF/A: strany sa uložia ako obrázky a text sa nebude dať označiť."
     static let e2eLogger = Logger(subsystem: "app.slovensko.chevron7", category: "ZaKo")
 
@@ -514,10 +629,11 @@ extension ZakoSessionStore {
         return loggable
     }
 
-    /// The clause and the record rendered and schema-validated with a placeholder number and
-    /// the Mac's clock: nil when both pass, else the advice for the advocate.
+    /// The clause and the record (in `recordForm`) rendered and schema-validated with a
+    /// placeholder number and the Mac's clock: nil when both pass, else the advice for the advocate.
     func dryRunE2EForms(original: ElectronicOriginal, newDocument: Data,
-                        containerDocumentName: String, deliveredAsSinglePDF: Bool = false) -> E2EFormIssue? {
+                        containerDocumentName: String, deliveredAsSinglePDF: Bool = false,
+                        recordForm: OfficialForm = .recordE2E_1_0) -> E2EFormIssue? {
         var draft = attestation
         draft.evidenceNumber = "0000-000000-0"
         draft.conversionExecutionDateTime = Date()
@@ -529,7 +645,7 @@ extension ZakoSessionStore {
                                               deliveredAsSinglePDF: deliveredAsSinglePDF)
             let builder = E2EDeliveryBuilder()
             _ = try builder.clause(model)
-            _ = try builder.record(model)
+            _ = try builder.record(model, form: recordForm)
             return nil
         } catch {
             return E2EFormIssue.from(error)
