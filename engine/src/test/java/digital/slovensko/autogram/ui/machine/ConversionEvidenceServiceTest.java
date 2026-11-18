@@ -651,4 +651,97 @@ class ConversionEvidenceServiceTest {
         assertEquals(1, innerTimestamps.size(), innerTimestamps.toString());
         assertEquals(timestamped.length, innerTimestamps.get(0).getAsJsonObject().get("coveredRevisionLength").getAsLong());
     }
+
+    /// Chevron7's own PAdES content timestamp: a document timestamp revision before the only
+    /// PAdES signature. It is listed with the revision it covers and is none of the signature's
+    /// own timestamps (DSS lists only those produced after the signature).
+    @Test
+    void documentTimestampBeforeTheSignatureIsListedAndIsNotTheSignaturesOwn() throws Exception {
+        var timestampedFirst = ConversionTestPdfs.documentTimestamp(ConversionTestPdfs.samplePdf(),
+                ContentTimestampTest.authority());
+        var signed = ConversionTestPdfs.sign(timestampedFirst, false);
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("signed.pdf"), signed);
+
+        var evidence = new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
+                .getAsJsonObject("evidence");
+
+        var timestamps = evidence.getAsJsonArray("documentTimestamps");
+        assertEquals(1, timestamps.size(), timestamps.toString());
+        assertEquals(timestampedFirst.length, timestamps.get(0).getAsJsonObject().get("coveredRevisionLength").getAsLong());
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+        assertEquals(signed.length, signature.get("signedRevisionLength").getAsLong());
+        assertEquals(0, signature.getAsJsonArray("timestamps").size(), signature.toString());
+    }
+
+    /// A PDF data object with document timestamps and no PAdES signature keeps its timestamps:
+    /// it gets nested evidence without signatures. The container's only PDF stays unsigned.
+    @Test
+    void pdfDataObjectWithOnlyDocumentTimestampsCarriesNestedEvidence() throws Exception {
+        var timestamped = ConversionTestPdfs.documentTimestamp(ConversionTestPdfs.samplePdf(),
+                ContentTimestampTest.authority());
+
+        var several = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", timestamped), new Entry("b.pdf", ConversionTestPdfs.withText("B")))));
+        var nested = dataObject(several, "zmluva.pdf").getAsJsonObject("evidence");
+        assertNotNull(nested, several.toString());
+        assertEquals(0, nested.getAsJsonArray("signatures").size());
+        var timestamps = nested.getAsJsonArray("documentTimestamps");
+        assertEquals(1, timestamps.size(), timestamps.toString());
+        assertEquals(timestamped.length, timestamps.get(0).getAsJsonObject().get("coveredRevisionLength").getAsLong());
+        assertFalse(dataObject(several, "zmluva.pdf").has("problem"));
+        assertFalse(dataObject(several, "b.pdf").has("evidence"));
+
+        var only = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(new Entry("zmluva.pdf", timestamped))));
+        assertFalse(only.get("asicDataObjectSigned").getAsBoolean(), only.toString());
+        var onlyNested = dataObject(only, "zmluva.pdf").getAsJsonObject("evidence");
+        assertNotNull(onlyNested, only.toString());
+        assertEquals(0, onlyNested.getAsJsonArray("signatures").size());
+        assertEquals(1, onlyNested.getAsJsonArray("documentTimestamps").size());
+    }
+
+    /// XAdES content timestamps are listed with the signature that carries them and the data
+    /// objects they cover, as DSS's timestamp scopes name them: the same names as the entries
+    /// and as the signature scopes (`coveredBy`).
+    @Test
+    void xadesContentTimestampsNameTheirSignatureAndTheDataObjectsTheyCover() throws Exception {
+        var a = ConversionTestPdfs.withText("A");
+        var b = ConversionTestPdfs.withText("B");
+        var base = ConversionTestContainers.xadesAsice(List.of(new Entry("a.pdf", a), new Entry("dir/b c.pdf", b)));
+        var container = ConversionTestContainers.addSignatureCovering(base, List.of("dir/b c.pdf"),
+                ContentTimestampTest.authority());
+
+        var evidence = evidenceOfContainer(container);
+        var content = evidence.getAsJsonArray("contentTimestamps");
+        assertEquals(1, content.size(), content.toString());
+        var timestamp = content.get(0).getAsJsonObject();
+        assertEquals("ALL_DATA_OBJECTS_TIMESTAMP", timestamp.get("type").getAsString());
+        assertEquals("[\"dir/b c.pdf\"]", timestamp.getAsJsonArray("coveredDataObjects").toString());
+        assertEquals("Test TSA", timestamp.get("producerCommonName").getAsString());
+        assertNotNull(timestamp.get("productionTime"));
+        assertNotNull(timestamp.get("indication"));
+        var carrier = timestamp.get("signatureId").getAsString();
+        var coveredBy = dataObject(evidence.getAsJsonObject("pdf"), "dir/b c.pdf").getAsJsonArray("coveredBy");
+        assertEquals(2, coveredBy.size(), coveredBy.toString());
+        assertTrue(coveredBy.contains(new com.google.gson.JsonPrimitive(carrier)));
+        var aCoveredBy = dataObject(evidence.getAsJsonObject("pdf"), "a.pdf").getAsJsonArray("coveredBy");
+        assertFalse(aCoveredBy.contains(new com.google.gson.JsonPrimitive(carrier)), aCoveredBy.toString());
+        var carrierFacts = evidence.getAsJsonArray("signatures").asList().stream().map(value -> value.getAsJsonObject())
+                .filter(signature -> signature.get("id").getAsString().equals(carrier)).findFirst().orElseThrow();
+        assertEquals(0, carrierFacts.getAsJsonArray("timestamps").size(), carrierFacts.toString());
+
+        var individual = evidenceOfContainer(ConversionTestContainers.xadesAsiceWithIndividualTimestamp(
+                List.of(new Entry("a.pdf", a), new Entry("dir/b c.pdf", b)), ContentTimestampTest.authority(), "dir/b c.pdf"))
+                .getAsJsonArray("contentTimestamps");
+        assertEquals(1, individual.size(), individual.toString());
+        assertEquals("INDIVIDUAL_DATA_OBJECTS_TIMESTAMP", individual.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals("[\"dir/b c.pdf\"]", individual.get(0).getAsJsonObject().getAsJsonArray("coveredDataObjects").toString());
+
+        var everything = evidenceOfContainer(ConversionTestContainers.xadesAsiceWithContentTimestamp(
+                List.of(new Entry("a.pdf", a), new Entry("dir/b c.pdf", b)), ContentTimestampTest.authority()))
+                .getAsJsonArray("contentTimestamps");
+        assertEquals("[\"a.pdf\",\"dir/b c.pdf\"]",
+                everything.get(0).getAsJsonObject().getAsJsonArray("coveredDataObjects").toString());
+
+        assertEquals(0, evidenceOfContainer(base).getAsJsonArray("contentTimestamps").size());
+    }
 }
