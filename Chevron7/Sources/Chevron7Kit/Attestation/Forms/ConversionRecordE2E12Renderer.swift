@@ -114,34 +114,63 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         original.kind == .pdf || authorization.fileEntryName != nil
     }
 
-    /// Indices of the authorizations one authorization covers (`AuthorizedAuthorization`): for a
-    /// container signature, the PAdES signatures of the files it covers; for a PAdES signature,
-    /// the PAdES signatures of the same file with a shorter signed revision.
+    /// The latest PAdES signatures of a file before `length` (nil for no limit), as indices
+    /// into `original.authorizations`; several only when they share one signed revision.
+    private static func latestPAdES(file: String?, before length: Int?, in original: ElectronicOriginal) -> [Int] {
+        let candidates = original.authorizations.indices.filter { index in
+            let other = original.authorizations[index]
+            guard isPAdES(other, in: original), other.fileEntryName == file,
+                  let otherLength = other.signedRevisionLength else { return false }
+            return length.map { otherLength < $0 } ?? true
+        }
+        guard let latest = candidates.compactMap({ original.authorizations[$0].signedRevisionLength }).max() else { return [] }
+        return candidates.filter { original.authorizations[$0].signedRevisionLength == latest }
+    }
+
+    /// The files (entry names) a container signature covers.
+    private static func coveredFiles(_ authorization: ElectronicOriginal.Authorization,
+                                     in original: ElectronicOriginal) -> [String] {
+        (original.evidence.pdf?.dataObjects ?? []).filter { $0.coveredBy.contains(authorization.signatureID) }.map(\.name)
+    }
+
+    /// Indices of the authorizations one authorization covers (`AuthorizedAuthorization`), nested
+    /// ones not repeated (the schema's annotation): a PAdES signature names only the immediately
+    /// preceding PAdES signature of its file (by signed revision length); a container signature
+    /// names only the latest PAdES signature of each file it covers.
     static func authorizedAuthorizations(of index: Int, in original: ElectronicOriginal) -> [Int] {
-        let authorizations = original.authorizations
-        let authorization = authorizations[index]
+        let authorization = original.authorizations[index]
         if isPAdES(authorization, in: original) {
             guard let length = authorization.signedRevisionLength else { return [] }
-            return authorizations.indices.filter { other in
-                other != index && isPAdES(authorizations[other], in: original)
-                    && authorizations[other].fileEntryName == authorization.fileEntryName
-                    && (authorizations[other].signedRevisionLength.map { $0 < length } ?? false)
-            }
+            return latestPAdES(file: authorization.fileEntryName, before: length, in: original)
         }
-        let covered = Set((original.evidence.pdf?.dataObjects ?? [])
-            .filter { $0.coveredBy.contains(authorization.signatureID) }.map(\.name))
-        return authorizations.indices.filter { other in
-            other != index && authorizations[other].fileEntryName.map(covered.contains) ?? false
+        let files = Set(coveredFiles(authorization, in: original))
+        return original.authorizations.indices.filter { other in
+            guard let file = original.authorizations[other].fileEntryName, files.contains(file) else { return false }
+            return latestPAdES(file: file, before: nil, in: original).contains(other)
         }
     }
 
-    /// Document timestamps one PAdES signature covers (`AuthorizedTimeStamp`): those of its file
-    /// with a shorter covered revision. A container signature names none.
+    /// Document timestamps one authorization covers (`AuthorizedTimeStamp`), none named twice: a
+    /// PAdES signature names those of its file from the preceding PAdES revision up to its own; a
+    /// container signature names those of each covered file that no PAdES signature names (from
+    /// the file's last PAdES revision on, or all of them when the file has no PAdES).
     static func authorizedTimestamps(of authorization: ElectronicOriginal.Authorization,
                                      in original: ElectronicOriginal) -> [ElectronicOriginal.DocumentTimestamp] {
-        guard isPAdES(authorization, in: original), let length = authorization.signedRevisionLength else { return [] }
-        return original.documentTimestamps.filter {
-            $0.fileEntryName == authorization.fileEntryName && $0.coveredRevisionLength < length
+        func revisionLength(_ indices: [Int]) -> Int {
+            indices.compactMap { original.authorizations[$0].signedRevisionLength }.max() ?? 0
+        }
+        if isPAdES(authorization, in: original) {
+            guard let length = authorization.signedRevisionLength else { return [] }
+            let from = revisionLength(latestPAdES(file: authorization.fileEntryName, before: length, in: original))
+            return original.documentTimestamps.filter {
+                $0.fileEntryName == authorization.fileEntryName
+                    && $0.coveredRevisionLength >= from && $0.coveredRevisionLength < length
+            }
+        }
+        let files = coveredFiles(authorization, in: original)
+        return original.documentTimestamps.filter { stamp in
+            guard let file = stamp.fileEntryName, files.contains(file) else { return false }
+            return stamp.coveredRevisionLength >= revisionLength(latestPAdES(file: file, before: nil, in: original))
         }
     }
 
@@ -149,16 +178,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
 
     public func render(_ m: E2EFormModel) -> String {
         let original = m.original
-        // Timestamp names in order of appearance: document timestamps first, then each
-        // authorization's own; one timestamp (by file and DSS id) keeps one name.
-        var timestampNames: [String: String] = [:]
-        func timestampName(file: String?, id: String?) -> String {
-            let key = id.map { "\(file ?? "")\u{0}\($0)" } ?? UUID().uuidString
-            if let name = timestampNames[key] { return name }
-            let name = "CasovaPeciatka\(timestampNames.count + 1)"
-            timestampNames[key] = name
-            return name
-        }
+        let timestampName = Self.timestampNames(original)
 
         var x = "<ConversionRecord xmlns=\"\(OfficialForm.recordE2E_1_2.namespace)\">"
         for (index, document) in original.documents.enumerated() {
@@ -174,7 +194,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
         for stamp in original.documentTimestamps {
             x += "<OriginalDocumentTimestamp>"
-            x += element("TimeStampName", timestampName(file: stamp.fileEntryName, id: stamp.id))
+            x += element("TimeStampName", timestampName(stamp.fileEntryName, stamp.id, nil))
             x += "<OriginalDocumentInfo>\(element("OriginalDocumentName", stamp.documentName))</OriginalDocumentInfo>"
             x += timestampBody(stamp.timestamp, publisherLimit: 255)
             x += "</OriginalDocumentTimestamp>"
@@ -190,7 +210,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
                 x += "<OriginalDocumentInfo>\(element("OriginalDocumentName", name))</OriginalDocumentInfo>"
             }
             for stamp in Self.authorizedTimestamps(of: authorization, in: original) {
-                x += "<AuthorizedTimeStamp>\(element("AuthorizedTimeStampName", timestampName(file: stamp.fileEntryName, id: stamp.id)))</AuthorizedTimeStamp>"
+                x += "<AuthorizedTimeStamp>\(element("AuthorizedTimeStampName", timestampName(stamp.fileEntryName, stamp.id, nil)))</AuthorizedTimeStamp>"
             }
             for other in Self.authorizedAuthorizations(of: index, in: original) {
                 x += "<AuthorizedAuthorization>\(element("AuthorizationName", names[other]))</AuthorizedAuthorization>"
@@ -211,7 +231,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
             x += "</AuthorizationPerson>"
             if let timestamp = authorization.timestamp {
                 x += "<TimeStamp>"
-                x += element("TimeStampName", timestampName(file: authorization.fileEntryName, id: timestamp.id))
+                x += element("TimeStampName", timestampName(authorization.fileEntryName, timestamp.id, index))
                 x += timestampBody(timestamp, publisherLimit: 2047)
                 x += "</TimeStamp>"
             }
@@ -243,6 +263,29 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
         x += "</PersonData></PersonPerformingConversion></ConversionRecord>"
         return x
+    }
+
+    /// Timestamp names as the form's annotation gives them: "Elektronicka casova peciatka" when
+    /// the record holds exactly one timestamp, else "Casova-peciatka-<N>" in order of appearance
+    /// (document timestamps first, then each authorization's own). One timestamp, by file and
+    /// DSS id, keeps one name; a timestamp without an id is its authorization's own.
+    static func timestampNames(_ original: ElectronicOriginal) -> (String?, String?, Int?) -> String {
+        func key(_ file: String?, _ id: String?, _ authorization: Int?) -> String {
+            id.map { "\(file ?? "")\u{0}\($0)" } ?? "authorization\u{0}\(authorization ?? -1)"
+        }
+        var order: [String] = []
+        for stamp in original.documentTimestamps where !order.contains(key(stamp.fileEntryName, stamp.id, nil)) {
+            order.append(key(stamp.fileEntryName, stamp.id, nil))
+        }
+        for (index, authorization) in original.authorizations.enumerated() {
+            guard let timestamp = authorization.timestamp else { continue }
+            let k = key(authorization.fileEntryName, timestamp.id, index)
+            if !order.contains(k) { order.append(k) }
+        }
+        let names = Dictionary(uniqueKeysWithValues: order.enumerated().map { position, k in
+            (k, order.count == 1 ? "Elektronicka casova peciatka" : "Casova-peciatka-\(position + 1)")
+        })
+        return { file, id, authorization in names[key(file, id, authorization)] ?? "Casova-peciatka-\(order.count + 1)" }
     }
 
     /// The elements after a timestamp's name, the same in `OriginalDocumentTimestamp` and `TimeStamp`.

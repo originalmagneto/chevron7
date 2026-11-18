@@ -132,6 +132,11 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         })
     }
 
+    private func authorized(_ block: String) -> [String] {
+        block.components(separatedBy: "<AuthorizedAuthorization>").dropFirst()
+            .compactMap { values("AuthorizationName", in: $0).first }
+    }
+
     private func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
 
     private func assertCrossReferencesResolve(_ xml: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -178,7 +183,7 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         XCTAssertTrue(second.contains("<OriginalDocumentInfo><OriginalDocumentName>zmluva-2</OriginalDocumentName></OriginalDocumentInfo><AuthorizedAuthorization><AuthorizationName>Autorizacia1</AuthorizationName></AuthorizedAuthorization><AuthorizationState>platný</AuthorizationState>"))
         XCTAssertTrue(second.contains("<ElectronicSignature>\(Data("value-S-2".utf8).base64EncodedString())</ElectronicSignature>"))
         XCTAssertTrue(second.contains("<ValidityVerificationResult>\(Data("<ValidationReport id=\"S-2\"/>".utf8).base64EncodedString())</ValidityVerificationResult>"))
-        XCTAssertEqual(values("TimeStampName", in: xml), ["CasovaPeciatka1", "CasovaPeciatka2"])
+        XCTAssertEqual(values("TimeStampName", in: xml), ["Casova-peciatka-1", "Casova-peciatka-2"])
         XCTAssertFalse(xml.contains("<OriginalDocumentTimestamp>"))
         XCTAssertFalse(xml.contains("<AuthorizationLocation>"))
         XCTAssertFalse(xml.contains("<Position>"))
@@ -238,14 +243,14 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         let original = try pdfOriginal([first, second], documentTimestamps: [documentStamp])
         XCTAssertEqual(original.documentTimestamps.map(\.documentName), ["zmluva-1"])
         let xml = try record12(try model(original))
-        XCTAssertTrue(xml.contains("<OriginalDocumentTimestamp><TimeStampName>CasovaPeciatka1</TimeStampName><OriginalDocumentInfo><OriginalDocumentName>zmluva-1</OriginalDocumentName></OriginalDocumentInfo><TimeStampType>kvalifikovaná elektronická časová pečiatka</TimeStampType><TimeStampState>platný</TimeStampState><TimeStampCreated>2026-10-11T09:00:00+02:00</TimeStampCreated><TimeStampPublisher>BOSA TSA</TimeStampPublisher><TimeStampValidationTime>2026-10-16T11:30:00+02:00</TimeStampValidationTime></OriginalDocumentTimestamp>"))
+        XCTAssertTrue(xml.contains("<OriginalDocumentTimestamp><TimeStampName>Casova-peciatka-1</TimeStampName><OriginalDocumentInfo><OriginalDocumentName>zmluva-1</OriginalDocumentName></OriginalDocumentInfo><TimeStampType>kvalifikovaná elektronická časová pečiatka</TimeStampType><TimeStampState>platný</TimeStampState><TimeStampCreated>2026-10-11T09:00:00+02:00</TimeStampCreated><TimeStampPublisher>BOSA TSA</TimeStampPublisher><TimeStampValidationTime>2026-10-16T11:30:00+02:00</TimeStampValidationTime></OriginalDocumentTimestamp>"))
         let later = try block(named: "Autorizacia2", in: xml)
-        XCTAssertTrue(later.contains("<OriginalDocumentInfo><OriginalDocumentName>zmluva-2</OriginalDocumentName></OriginalDocumentInfo><AuthorizedTimeStamp><AuthorizedTimeStampName>CasovaPeciatka1</AuthorizedTimeStampName></AuthorizedTimeStamp><AuthorizedAuthorization><AuthorizationName>Autorizacia1</AuthorizationName></AuthorizedAuthorization>"))
+        XCTAssertTrue(later.contains("<OriginalDocumentInfo><OriginalDocumentName>zmluva-2</OriginalDocumentName></OriginalDocumentInfo><AuthorizedTimeStamp><AuthorizedTimeStampName>Casova-peciatka-1</AuthorizedTimeStampName></AuthorizedTimeStamp><AuthorizedAuthorization><AuthorizationName>Autorizacia1</AuthorizationName></AuthorizedAuthorization>"))
         let earlier = try block(named: "Autorizacia1", in: xml)
         XCTAssertFalse(earlier.contains("<AuthorizedTimeStamp>"))
-        // The same timestamp keeps its one name: the earlier signature's TimeStamp is CasovaPeciatka1.
-        XCTAssertTrue(earlier.contains("<TimeStamp><TimeStampName>CasovaPeciatka1</TimeStampName>"))
-        XCTAssertTrue(later.contains("<TimeStamp><TimeStampName>CasovaPeciatka2</TimeStampName>"))
+        // The same timestamp keeps its one name: the earlier signature's TimeStamp is Casova-peciatka-1.
+        XCTAssertTrue(earlier.contains("<TimeStamp><TimeStampName>Casova-peciatka-1</TimeStampName>"))
+        XCTAssertTrue(later.contains("<TimeStamp><TimeStampName>Casova-peciatka-2</TimeStampName>"))
         assertCrossReferencesResolve(xml)
     }
 
@@ -253,9 +258,10 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         let original = try pdfOriginal([signature("S-1", revision: 100), signature("S-2", revision: 200),
                                         signature("S-3", revision: pdf.count)])
         let xml = try record12(try model(original))
-        let last = try block(named: "Autorizacia3", in: xml)
-        XCTAssertEqual(last.components(separatedBy: "<AuthorizedAuthorization>").dropFirst()
-            .compactMap { values("AuthorizationName", in: $0).first }, ["Autorizacia1", "Autorizacia2"])
+        // Nested authorizations are not repeated: each names only its predecessor.
+        XCTAssertEqual(authorized(try block(named: "Autorizacia3", in: xml)), ["Autorizacia2"])
+        XCTAssertEqual(authorized(try block(named: "Autorizacia2", in: xml)), ["Autorizacia1"])
+        XCTAssertEqual(authorized(try block(named: "Autorizacia1", in: xml)), [])
     }
 
     func testNestedDocumentTimestampNamesItsFileRevision() throws {
@@ -270,13 +276,75 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         XCTAssertEqual(original.documentTimestamps.map(\.fileEntryName), ["a.pdf"])
         let xml = try record12(try model(original))
         let p2 = try block(named: "Autorizacia2", in: xml)
-        XCTAssertEqual(values("AuthorizedTimeStampName", in: p2), ["CasovaPeciatka1"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: p2), ["Casova-peciatka-1"])
         XCTAssertEqual(p2.components(separatedBy: "<AuthorizedAuthorization>").dropFirst()
             .compactMap { values("AuthorizationName", in: $0).first }, ["Autorizacia1"])
         let outer = try block(named: "signatures001.xml", in: xml)
-        XCTAssertEqual(outer.components(separatedBy: "<AuthorizedAuthorization>").dropFirst()
-            .compactMap { values("AuthorizationName", in: $0).first }, ["Autorizacia1", "Autorizacia2"])
+        XCTAssertEqual(authorized(outer), ["Autorizacia2"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: outer), [])
         assertCrossReferencesResolve(xml)
+    }
+
+    func testPAdESChainAndTimestampsAreNamedOnceEach() throws {
+        // a.pdf: P-1 (300), document timestamp D-1 (400), P-2 (500), P-3 (800), D-2 (900), 1000 bytes.
+        var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
+        a.nestedSignatures = [signature("P-1", revision: 300), signature("P-2", revision: 500),
+                              signature("P-3", revision: 800)]
+        var d1 = E2EEvidenceFixtures.DocumentTimestamp()
+        d1.id = "D-1"
+        d1.coveredRevisionLength = 400
+        var d2 = E2EEvidenceFixtures.DocumentTimestamp()
+        d2.id = "D-2"
+        d2.coveredRevisionLength = 900
+        a.nestedDocumentTimestamps = [d1, d2]
+        let original = try container([a], signatures: [containerSignature("C-1", file: "META-INF/signatures001.xml")])
+        XCTAssertEqual(original.documentTimestamps.map(\.documentName), ["a-1", "a-3"])
+        let xml = try record12(try model(original))
+        let p1 = try block(named: "Autorizacia1", in: xml)
+        let p2 = try block(named: "Autorizacia2", in: xml)
+        let p3 = try block(named: "Autorizacia3", in: xml)
+        let outer = try block(named: "signatures001.xml", in: xml)
+        XCTAssertEqual(authorized(p1), [])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: p1), [])
+        XCTAssertEqual(authorized(p2), ["Autorizacia1"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: p2), ["Casova-peciatka-1"])
+        XCTAssertEqual(authorized(p3), ["Autorizacia2"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: p3), [])
+        XCTAssertEqual(authorized(outer), ["Autorizacia3"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: outer), ["Casova-peciatka-2"])
+        // D-1, D-2, then the four signatures' own timestamps.
+        XCTAssertEqual(values("TimeStampName", in: xml), (1...6).map { "Casova-peciatka-\($0)" })
+        assertCrossReferencesResolve(xml)
+    }
+
+    func testContainerNamesEveryTimestampOfAFileWithoutPAdES() throws {
+        var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
+        a.nestedSignatures = [signature("P-1", revision: 300)]
+        var early = E2EEvidenceFixtures.DocumentTimestamp()
+        early.id = "D-1"
+        early.coveredRevisionLength = 600
+        a.nestedDocumentTimestamps = [early]
+        let original = try container([a], signatures: [containerSignature("C-1", file: "META-INF/signatures001.xml")])
+        let xml = try record12(try model(original))
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: try block(named: "signatures001.xml", in: xml)),
+                       ["Casova-peciatka-1"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: try block(named: "Autorizacia1", in: xml)), [])
+    }
+
+    func testSingleTimestampIsElektronickaCasovaPeciatka() throws {
+        let xml = try record12(try model(try pdfOriginal([signature("S-1", revision: pdf.count)])))
+        XCTAssertEqual(values("TimeStampName", in: xml), ["Elektronicka casova peciatka"])
+        // One document timestamp that DSS also lists under the only signature is still one timestamp.
+        var documentStamp = E2EEvidenceFixtures.DocumentTimestamp()
+        documentStamp.id = "T-DOC-1"
+        documentStamp.coveredRevisionLength = 200
+        var first = signature("S-1", revision: 150)
+        first.timestamps = [stamp("T-DOC-1", at: documentStamp.productionTime, type: "DOCUMENT_TIMESTAMP")]
+        var second = signature("S-2", revision: pdf.count)
+        second.timestamps = []
+        let shared = try record12(try model(try pdfOriginal([first, second], documentTimestamps: [documentStamp])))
+        XCTAssertEqual(values("TimeStampName", in: shared), ["Elektronicka casova peciatka", "Elektronicka casova peciatka"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: shared), ["Elektronicka casova peciatka"])
     }
 
     func testDocumentTimestampCoveringNoDocumentIsLeftOut() throws {
