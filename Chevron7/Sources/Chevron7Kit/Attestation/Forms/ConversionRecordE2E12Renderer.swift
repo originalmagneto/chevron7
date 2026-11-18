@@ -12,7 +12,8 @@ import Foundation
 /// evidence number as a URI and no `Position` or `AuthorizationLocation`.
 ///
 /// It never substitutes a value it cannot map: an unmappable authorization type or format is
-/// written empty, which the schema refuses, and `E2EDeliveryBuilder` refuses it before rendering.
+/// written empty, which the schema refuses, and `E2EDeliveryBuilder` refuses it before rendering;
+/// a timestamp it cannot name makes `render` throw.
 public struct ConversionRecordE2E12Renderer: Sendable {
     public init() {}
 
@@ -150,6 +151,14 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
     }
 
+    /// XAdES content timestamps a container signature carries in its signed properties, which it
+    /// therefore authorizes (`AuthorizedTimeStamp`).
+    static func authorizedContentTimestamps(of authorization: ElectronicOriginal.Authorization,
+                                            in original: ElectronicOriginal) -> [ElectronicOriginal.ContentTimestamp] {
+        guard !isPAdES(authorization, in: original) else { return [] }
+        return original.contentTimestamps.filter { $0.signatureID == authorization.signatureID }
+    }
+
     /// Document timestamps one authorization covers (`AuthorizedTimeStamp`), none named twice: a
     /// PAdES signature names those of its file from the preceding PAdES revision up to its own; a
     /// container signature names those of each covered file that no PAdES signature names (from
@@ -176,7 +185,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
 
     // MARK: Rendering
 
-    public func render(_ m: E2EFormModel) -> String {
+    public func render(_ m: E2EFormModel) throws -> String {
         let original = m.original
         let timestampName = Self.timestampNames(original)
 
@@ -194,8 +203,17 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
         for stamp in original.documentTimestamps {
             x += "<OriginalDocumentTimestamp>"
-            x += element("TimeStampName", timestampName(stamp.fileEntryName, stamp.id, nil))
+            x += element("TimeStampName", try timestampName(stamp.fileEntryName, stamp.id, nil))
             x += "<OriginalDocumentInfo>\(element("OriginalDocumentName", stamp.documentName))</OriginalDocumentInfo>"
+            x += timestampBody(stamp.timestamp, publisherLimit: 255)
+            x += "</OriginalDocumentTimestamp>"
+        }
+        for stamp in original.contentTimestamps {
+            x += "<OriginalDocumentTimestamp>"
+            x += element("TimeStampName", try timestampName(nil, stamp.id, nil))
+            for name in stamp.documentNames {
+                x += "<OriginalDocumentInfo>\(element("OriginalDocumentName", name))</OriginalDocumentInfo>"
+            }
             x += timestampBody(stamp.timestamp, publisherLimit: 255)
             x += "</OriginalDocumentTimestamp>"
         }
@@ -210,7 +228,10 @@ public struct ConversionRecordE2E12Renderer: Sendable {
                 x += "<OriginalDocumentInfo>\(element("OriginalDocumentName", name))</OriginalDocumentInfo>"
             }
             for stamp in Self.authorizedTimestamps(of: authorization, in: original) {
-                x += "<AuthorizedTimeStamp>\(element("AuthorizedTimeStampName", timestampName(stamp.fileEntryName, stamp.id, nil)))</AuthorizedTimeStamp>"
+                x += "<AuthorizedTimeStamp>\(element("AuthorizedTimeStampName", try timestampName(stamp.fileEntryName, stamp.id, nil)))</AuthorizedTimeStamp>"
+            }
+            for stamp in Self.authorizedContentTimestamps(of: authorization, in: original) {
+                x += "<AuthorizedTimeStamp>\(element("AuthorizedTimeStampName", try timestampName(nil, stamp.id, nil)))</AuthorizedTimeStamp>"
             }
             for other in Self.authorizedAuthorizations(of: index, in: original) {
                 x += "<AuthorizedAuthorization>\(element("AuthorizationName", names[other]))</AuthorizedAuthorization>"
@@ -219,9 +240,8 @@ public struct ConversionRecordE2E12Renderer: Sendable {
             if let time = authorization.signingTime {
                 x += element("AuthorizationTime", ConversionFormModel.bratislavaDateTime(time))
             }
-            if !authorization.signatureValue.isEmpty {
-                x += element("ElectronicSignature", authorization.signatureValue.base64EncodedString())
-            }
+            // Obligatory for every signature and seal type; `E2EDeliveryBuilder` refuses an empty value.
+            x += element("ElectronicSignature", authorization.signatureValue.base64EncodedString())
             x += element("ValidityVerificationResult", m.validityVerificationResult(authorization))
             x += element("AuthorizationValidationTime", ConversionFormModel.bratislavaDateTime(authorization.validationTime))
             x += "<AuthorizationPerson>"
@@ -231,7 +251,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
             x += "</AuthorizationPerson>"
             if let timestamp = authorization.timestamp {
                 x += "<TimeStamp>"
-                x += element("TimeStampName", timestampName(authorization.fileEntryName, timestamp.id, index))
+                x += element("TimeStampName", try timestampName(authorization.fileEntryName, timestamp.id, index))
                 x += timestampBody(timestamp, publisherLimit: 2047)
                 x += "</TimeStamp>"
             }
@@ -267,18 +287,22 @@ public struct ConversionRecordE2E12Renderer: Sendable {
 
     /// Timestamp names, per element as each annotation says. `Authorization/TimeStamp` is always
     /// "Casova-peciatka-<N>"; an `OriginalDocumentTimestamp` is "Elektronicka casova peciatka"
-    /// when the record holds exactly one document timestamp and no authorization lists it as its
-    /// `TimeStamp` (one timestamp keeps one name), else "Casova-peciatka-<N>". N counts in order
-    /// of appearance (document timestamps first, then each authorization's own). One timestamp,
-    /// by file and DSS id, keeps one name; a timestamp without an id is its authorization's own.
-    /// The lookup traps on a timestamp it was not built from, so a miss never yields a duplicate.
-    static func timestampNames(_ original: ElectronicOriginal) -> (String?, String?, Int?) -> String {
+    /// when the record holds exactly one (a document or content timestamp) and no authorization
+    /// lists it as its `TimeStamp` (one timestamp keeps one name), else "Casova-peciatka-<N>". N
+    /// counts in order of appearance (document timestamps, content timestamps, then each
+    /// authorization's own). One timestamp, by file and DSS id, keeps one name; a timestamp
+    /// without an id is its authorization's own. The lookup throws on a timestamp it was not
+    /// built from, so a miss never yields a duplicate.
+    static func timestampNames(_ original: ElectronicOriginal) -> (String?, String?, Int?) throws -> String {
         func key(_ file: String?, _ id: String?, _ authorization: Int?) -> String {
             id.map { "\(file ?? "")\u{0}\($0)" } ?? "authorization\u{0}\(authorization ?? -1)"
         }
         var documentKeys: [String] = []
         for stamp in original.documentTimestamps where !documentKeys.contains(key(stamp.fileEntryName, stamp.id, nil)) {
             documentKeys.append(key(stamp.fileEntryName, stamp.id, nil))
+        }
+        for stamp in original.contentTimestamps where !documentKeys.contains(key(nil, stamp.id, nil)) {
+            documentKeys.append(key(nil, stamp.id, nil))
         }
         var authorizationKeys: [String] = []
         for (index, authorization) in original.authorizations.enumerated() {
@@ -300,7 +324,7 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
         return { file, id, authorization in
             guard let name = names[key(file, id, authorization)] else {
-                preconditionFailure("record 1.2: timestamp without a name")
+                throw E2EDeliveryBuilder.Failure.unnamedTimestamp
             }
             return name
         }

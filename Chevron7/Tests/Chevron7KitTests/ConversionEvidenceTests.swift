@@ -133,6 +133,34 @@ final class ConversionEvidenceTests: XCTestCase {
         XCTAssertEqual(inner.documentTimestamps.first?.coveredRevisionLength, 8_192)
     }
 
+    func testDecodesContentTimestamps() throws {
+        var stamp = E2EEvidenceFixtures.ContentTimestamp()
+        stamp.coveredDataObjects = ["a.pdf", "dir/b c.pdf"]
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], contentTimestamps: [stamp])) as? [String: Any])
+        let evidence = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(evidence.contentTimestamps, [ConversionEvidence.ContentTimestamp(
+            id: "T-CONTENT-1", signatureID: "C-1", type: "ALL_DATA_OBJECTS_TIMESTAMP",
+            productionTime: ISO8601DateFormatter().date(from: "2026-10-10T08:14:00Z"),
+            producerCommonName: "Sectigo Qualified Time Stamping Signer #2", indication: "PASSED",
+            qualification: "QTSA", coveredDataObjects: ["a.pdf", "dir/b c.pdf"])])
+
+        // A timestamp without its carrier degrades to an empty one, never the whole evidence.
+        var body = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var stamps = try XCTUnwrap(body["contentTimestamps"] as? [[String: Any]])
+        stamps[0].removeValue(forKey: "signatureId")
+        body["contentTimestamps"] = stamps
+        json["evidence"] = body
+        let degraded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(degraded.contentTimestamps.map(\.signatureID), [""])
+
+        // An old payload has none.
+        body.removeValue(forKey: "contentTimestamps")
+        json["evidence"] = body
+        let old = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(old.contentTimestamps, [])
+    }
+
     func testOldPayloadHasNoDocumentTimestamps() throws {
         var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
         object.nestedSignatures = [E2EEvidenceFixtures.Signature()]

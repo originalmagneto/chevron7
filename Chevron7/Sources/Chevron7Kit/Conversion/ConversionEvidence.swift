@@ -40,6 +40,25 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var coveredRevisionLength: Int?
     }
 
+    /// A XAdES content timestamp (DSS `ALL_DATA_OBJECTS_TIMESTAMP` or
+    /// `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`) in a container signature's signed properties.
+    public struct ContentTimestamp: Sendable, Equatable {
+        public var id: String
+        /// The signature that carries it.
+        public var signatureID: String
+        /// DSS `TimestampType` name.
+        public var type: String?
+        public var productionTime: Date?
+        /// Common name of the timestamp unit's certificate.
+        public var producerCommonName: String?
+        /// DSS indication: `PASSED`, `INDETERMINATE` or `FAILED`.
+        public var indication: String?
+        /// DSS timestamp qualification, `QTSA` for a qualified one.
+        public var qualification: String?
+        /// The data objects it covers, by DSS's timestamp scope names (the entry names).
+        public var coveredDataObjects: [String]
+    }
+
     public struct Signature: Sendable, Equatable {
         public var id: String
         public var signatureValue: Data
@@ -123,9 +142,12 @@ public struct ConversionEvidence: Sendable, Equatable {
     public var pdf: PDFFacts?
     /// Document timestamps of a PDF original; empty for a container or an old payload.
     public var documentTimestamps: [DocumentTimestamp]
+    /// XAdES content timestamps of the container's signatures; empty for a PDF or an old payload.
+    public var contentTimestamps: [ContentTimestamp]
 
     public init(tree: SignatureTree, validationTime: Date, dssVersion: String, etsiReport: Data,
-                signatures: [Signature], pdf: PDFFacts?, documentTimestamps: [DocumentTimestamp] = []) {
+                signatures: [Signature], pdf: PDFFacts?, documentTimestamps: [DocumentTimestamp] = [],
+                contentTimestamps: [ContentTimestamp] = []) {
         self.tree = tree
         self.validationTime = validationTime
         self.dssVersion = dssVersion
@@ -133,6 +155,7 @@ public struct ConversionEvidence: Sendable, Equatable {
         self.signatures = signatures
         self.pdf = pdf
         self.documentTimestamps = documentTimestamps
+        self.contentTimestamps = contentTimestamps
     }
 
     public func signature(id: String) -> Signature? {
@@ -181,6 +204,18 @@ extension ConversionEvidence {
             var indication: String?
             var qualification: String?
             var coveredRevisionLength: Int?
+        }
+
+        struct RawContentTimestamp: Decodable {
+            var id: String
+            /// Optional so a missing value degrades only this timestamp (record 1.2 refuses it).
+            var signatureId: String?
+            var type: String?
+            var productionTime: String?
+            var producerCommonName: String?
+            var indication: String?
+            var qualification: String?
+            var coveredDataObjects: [String]?
         }
 
         struct RawTimestamp: Decodable {
@@ -263,6 +298,7 @@ extension ConversionEvidence {
         var signatures: [RawSignature]
         var pdf: RawPDF?
         var documentTimestamps: [RawDocumentTimestamp]?
+        var contentTimestamps: [RawContentTimestamp]?
 
         private static func parseDate(_ text: String?) -> Date? {
             let formatter = ISO8601DateFormatter()
@@ -296,6 +332,15 @@ extension ConversionEvidence {
                 DocumentTimestamp(id: $0.id, productionTime: parseDate($0.productionTime),
                                   producerCommonName: $0.producerCommonName, indication: $0.indication,
                                   qualification: $0.qualification, coveredRevisionLength: $0.coveredRevisionLength)
+            }
+        }
+
+        private static func contentTimestamps(_ raw: [RawContentTimestamp]?) -> [ContentTimestamp] {
+            (raw ?? []).map {
+                ContentTimestamp(id: $0.id, signatureID: $0.signatureId ?? "", type: $0.type,
+                                 productionTime: parseDate($0.productionTime),
+                                 producerCommonName: $0.producerCommonName, indication: $0.indication,
+                                 qualification: $0.qualification, coveredDataObjects: $0.coveredDataObjects ?? [])
             }
         }
 
@@ -343,7 +388,8 @@ extension ConversionEvidence {
             return ConversionEvidence(tree: tree, validationTime: time, dssVersion: dssVersion, etsiReport: report,
                                       signatures: try signatures.map(Self.signature),
                                       pdf: try pdf.map(Self.facts),
-                                      documentTimestamps: Self.documentTimestamps(documentTimestamps))
+                                      documentTimestamps: Self.documentTimestamps(documentTimestamps),
+                                      contentTimestamps: Self.contentTimestamps(contentTimestamps))
         }
     }
 }

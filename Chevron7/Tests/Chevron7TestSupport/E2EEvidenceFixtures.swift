@@ -30,6 +30,21 @@ public enum E2EEvidenceFixtures {
         public init() {}
     }
 
+    /// A XAdES content timestamp (DSS `ALL_DATA_OBJECTS_TIMESTAMP`) of a container signature,
+    /// as the engine lists it under `contentTimestamps`.
+    public struct ContentTimestamp {
+        public var id = "T-CONTENT-1"
+        public var signatureID = "C-1"
+        public var type = "ALL_DATA_OBJECTS_TIMESTAMP"
+        public var productionTime = "2026-10-10T08:14:00Z"
+        public var producerCommonName = "Sectigo Qualified Time Stamping Signer #2"
+        public var indication = "PASSED"
+        public var qualification = "QTSA"
+        public var coveredDataObjects: [String] = []
+
+        public init() {}
+    }
+
     public struct Signature {
         public var id = "S-1"
         public var indication = "TOTAL_PASSED"
@@ -104,9 +119,11 @@ public enum E2EEvidenceFixtures {
     public static let validationTime = "2026-10-16T09:30:00Z"
 
     public static func payload(signatures: [Signature], pdf: PDF? = PDF(), dataObjects: [DataObject] = [],
-                               documentTimestamps: [DocumentTimestamp] = []) -> Data {
+                               documentTimestamps: [DocumentTimestamp] = [],
+                               contentTimestamps: [ContentTimestamp] = []) -> Data {
         let (tree, evidence) = evidenceBody(signatures: signatures, pdf: pdf, dataObjects: dataObjects,
-                                            documentTimestamps: documentTimestamps)
+                                            documentTimestamps: documentTimestamps,
+                                            contentTimestamps: contentTimestamps)
         let payload: [String: Any] = ["signatures": tree, "documents": dataObjects.map(treeDocumentJSON),
                                       "evidence": evidence]
         return try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -115,6 +132,7 @@ public enum E2EEvidenceFixtures {
     /// The tree entries and the `evidence` object, also the shape of a data object's nested `evidence`.
     private static func evidenceBody(signatures: [Signature], pdf: PDF?, dataObjects: [DataObject],
                                      documentTimestamps: [DocumentTimestamp] = [],
+                                     contentTimestamps: [ContentTimestamp] = [],
                                      validationTime: String = E2EEvidenceFixtures.validationTime) -> ([[String: Any]], [String: Any]) {
         var tree: [[String: Any]] = []
         var facts: [[String: Any]] = []
@@ -168,6 +186,14 @@ public enum E2EEvidenceFixtures {
                 ]
                 if let value = stamp.coveredRevisionLength { json["coveredRevisionLength"] = value }
                 return json
+            },
+            "contentTimestamps": contentTimestamps.map { stamp -> [String: Any] in
+                [
+                    "id": stamp.id, "signatureId": stamp.signatureID, "type": stamp.type,
+                    "productionTime": stamp.productionTime, "producerCommonName": stamp.producerCommonName,
+                    "indication": stamp.indication, "qualification": stamp.qualification,
+                    "coveredDataObjects": stamp.coveredDataObjects
+                ]
             }
         ]
         if let pdf {

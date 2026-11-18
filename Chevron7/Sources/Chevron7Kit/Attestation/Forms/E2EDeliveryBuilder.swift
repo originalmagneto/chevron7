@@ -53,7 +53,16 @@ public struct E2EDeliveryBuilder: Sendable {
             guard ConversionRecordE2E12Renderer.newDocumentFormat(model.newDocument) != nil else {
                 throw Failure.unmappableNewDocumentFormat
             }
-            xml = ConversionRecordE2E12Renderer().render(model)
+            // `ElectronicSignature` is obligatory for every signature and seal type the form names.
+            if let unsigned = model.original.authorizations.first(where: { $0.signatureValue.isEmpty }) {
+                throw Failure.missingSignatureValue(signer: unsigned.signerName)
+            }
+            // Every timestamp covering the originals is listed: one the record cannot tie to its
+            // documents is refused, never left out.
+            if model.original.contentTimestamps.contains(where: { !$0.isResolved }) {
+                throw Failure.unresolvedContentTimestamp
+            }
+            xml = try ConversionRecordE2E12Renderer().render(model)
         default:
             throw Failure.notAnE2ERecordForm
         }
@@ -69,6 +78,12 @@ public struct E2EDeliveryBuilder: Sendable {
         case unmappableAuthorization(signer: String)
         case unmappableOriginalDocumentFormat(name: String)
         case unmappableNewDocumentFormat
+        /// A signature or seal whose value the engine did not give.
+        case missingSignatureValue(signer: String)
+        /// A content timestamp the record cannot tie to the original's documents.
+        case unresolvedContentTimestamp
+        /// A timestamp the record 1.2 renderer has no name for (an internal inconsistency).
+        case unnamedTimestamp
         case notAnE2ERecordForm
 
         public var errorDescription: String? {
@@ -79,6 +94,12 @@ public struct E2EDeliveryBuilder: Sendable {
                 return "Formát dokumentu \(name) nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
             case .unmappableNewDocumentFormat:
                 return "Formát nového dokumentu nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
+            case .missingSignatureValue(let signer):
+                return "Hodnotu podpisu \(signer) sa nepodarilo prečítať. Podľa postupu od 1. 1. 2027 ju záznam musí obsahovať. Skúste overenie znova."
+            case .unresolvedContentTimestamp:
+                return "Časovú pečiatku údajov v kontajneri sa nepodarilo priradiť k jeho súborom. Podľa postupu od 1. 1. 2027 ju nemožno zapísať do záznamu. Skúste overenie znova."
+            case .unnamedTimestamp:
+                return "Časovú pečiatku pôvodného dokumentu nemožno pomenovať v zázname podľa postupu od 1. 1. 2027. Pošlite nám prosím túto chybu."
             case .notAnE2ERecordForm:
                 return "Tento formulár nie je záznamom o zaručenej konverzii elektronického dokumentu."
             }
