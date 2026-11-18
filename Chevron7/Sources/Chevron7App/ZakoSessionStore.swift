@@ -1726,6 +1726,8 @@ final class ZakoSessionStore {
                 let pending = RecordFirstPending(
                     recordID: currentRecordID,
                     stage: .awaitingEZZK,
+                    direction: .paperToElectronic,
+                    originalFingerprints: nil,
                     // The row is looked up in the EZZK that allocated the number.
                     mode: attestation.evidenceNumberMode ?? ezzkMode,
                     evidenceNumber: number,
@@ -1744,10 +1746,32 @@ final class ZakoSessionStore {
                     fixedTarget: singlePDFTarget,
                     clientTimestampServers: clientTimestampServers,
                     clientTSAURL: clientTSAURL)
-                try await startRecordFirst(pending, recordDelivery: recordDelivery,
-                                           formPack: selectedFormPack, identityID: identityID,
-                                           securityReview: securityReviewSnapshot,
-                                           securityElementCount: confirmedElementsSnapshot.count)
+                let formPack = selectedFormPack
+                let securityReview = securityReviewSnapshot
+                let securityElementCount = confirmedElementsSnapshot.count
+                try await startRecordFirst(pending, recordDelivery: recordDelivery, identityID: identityID) {
+                    EvidenceRecord(
+                        id: pending.recordID,
+                        status: .signed,
+                        direction: .paperToElectronic,
+                        originalName: pending.attestation.originalDocumentName,
+                        newDocumentName: pending.containerDocumentName,
+                        evidenceNumber: pending.evidenceNumber,
+                        fingerprintSHA256Hex: pending.fingerprint,
+                        attestationXML: recordDelivery.recordXML,
+                        conversionTime: pending.conversionTime,
+                        performingPersonName: pending.attestation.performingPerson.fullName,
+                        securityElementCount: securityElementCount,
+                        totalPages: analysis.totalPages,
+                        totalSheets: pending.attestation.numberOfSheets,
+                        formPack: FormPackStamp(pack: formPack),
+                        securityReview: securityReview,
+                        ezzkMode: pending.mode,
+                        evidenceNumberAllocatedAt: pending.attestation.evidenceNumberAllocatedAt,
+                        clientOutput: pending.clientOutput,
+                        // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
+                        revisionOneLength: pending.clientOutput == .singlePDF ? pending.finalPDF.count : nil)
+                }
                 return
             }
             let signed: SignedConversionResult

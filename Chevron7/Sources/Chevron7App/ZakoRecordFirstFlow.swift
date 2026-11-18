@@ -18,6 +18,11 @@ struct RecordFirstPending: Sendable {
 
     let recordID: UUID
     var stage: Stage
+    /// The conversion's direction: the row and the client signature follow it.
+    let direction: ConversionDirection
+    /// E→E: the SHA-256 of the original's documents in order, as the record names them; a
+    /// resume refuses when they changed. Nil for P→E.
+    let originalFingerprints: [Data]?
     let mode: AppSettings.EZZKMode
     let evidenceNumber: String
     let conversionTime: Date
@@ -59,6 +64,7 @@ struct RecordFirstClientSignatureError: LocalizedError, Equatable {
 extension ZakoSessionStore {
     static let recordFirstMobileMessage = "Od 1. 1. 2027 sa najprv podpisuje záznam o konverzii, a ten mobil podpísať nevie. Autorizujte kartou."
     static let recordFirstModeChangedMessage = "Táto konverzia začala v inom režime EZZK. Prepnite späť alebo začnite konverziu znova."
+    static let recordFirstOriginalChangedMessage = "Pôvodný dokument alebo poradie jeho súborov sa od podpisu záznamu zmenili. Dokončite konverziu s pôvodným stavom alebo začnite novú."
     static let recordFirstFormChangedMessage = "Údaje konverzie sa zmenili po podpise záznamu o konverzii. Doložka musí zodpovedať podpísanému záznamu: vráťte zmeny alebo začnite konverziu znova."
     static let recordFirstWaitStoppedMessage = "Čakanie na EZZK je zastavené. Záznam je odoslaný a Chevron7 ho overuje aj na pozadí. Keď ho EZZK spracuje, kliknite znova na Autorizovať konverziu a doložka sa podpíše."
     static let recordFirstTimedOutMessage = "EZZK záznam zatiaľ nespracovalo. Chevron7 ho overuje aj na pozadí; neskôr kliknite znova na Autorizovať konverziu a konverzia sa dokončí."
@@ -74,10 +80,11 @@ extension ZakoSessionStore {
     /// Signs the record first, registers and sends it, waits until EZZK has processed it, and
     /// only then signs the clause and the PDF/A for the client (§ 36 ods. 3 zákona č.
     /// 305/2013 Z. z. from 1. 1. 2027). A failed record signature leaves no row and keeps the
-    /// number in the pool for the next attempt.
+    /// number in the pool for the next attempt. The caller builds the `.signed` register row
+    /// (`makeRow`, with `pending.recordID` as its id), which is asked for only once the record
+    /// is signed.
     func startRecordFirst(_ pending: RecordFirstPending, recordDelivery: ZakoRecordDelivery,
-                          formPack: ConversionFormPack, identityID: String,
-                          securityReview: SecurityReviewStamp, securityElementCount: Int) async throws {
+                          identityID: String, makeRow: () -> EvidenceRecord) async throws {
         analysisProgressText = "Podpisujem záznam o konverzii…"
         let signedRecord = try await middlewareInput.during(asksEIDForBOK) {
             try await signingProvider.sign(SigningRequest(
@@ -98,27 +105,8 @@ extension ZakoSessionStore {
             throw ComplianceValidationError(domain: "Kontajner záznamu o konverzii", issues: recordCheck.issues)
         }
 
-        var record = EvidenceRecord(
-            id: pending.recordID,
-            status: .signed,
-            direction: .paperToElectronic,
-            originalName: pending.attestation.originalDocumentName,
-            newDocumentName: pending.containerDocumentName,
-            evidenceNumber: pending.evidenceNumber,
-            fingerprintSHA256Hex: pending.fingerprint,
-            attestationXML: recordDelivery.recordXML,
-            conversionTime: pending.conversionTime,
-            performingPersonName: pending.attestation.performingPerson.fullName,
-            securityElementCount: securityElementCount,
-            totalPages: analysis.totalPages,
-            totalSheets: pending.attestation.numberOfSheets,
-            formPack: FormPackStamp(pack: formPack),
-            securityReview: securityReview,
-            ezzkMode: pending.mode,
-            evidenceNumberAllocatedAt: pending.attestation.evidenceNumberAllocatedAt,
-            clientOutput: pending.clientOutput,
-            // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
-            revisionOneLength: pending.clientOutput == .singlePDF ? pending.finalPDF.count : nil)
+        var record = makeRow()
+        assert(record.id == pending.recordID && record.status == .signed, "the row is the pending conversion's signed row")
         do {
             // Held from the first write until the send, so the periodic check cannot send it twice.
             let held = settingsStore.statusChecker.hold(record.id)
@@ -137,7 +125,8 @@ extension ZakoSessionStore {
     }
 
     /// Picks up a record-first conversion where it stopped: waiting for EZZK, or the client
-    /// signature. Refuses when the EZZK mode or the form changed since the record was signed.
+    /// signature. Refuses when the EZZK mode or the form changed since the record was signed,
+    /// and for E→E when the original's documents or their order changed.
     func resumeRecordFirst(viaMobile: Bool) async {
         guard let pending = recordFirstPending else { return }
         if viaMobile {
@@ -146,6 +135,11 @@ extension ZakoSessionStore {
         }
         guard pending.mode == settingsStore.ezzkAccountController.mode else {
             lastError = Self.recordFirstModeChangedMessage
+            return
+        }
+        if pending.direction == .electronicToElectronic,
+           electronicOriginal?.documents.map(\.sha256) != pending.originalFingerprints {
+            lastError = Self.recordFirstOriginalChangedMessage
             return
         }
         guard Self.formMatches(attestation, signed: pending.attestation) else {
