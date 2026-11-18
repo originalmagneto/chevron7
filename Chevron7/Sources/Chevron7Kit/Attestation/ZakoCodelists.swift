@@ -99,6 +99,8 @@ public enum ZakoCodelists {
 
     /// CL009009, "Formát novovzniknutého elektronického dokumentu zaručenou konverziou".
     public static let record12NewDocumentFormatCode = "https://metais.vicepremier.gov.sk/set/codelist/CL009009"
+    /// CL009009 item 1, PDF/A-1: an E→E original kept byte for byte as PDF/A-1.
+    public static let record12PDFA1Item = ZakoCodelistItem(code: "1", skName: "PDF/A-1")
     /// CL009009 item 2 (1 PDF/A-1, 2 PDF/A-2, 3 PDF/A-3, 4 PNG).
     public static let record12PDFA2Item = ZakoCodelistItem(code: "2", skName: "PDF/A-2")
     /// The format text of the one-PDF output: the clause's `NewDocumentFormatOther`, record 1.0's

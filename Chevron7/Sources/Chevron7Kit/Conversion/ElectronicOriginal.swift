@@ -107,6 +107,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var created: Date
         public var publisherCommonName: String
         public var validationTime: Date
+        /// DSS's timestamp id, which names one timestamp across the signatures that list it.
+        public var id: String? = nil
 
         public var typeItem: ZakoCodelistItem {
             qualified ? E2ECodelists.qualifiedTimestamp : E2ECodelists.nonQualifiedTimestamp
@@ -135,10 +137,29 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var trustedListUnavailable: Bool
         /// The container entry of a nested PAdES signature; nil for a container or a top-level signature.
         public var fileEntryName: String? = nil
+        /// DSS `SignatureQualification` as the validation gave it, e.g. `QESIG` or `INDETERMINATE_QESIG`.
+        public var qualification: String? = nil
+        /// `esign` or `eseal` from the certificate's QcType.
+        public var qcType: String? = nil
+        /// The container's signature file, e.g. `META-INF/signatures001.xml`; nil for PAdES.
+        public var signatureFilename: String? = nil
+        /// End of a PAdES signature's `/ByteRange`; nil for a container signature.
+        public var signedRevisionLength: Int? = nil
 
         public var otherInfo: String {
             "Kvalifikovaný certifikát: \(qualifiedCertificate ? "áno" : "nie")"
         }
+    }
+
+    /// A PDF document timestamp of the original (DSS `DOCUMENT_TIMESTAMP`) with the document it
+    /// covers: the longest document of its file whose revision lies within the timestamped bytes.
+    public struct DocumentTimestamp: Sendable, Equatable {
+        public var id: String
+        public var timestamp: Timestamp
+        public var coveredRevisionLength: Int
+        /// The container entry of the PDF; nil for a PDF original.
+        public var fileEntryName: String?
+        public var documentName: String
     }
 
     public enum NewDocumentPlan: Sendable, Equatable {
@@ -163,6 +184,9 @@ public struct ElectronicOriginal: Sendable, Equatable {
     public var evidence: ConversionEvidence
     /// The files of an `.asicEMultiple` container; empty otherwise.
     public var files: [File] = []
+    /// Document timestamps of the PDF original or of the container's PDFs, in file order; a
+    /// timestamp whose covered revision holds no document is left out.
+    public var documentTimestamps: [DocumentTimestamp] = []
 
     public static func make(sourceName: String, sourceData: Data,
                             evidence: ConversionEvidence) throws -> ElectronicOriginal {
@@ -216,6 +240,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
 
         var documents: [Document] = []
         var documentBySignature: [String: String] = [:]
+        var documentTimestamps: [DocumentTimestamp] = []
         switch kind {
         case .asicE(let entry):
             documents = [Document(name: displayName(entry), format: format.item, formatOther: format.other,
@@ -243,6 +268,9 @@ public struct ElectronicOriginal: Sendable, Equatable {
                     documentBySignature[signature.id] = documents[index].name
                 }
             }
+            documentTimestamps = self.documentTimestamps(evidence.documentTimestamps, lengths: lengths,
+                                                         documentNames: documents.map(\.name), fileEntryName: nil,
+                                                         validationTime: evidence.validationTime)
         }
 
         let authorizations = try evidence.tree.signatures.map { signature -> Authorization in
@@ -262,8 +290,10 @@ public struct ElectronicOriginal: Sendable, Equatable {
         } else {
             plan = .convert(reason: "PDF nie je platné PDF/A")
         }
-        return ElectronicOriginal(sourceName: sourceName, kind: kind, pdfData: pdfData, documents: documents,
-                                  authorizations: authorizations, plan: plan, evidence: evidence)
+        var original = ElectronicOriginal(sourceName: sourceName, kind: kind, pdfData: pdfData, documents: documents,
+                                          authorizations: authorizations, plan: plan, evidence: evidence)
+        original.documentTimestamps = documentTimestamps
+        return original
     }
 
     /// A container with several files, or with one that is not an unsigned PDF (§ 7.2 of the
@@ -327,6 +357,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         var files: [File] = []
         var documents: [Document] = []
         var nestedAuthorizations: [Authorization] = []
+        var documentTimestamps: [DocumentTimestamp] = []
         for (index, object) in objects.enumerated() {
             let data = try bytes(of: object, in: entries)
             let name = names[index]
@@ -352,6 +383,12 @@ public struct ElectronicOriginal: Sendable, Equatable {
                                                           documentNames: [fileDocuments[position].name],
                                                           validationTime: nested.validationTime,
                                                           fileEntryName: object.name))
+            }
+            if let nested = object.nested {
+                documentTimestamps += self.documentTimestamps(nested.documentTimestamps, lengths: lengths,
+                                                              documentNames: fileDocuments.map(\.name),
+                                                              fileEntryName: object.name,
+                                                              validationTime: nested.validationTime)
             }
             files.append(File(entryName: object.name, displayName: name, kind: object.kind, data: data,
                               documentNames: fileDocuments.map(\.name), embeddedFileNames: object.embeddedFileNames,
@@ -379,6 +416,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
             authorizations: containerAuthorizations + nestedAuthorizations, plan: .convert(reason: reason),
             evidence: evidence)
         original.files = files
+        original.documentTimestamps = documentTimestamps
         return original
     }
 
@@ -497,7 +535,30 @@ public struct ElectronicOriginal: Sendable, Equatable {
             signatureValue: facts.signatureValue,
             slimReport: facts.slimReport,
             trustedListUnavailable: facts.trustedListUnavailable,
-            fileEntryName: fileEntryName)
+            fileEntryName: fileEntryName,
+            qualification: signature.certificateQualification,
+            qcType: facts.qcType,
+            signatureFilename: facts.signatureFilename,
+            signedRevisionLength: facts.signedRevisionLength)
+    }
+
+    /// Each dated document timestamp with the longest of the file's documents whose revision
+    /// lies within its covered bytes (`lengths` ascending, one per document name). A timestamp
+    /// without a covered length, or covering less than the first document, names no document.
+    static func documentTimestamps(_ stamps: [ConversionEvidence.DocumentTimestamp], lengths: [Int],
+                                   documentNames: [String], fileEntryName: String?,
+                                   validationTime: Date) -> [DocumentTimestamp] {
+        stamps.compactMap { stamp in
+            guard let covered = stamp.coveredRevisionLength, let created = stamp.productionTime,
+                  let index = lengths.indices.last(where: { lengths[$0] <= covered && $0 < documentNames.count }) else {
+                return nil
+            }
+            let timestamp = Timestamp(qualified: stamp.qualification == "QTSA", state: timestampState(stamp.indication),
+                                      created: created, publisherCommonName: stamp.producerCommonName ?? "Neuvedené",
+                                      validationTime: validationTime, id: stamp.id)
+            return DocumentTimestamp(id: stamp.id, timestamp: timestamp, coveredRevisionLength: covered,
+                                     fileEntryName: fileEntryName, documentName: documentNames[index])
+        }
     }
 
     /// Codelist 53: PDF/A-1 and A-2 have items, A-3 is `Iny` with its name, anything else `PDF`.
@@ -545,15 +606,17 @@ public struct ElectronicOriginal: Sendable, Equatable {
             .sorted { $0.productionTime! < $1.productionTime! }
         guard let chosen = dated.first(where: { $0.indication == "PASSED" }) ?? dated.first,
               let created = chosen.productionTime else { return nil }
-        let state: ValidityState
-        switch chosen.indication {
-        case "PASSED": state = .valid
-        case "FAILED": state = .invalid
-        default: state = .undetermined
+        return Timestamp(qualified: chosen.qualification == "QTSA", state: timestampState(chosen.indication),
+                         created: created, publisherCommonName: chosen.producerCommonName ?? "Neuvedené",
+                         validationTime: validationTime, id: chosen.id)
+    }
+
+    static func timestampState(_ indication: String?) -> ValidityState {
+        switch indication {
+        case "PASSED": return .valid
+        case "FAILED": return .invalid
+        default: return .undetermined
         }
-        return Timestamp(qualified: chosen.qualification == "QTSA", state: state, created: created,
-                         publisherCommonName: chosen.producerCommonName ?? "Neuvedené",
-                         validationTime: validationTime)
     }
 
     static func displayName(_ name: String) -> String {

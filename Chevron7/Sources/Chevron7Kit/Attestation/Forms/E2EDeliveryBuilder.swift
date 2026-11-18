@@ -24,17 +24,56 @@ public struct E2EDeliveryBuilder: Sendable {
         return Clause(xml: xml, xdcf: XMLDataContainerBuilder.build(formXML: xml, form: .clauseE2E_1_3))
     }
 
+    /// The record in today's form, 1.0.
     public func record(_ model: E2EFormModel) throws -> ZakoRecordDelivery {
+        try record(model, form: .recordE2E_1_0)
+    }
+
+    /// The record in `form`: `.recordE2E_1_0` as before, `.recordE2E_1_2` for the order from
+    /// 1. 1. 2027, which refuses an authorization or a new document format it cannot name.
+    public func record(_ model: E2EFormModel, form: OfficialForm) throws -> ZakoRecordDelivery {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
         guard !model.evidenceNumber.isEmpty,
               model.evidenceNumber.unicodeScalars.allSatisfy({ allowed.contains($0) && $0.isASCII }) else {
             throw ZakoRecordDeliveryBuilder.Failure.unusableEvidenceNumber
         }
-        let xml = ConversionRecordE2ERenderer().render(model)
-        try validator.validate(Data(xml.utf8), against: .recordE2E_1_0)
+        let xml: String
+        switch form {
+        case .recordE2E_1_0:
+            xml = ConversionRecordE2ERenderer().render(model)
+        case .recordE2E_1_2:
+            if let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(model.original).first {
+                throw Failure.unmappableAuthorization(signer: unmappable.signerName)
+            }
+            guard ConversionRecordE2E12Renderer.newDocumentFormat(model.newDocument) != nil else {
+                throw Failure.unmappableNewDocumentFormat
+            }
+            xml = ConversionRecordE2E12Renderer().render(model)
+        default:
+            throw Failure.notAnE2ERecordForm
+        }
+        try validator.validate(Data(xml.utf8), against: form)
         return ZakoRecordDelivery(recordXML: xml,
-                                  recordXDCF: XMLDataContainerBuilder.build(formXML: xml, form: .recordE2E_1_0),
+                                  recordXDCF: XMLDataContainerBuilder.build(formXML: xml, form: form),
                                   entryName: "\(model.evidenceNumber).record.xml.xdcf",
                                   containerName: ZakoRecordDeliveryBuilder.containerName(evidenceNumber: model.evidenceNumber))
+    }
+
+    public enum Failure: LocalizedError, Equatable {
+        /// The signature's qualification maps to no record 1.2 `AuthorizationType`.
+        case unmappableAuthorization(signer: String)
+        case unmappableNewDocumentFormat
+        case notAnE2ERecordForm
+
+        public var errorDescription: String? {
+            switch self {
+            case .unmappableAuthorization(let signer):
+                return "Kvalifikáciu podpisu \(signer) sa nepodarilo určiť. Podľa postupu od 1. 1. 2027 ho nemožno zapísať do záznamu. Skúste overenie znova."
+            case .unmappableNewDocumentFormat:
+                return "Formát nového dokumentu nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
+            case .notAnE2ERecordForm:
+                return "Tento formulár nie je záznamom o zaručenej konverzii elektronického dokumentu."
+            }
+        }
     }
 }
