@@ -23,6 +23,8 @@ import org.bouncycastle.asn1.x509.UserNotice;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.w3c.dom.Element;
 
+import javax.imageio.ImageIO;
+import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.TransformerFactory;
@@ -35,11 +37,15 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -267,7 +273,11 @@ public final class ConversionEvidenceService {
         return identifiers.getLength() == 0 ? null : ((Element) identifiers.item(0)).getAttribute("id");
     }
 
+    /// A data object larger than this is listed with its hash only, never parsed.
+    static final long DATA_OBJECT_LIMIT = 100L * 1024 * 1024;
+
     /// PDF facts for a PDF source, or for an ASiC-E's only PDF data object; null otherwise.
+    /// A container also lists every data object (`dataObjects`) in zip entry order.
     static JsonObject pdfFacts(Path path, DiagnosticData diagnostic) {
         byte[] content;
         try {
@@ -283,27 +293,28 @@ public final class ConversionEvidenceService {
         if (!startsWith(content, "PK")) {
             return null;
         }
-        var dataObjects = new ArrayList<String>();
-        byte[] onlyPdf = null;
+        var entries = new ArrayList<ContainerEntry>();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(content))) {
             for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
                 var name = entry.getName();
                 if (entry.isDirectory() || name.equals("mimetype") || name.startsWith("META-INF/")) {
                     continue;
                 }
-                dataObjects.add(name);
-                var bytes = zip.readAllBytes();
-                if (name.toLowerCase(Locale.ROOT).endsWith(".pdf")) {
-                    onlyPdf = bytes;
-                }
+                entries.add(new ContainerEntry(name, zip.readAllBytes()));
             }
         } catch (IOException exception) {
             return null;
         }
-        var facts = onlyPdf != null && dataObjects.size() == 1 ? PdfConversionFacts.read(onlyPdf) : new JsonObject();
-        facts.addProperty("asicDataObjectCount", dataObjects.size());
-        if (onlyPdf != null && dataObjects.size() == 1) {
-            facts.addProperty("asicDataObjectName", dataObjects.getFirst());
+        byte[] onlyPdf = null;
+        for (var entry : entries) {
+            if (entry.name().toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+                onlyPdf = entry.bytes();
+            }
+        }
+        var facts = onlyPdf != null && entries.size() == 1 ? PdfConversionFacts.read(onlyPdf) : new JsonObject();
+        facts.addProperty("asicDataObjectCount", entries.size());
+        if (onlyPdf != null && entries.size() == 1) {
+            facts.addProperty("asicDataObjectName", entries.getFirst().name());
             var inner = DSSUtils.createDocumentValidator(new InMemoryDocument(onlyPdf));
             if (inner != null) {
                 inner.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
@@ -311,7 +322,147 @@ public final class ConversionEvidenceService {
             facts.addProperty("asicDataObjectSigned", inner != null && !inner.getSignatures().isEmpty());
         }
         facts.add("changesAfterLastSignature", new JsonArray());
+        var coverage = signatureCoverage(diagnostic);
+        var dataObjects = new JsonArray();
+        for (var entry : entries) {
+            dataObjects.add(dataObjectFacts(entry, coverage.getOrDefault(entry.name(), List.of())));
+        }
+        facts.add("dataObjects", dataObjects);
         return facts;
+    }
+
+    record ContainerEntry(String name, byte[] bytes) {
+    }
+
+    /// For each signed file name, the ids of the signatures whose scope names it, in the order
+    /// DSS lists the signatures.
+    static Map<String, List<String>> signatureCoverage(DiagnosticData diagnostic) {
+        var coverage = new HashMap<String, List<String>>();
+        for (var signature : diagnostic.getSignatures()) {
+            var scopes = signature.getSignatureScopes();
+            if (scopes == null) continue;
+            for (var scope : scopes) {
+                var name = scope.getName();
+                if (name == null) continue;
+                var ids = coverage.computeIfAbsent(name, key -> new ArrayList<>());
+                if (!ids.contains(signature.getId())) ids.add(signature.getId());
+            }
+        }
+        return coverage;
+    }
+
+    /// One data object: name, size, hash and the signatures covering it, plus what its kind,
+    /// read from its bytes, tells: PDF facts and page count, or image size and resolution.
+    static JsonObject dataObjectFacts(ContainerEntry entry, List<String> coveredBy) {
+        var bytes = entry.bytes();
+        var facts = new JsonObject();
+        facts.addProperty("name", entry.name());
+        facts.addProperty("size", bytes.length);
+        facts.addProperty("sha256Base64", sha256Base64(bytes));
+        var covered = new JsonArray();
+        coveredBy.forEach(covered::add);
+        facts.add("coveredBy", covered);
+        var kind = kindOf(bytes);
+        if (bytes.length > DATA_OBJECT_LIMIT) {
+            facts.addProperty("kind", "other");
+            facts.addProperty("problem", "TOO_LARGE");
+            return facts;
+        }
+        switch (kind) {
+            case "pdf" -> {
+                var pdf = PdfConversionFacts.read(bytes);
+                if (pdf.has("readable") && !pdf.get("readable").getAsBoolean()) {
+                    facts.addProperty("kind", "other");
+                    facts.addProperty("problem", "UNREADABLE");
+                    return facts;
+                }
+                facts.addProperty("kind", "pdf");
+                pdf.entrySet().forEach(item -> facts.add(item.getKey(), item.getValue()));
+            }
+            case "png", "jpeg" -> {
+                if (!addImageFacts(facts, bytes)) {
+                    facts.addProperty("kind", "other");
+                    facts.addProperty("problem", "UNREADABLE");
+                    return facts;
+                }
+                facts.addProperty("kind", kind);
+            }
+            default -> facts.addProperty("kind", "other");
+        }
+        return facts;
+    }
+
+    private static final byte[] PNG_SIGNATURE = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    private static final byte[] JPEG_SIGNATURE = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
+
+    /// `pdf`, `png`, `jpeg` or `other`, from the leading bytes only, never the name.
+    static String kindOf(byte[] bytes) {
+        if (startsWith(bytes, "%PDF")) return "pdf";
+        if (startsWith(bytes, PNG_SIGNATURE)) return "png";
+        if (startsWith(bytes, JPEG_SIGNATURE)) return "jpeg";
+        return "other";
+    }
+
+    /// Adds `widthPx`, `heightPx` and, when the file states a resolution, `dpiX` and `dpiY`.
+    /// False when no image reader can read the header.
+    private static boolean addImageFacts(JsonObject facts, byte[] bytes) {
+        try (var input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (input == null) return false;
+            var readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) return false;
+            var reader = readers.next();
+            try {
+                reader.setInput(input, true, false);
+                facts.addProperty("widthPx", reader.getWidth(0));
+                facts.addProperty("heightPx", reader.getHeight(0));
+                try {
+                    var metadata = reader.getImageMetadata(0);
+                    if (metadata != null && metadata.isStandardMetadataFormatSupported()) {
+                        var root = metadata.getAsTree(IIOMetadataFormatImpl.standardMetadataFormatName);
+                        var dpiX = dpi(root, "HorizontalPixelSize");
+                        var dpiY = dpi(root, "VerticalPixelSize");
+                        if (dpiX != null && dpiY != null) {
+                            facts.addProperty("dpiX", dpiX);
+                            facts.addProperty("dpiY", dpiY);
+                        }
+                    }
+                } catch (IOException | RuntimeException exception) {
+                    // The size is known; a resolution the reader cannot parse is simply not stated.
+                }
+                return true;
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException | RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /// Dots per inch from the standard metadata's millimetres per pixel, rounded to two places.
+    private static Double dpi(org.w3c.dom.Node root, String name) {
+        for (var dimension = root.getFirstChild(); dimension != null; dimension = dimension.getNextSibling()) {
+            if (!"Dimension".equals(dimension.getNodeName())) continue;
+            for (var child = dimension.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (!name.equals(child.getNodeName())) continue;
+                var value = ((Element) child).getAttribute("value");
+                try {
+                    var millimetres = Double.parseDouble(value);
+                    if (millimetres <= 0 || Double.isNaN(millimetres) || Double.isInfinite(millimetres)) return null;
+                    return Math.round(25.4 / millimetres * 100.0) / 100.0;
+                } catch (NumberFormatException exception) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String sha256Base64(byte[] bytes) {
+        try {
+            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     /// Kinds of change DSS found after the last PAdES signature's revision, other than
@@ -344,7 +495,10 @@ public final class ConversionEvidenceService {
     }
 
     private static boolean startsWith(byte[] content, String prefix) {
-        var bytes = prefix.getBytes(StandardCharsets.US_ASCII);
+        return startsWith(content, prefix.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static boolean startsWith(byte[] content, byte[] bytes) {
         if (content.length < bytes.length) return false;
         for (var index = 0; index < bytes.length; index++) {
             if (content[index] != bytes[index]) return false;

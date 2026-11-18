@@ -1,6 +1,9 @@
 package digital.slovensko.autogram.ui.machine;
 
 import com.google.gson.JsonObject;
+import digital.slovensko.autogram.core.ConversionTestContainers;
+import digital.slovensko.autogram.core.ConversionTestContainers.Entry;
+import digital.slovensko.autogram.core.ConversionTestPdfs;
 import digital.slovensko.autogram.util.DSSUtils;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.model.timedependent.TimeDependentValues;
@@ -126,6 +129,105 @@ class ConversionEvidenceServiceTest {
         assertEquals(1, pdf.get("asicDataObjectCount").getAsInt());
         assertTrue(pdf.get("asicDataObjectName").getAsString().toLowerCase(Locale.ROOT).endsWith(".pdf"));
         assertFalse(pdf.get("asicDataObjectSigned").getAsBoolean());
+    }
+
+    private static JsonObject pdfEvidenceOfContainer(byte[] container) throws Exception {
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
+        return new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
+                .getAsJsonObject("evidence").getAsJsonObject("pdf");
+    }
+
+    private static String sha256Base64(byte[] bytes) throws Exception {
+        return Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private static JsonObject dataObject(JsonObject pdf, String name) {
+        for (var element : pdf.getAsJsonArray("dataObjects")) {
+            if (element.getAsJsonObject().get("name").getAsString().equals(name)) return element.getAsJsonObject();
+        }
+        throw new AssertionError("No data object " + name + " in " + pdf);
+    }
+
+    @Test
+    void multiFileContainerListsEveryDataObjectInOrder() throws Exception {
+        var entries = List.of(
+                new Entry("zmluva.pdf", ConversionTestPdfs.samplePdf()),
+                new Entry("priloha.png", ConversionTestContainers.png(120, 80, false)),
+                new Entry("foto.jpg", ConversionTestContainers.jpeg(64, 48, false)));
+
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(entries));
+
+        assertEquals(3, pdf.get("asicDataObjectCount").getAsInt());
+        var objects = pdf.getAsJsonArray("dataObjects");
+        assertEquals(3, objects.size(), objects.toString());
+        var kinds = List.of("pdf", "png", "jpeg");
+        String signatureId = null;
+        for (var index = 0; index < 3; index++) {
+            var object = objects.get(index).getAsJsonObject();
+            var entry = entries.get(index);
+            assertEquals(entry.name(), object.get("name").getAsString());
+            assertEquals(kinds.get(index), object.get("kind").getAsString());
+            assertEquals(entry.bytes().length, object.get("size").getAsLong());
+            assertEquals(sha256Base64(entry.bytes()), object.get("sha256Base64").getAsString());
+            var coveredBy = object.getAsJsonArray("coveredBy");
+            assertEquals(1, coveredBy.size(), object.toString());
+            if (signatureId == null) signatureId = coveredBy.get(0).getAsString();
+            assertEquals(signatureId, coveredBy.get(0).getAsString());
+            assertFalse(object.has("problem"), object.toString());
+        }
+        assertEquals(1, objects.get(0).getAsJsonObject().get("pages").getAsInt());
+        assertTrue(objects.get(0).getAsJsonObject().has("pdfaCompliant"));
+        assertEquals(120, objects.get(1).getAsJsonObject().get("widthPx").getAsInt());
+        assertEquals(80, objects.get(1).getAsJsonObject().get("heightPx").getAsInt());
+        assertEquals(64, objects.get(2).getAsJsonObject().get("widthPx").getAsInt());
+        assertEquals(48, objects.get(2).getAsJsonObject().get("heightPx").getAsInt());
+    }
+
+    @Test
+    void signatureCoveringOneFileIsListedOnlyThere() throws Exception {
+        var container = ConversionTestContainers.xadesAsice(List.of(
+                new Entry("a.pdf", ConversionTestPdfs.withText("A")),
+                new Entry("b.pdf", ConversionTestPdfs.withText("B"))));
+        var twice = ConversionTestContainers.addSignatureCovering(container, List.of("b.pdf"));
+
+        var pdf = pdfEvidenceOfContainer(twice);
+
+        var a = dataObject(pdf, "a.pdf").getAsJsonArray("coveredBy");
+        var b = dataObject(pdf, "b.pdf").getAsJsonArray("coveredBy");
+        assertEquals(1, a.size(), a.toString());
+        assertEquals(2, b.size(), b.toString());
+        assertTrue(b.contains(a.get(0)), b.toString());
+    }
+
+    @Test
+    void docxEntryIsOther() {
+        var pdf = evidenceOf("sample_docx_xades.asice", List.of()).getAsJsonObject("pdf");
+        var objects = pdf.getAsJsonArray("dataObjects");
+        assertEquals(1, objects.size());
+        assertEquals("other", objects.get(0).getAsJsonObject().get("kind").getAsString());
+    }
+
+    @Test
+    void kindIsReadFromBytes() throws Exception {
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("obrazok.pdf", ConversionTestContainers.png(10, 10, true)))));
+
+        var object = dataObject(pdf, "obrazok.pdf");
+        assertEquals("png", object.get("kind").getAsString());
+        assertEquals(10, object.get("widthPx").getAsInt());
+    }
+
+    @Test
+    void embeddedFileNamesAreListed() throws Exception {
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("s-prilohou.pdf", ConversionTestContainers.pdfWithEmbeddedFile("x.txt",
+                        "obsah".getBytes(StandardCharsets.UTF_8))),
+                new Entry("foto.jpg", ConversionTestContainers.jpeg(20, 10, true)))));
+
+        var object = dataObject(pdf, "s-prilohou.pdf");
+        assertEquals("[\"x.txt\"]", object.getAsJsonArray("embeddedFileNames").toString());
+        assertTrue(object.get("hasEmbeddedFiles").getAsBoolean());
+        assertEquals("jpeg", dataObject(pdf, "foto.jpg").get("kind").getAsString());
     }
 
     @Test

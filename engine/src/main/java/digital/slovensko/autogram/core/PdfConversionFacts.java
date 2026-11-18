@@ -7,10 +7,17 @@ import eu.europa.esig.dss.model.InMemoryDocument;
 import eu.europa.esig.dss.pdfa.PDFAStructureValidator;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.PDNameTreeNode;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
+import org.apache.pdfbox.pdmodel.common.filespecification.PDFileSpecification;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -30,7 +37,10 @@ public final class PdfConversionFacts {
         Integer part = null;
         String conformance = null;
         var embedded = false;
+        Integer pages = null;
+        var embeddedNames = new JsonArray();
         try (PDDocument document = Loader.loadPDF(pdf)) {
+            pages = document.getNumberOfPages();
             var metadata = document.getDocumentCatalog().getMetadata();
             if (metadata != null) {
                 try (var stream = metadata.exportXMPMetadata()) {
@@ -42,6 +52,7 @@ public final class PdfConversionFacts {
                 }
             }
             embedded = hasEmbeddedFiles(document);
+            embeddedFileNames(document).forEach(embeddedNames::add);
         } catch (IOException exception) {
             facts.addProperty("readable", false);
         }
@@ -61,6 +72,8 @@ public final class PdfConversionFacts {
         facts.addProperty("pdfaCompliant", compliant);
         facts.add("pdfaErrors", errors);
         facts.addProperty("hasEmbeddedFiles", embedded);
+        if (pages != null) facts.addProperty("pages", pages);
+        facts.add("embeddedFileNames", embeddedNames);
         return facts;
     }
 
@@ -70,6 +83,55 @@ public final class PdfConversionFacts {
         } catch (IOException exception) {
             throw new java.io.UncheckedIOException(exception);
         }
+    }
+
+    /// The names of the files the PDF embeds (the EmbeddedFiles name tree, then file attachment
+    /// annotations), each once, in the order found.
+    static List<String> embeddedFileNames(PDDocument document) throws IOException {
+        var names = new LinkedHashSet<String>();
+        var dictionary = document.getDocumentCatalog().getNames();
+        if (dictionary != null && dictionary.getEmbeddedFiles() != null) {
+            collectNames(dictionary.getEmbeddedFiles(), names, 0);
+        }
+        for (var page : document.getPages()) {
+            for (var annotation : page.getAnnotations()) {
+                if (annotation instanceof PDAnnotationFileAttachment attachment) {
+                    var name = fileName(attachment.getFile(), null);
+                    if (name != null) names.add(name);
+                }
+            }
+        }
+        return new ArrayList<>(names);
+    }
+
+    private static void collectNames(PDNameTreeNode<PDComplexFileSpecification> node, Set<String> names, int depth)
+            throws IOException {
+        if (depth > 32) return;
+        var entries = node.getNames();
+        if (entries != null) {
+            for (var entry : entries.entrySet()) {
+                var name = fileName(entry.getValue(), entry.getKey());
+                if (name != null) names.add(name);
+            }
+        }
+        var kids = node.getKids();
+        if (kids != null) {
+            for (var kid : kids) {
+                collectNames(kid, names, depth + 1);
+            }
+        }
+    }
+
+    private static String fileName(PDFileSpecification specification, String fallback) {
+        String name = null;
+        if (specification instanceof PDComplexFileSpecification complex) {
+            name = complex.getFileUnicode();
+            if (name == null || name.isBlank()) name = complex.getFile();
+        } else if (specification != null) {
+            name = specification.getFile();
+        }
+        if (name == null || name.isBlank()) name = fallback;
+        return name == null || name.isBlank() ? null : name;
     }
 
     static boolean hasEmbeddedFiles(PDDocument document) throws IOException {
