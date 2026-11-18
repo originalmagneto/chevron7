@@ -65,6 +65,8 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var asicDataObjectCount: Int?
         /// Every data object of a container in zip entry order; empty for a PDF source or an old payload.
         public var dataObjects: [DataObject] = []
+        /// A data object name the container holds more than once, as the engine read it.
+        public var duplicateDataObjectName: String? = nil
     }
 
     /// One file of a container: what its bytes are, who signed it, and for a PDF or an image what it holds.
@@ -170,6 +172,7 @@ extension ConversionEvidence {
             var asicDataObjectSigned: Bool?
             var asicDataObjectCount: Int?
             var dataObjects: [RawDataObject]?
+            var duplicateDataObjectName: String?
         }
 
         struct RawNested: Decodable {
@@ -255,7 +258,8 @@ extension ConversionEvidence {
                      changesAfterLastSignature: raw.changesAfterLastSignature ?? [],
                      asicDataObjectName: raw.asicDataObjectName, asicDataObjectSigned: raw.asicDataObjectSigned ?? false,
                      asicDataObjectCount: raw.asicDataObjectCount,
-                     dataObjects: try (raw.dataObjects ?? []).map(dataObject))
+                     dataObjects: try (raw.dataObjects ?? []).map(dataObject),
+                     duplicateDataObjectName: raw.duplicateDataObjectName)
         }
 
         private static func dataObject(_ raw: RawDataObject) throws -> DataObject {

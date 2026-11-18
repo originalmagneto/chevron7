@@ -172,7 +172,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         }
         let objects = pdf.dataObjects
         // Two entries under one name make "the file" ambiguous: refuse before any branch reads one.
-        if let duplicate = firstDuplicate(objects.map(\.name))
+        if let duplicate = pdf.duplicateDataObjectName ?? firstDuplicate(objects.map(\.name))
             ?? ASiCEContainerVerifier.readEntries(sourceData).flatMap({ firstDuplicate($0.map(\.name)) }) {
             throw ElectronicOriginalError.duplicateEntryName(name: displayName(duplicate))
         }

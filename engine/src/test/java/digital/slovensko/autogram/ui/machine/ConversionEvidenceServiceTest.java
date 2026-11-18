@@ -250,6 +250,136 @@ class ConversionEvidenceServiceTest {
         assertEquals(4, components);
     }
 
+    private static JsonObject pdfEvidenceOf(ConversionEvidenceService service, byte[] container) throws Exception {
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
+        return service.evidence(path).getAsJsonObject("evidence").getAsJsonObject("pdf");
+    }
+
+    /// Replaces every occurrence of `from` in the zip's raw bytes (entry names in the local
+    /// headers and the central directory) with `to`, which has the same length.
+    private static byte[] renamedInZip(byte[] zip, String from, String to) {
+        var source = from.getBytes(StandardCharsets.UTF_8);
+        var target = to.getBytes(StandardCharsets.UTF_8);
+        assertEquals(source.length, target.length);
+        var copy = zip.clone();
+        var replaced = 0;
+        for (var index = 0; index + source.length <= copy.length; index++) {
+            if (java.util.Arrays.equals(copy, index, index + source.length, source, 0, source.length)) {
+                System.arraycopy(target, 0, copy, index, target.length);
+                replaced++;
+            }
+        }
+        assertEquals(2, replaced, "local header and central directory");
+        return copy;
+    }
+
+    @Test
+    void duplicateEntryNameIsFlagged() throws Exception {
+        var bytes = ConversionTestPdfs.withText("A");
+        var container = renamedInZip(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("dvojka-A.pdf", bytes), new Entry("dvojka-B.pdf", bytes))), "dvojka-B.pdf", "dvojka-A.pdf");
+
+        var pdf = pdfEvidenceOfContainer(container);
+
+        assertEquals("dvojka-A.pdf", pdf.get("duplicateDataObjectName").getAsString(), pdf.toString());
+        assertEquals(2, pdf.getAsJsonArray("dataObjects").size());
+    }
+
+    @Test
+    void onlyPdfIsFoundByItsBytesNotItsName() throws Exception {
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva", ConversionTestPdfs.samplePdf()))));
+
+        assertEquals("zmluva", pdf.get("asicDataObjectName").getAsString(), pdf.toString());
+        assertFalse(pdf.get("asicDataObjectSigned").getAsBoolean());
+        assertTrue(pdf.has("pdfaCompliant"), pdf.toString());
+        assertTrue(pdf.has("declaredPdfaPart") || pdf.has("hasEmbeddedFiles"), pdf.toString());
+    }
+
+    @Test
+    void imageNamedPdfIsNotTheOnlyPdf() throws Exception {
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("obrazok.pdf", ConversionTestContainers.png(10, 10, false)))));
+
+        assertFalse(pdf.has("asicDataObjectName"), pdf.toString());
+        assertFalse(pdf.has("pdfaCompliant"), pdf.toString());
+    }
+
+    @Test
+    void sizeLimitAppliesOnlyToContainersWithSeveralFiles() throws Exception {
+        var service = new ConversionEvidenceService(plainValidation(), List::of, 10,
+                ConversionEvidenceService::hasSignatures);
+        var only = pdfEvidenceOf(service, ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", ConversionTestPdfs.samplePdf()))));
+        var object = dataObject(only, "zmluva.pdf");
+        assertEquals("pdf", object.get("kind").getAsString(), object.toString());
+        assertFalse(object.has("problem"), object.toString());
+        assertEquals("zmluva.pdf", only.get("asicDataObjectName").getAsString());
+
+        var several = pdfEvidenceOf(service, ConversionTestContainers.xadesAsice(List.of(
+                new Entry("a.pdf", ConversionTestPdfs.withText("A")),
+                new Entry("b.png", ConversionTestContainers.png(10, 10, false)))));
+        for (var name : List.of("a.pdf", "b.png")) {
+            assertEquals("TOO_LARGE", dataObject(several, name).get("problem").getAsString(), several.toString());
+        }
+    }
+
+    @Test
+    void signatureProbeFailureIsNeverUnsigned() throws Exception {
+        java.util.function.Predicate<byte[]> failing = bytes -> {
+            throw new IllegalStateException("DSS cannot read it");
+        };
+        var service = new ConversionEvidenceService(plainValidation(), List::of,
+                ConversionEvidenceService.DATA_OBJECT_LIMIT, failing);
+
+        var several = pdfEvidenceOf(service, ConversionTestContainers.xadesAsice(List.of(
+                new Entry("a.pdf", ConversionTestPdfs.withText("A")),
+                new Entry("b.png", ConversionTestContainers.png(10, 10, false)))));
+        var object = dataObject(several, "a.pdf");
+        assertEquals("pdf", object.get("kind").getAsString());
+        assertEquals("NESTED_UNREADABLE", object.get("problem").getAsString(), object.toString());
+
+        var only = pdfEvidenceOf(service, ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", ConversionTestPdfs.withText("A")))));
+        assertTrue(only.get("asicDataObjectSigned").getAsBoolean(), only.toString());
+        assertEquals("NESTED_UNREADABLE", dataObject(only, "zmluva.pdf").get("problem").getAsString());
+    }
+
+    /// The app pairs the tree with the evidence by name and by signature id; both must agree.
+    @Test
+    void treeAndDataObjectsAgreeOnNamesAndNestedSignatureIds() throws Exception {
+        var signed = ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false);
+        var container = ConversionTestContainers.xadesAsice(List.of(
+                new Entry("slozka/zmluva.pdf", signed),
+                new Entry("prilohy/foto.png", ConversionTestContainers.png(10, 10, false))));
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
+
+        var output = new ConversionEvidenceService(plainValidation(), List::of).evidence(path);
+
+        var objects = output.getAsJsonObject("evidence").getAsJsonObject("pdf").getAsJsonArray("dataObjects");
+        var objectNames = new java.util.ArrayList<String>();
+        objects.forEach(element -> objectNames.add(element.getAsJsonObject().get("name").getAsString()));
+        var treeNames = new java.util.ArrayList<String>();
+        JsonObject signedEntry = null;
+        for (var element : output.getAsJsonArray("documents")) {
+            var name = element.getAsJsonObject().get("name").getAsString();
+            treeNames.add(name);
+            if (name.equals("slozka/zmluva.pdf")) signedEntry = element.getAsJsonObject();
+        }
+        assertEquals(objectNames, treeNames, output.getAsJsonArray("documents").toString());
+        assertNotNull(signedEntry);
+
+        var treeIds = new java.util.ArrayList<String>();
+        signedEntry.getAsJsonObject("nested").getAsJsonArray("signatures")
+                .forEach(element -> treeIds.add(element.getAsJsonObject().get("id").getAsString()));
+        var evidenceIds = new java.util.ArrayList<String>();
+        dataObject(output.getAsJsonObject("evidence").getAsJsonObject("pdf"), "slozka/zmluva.pdf")
+                .getAsJsonObject("evidence").getAsJsonArray("signatures")
+                .forEach(element -> evidenceIds.add(element.getAsJsonObject().get("id").getAsString()));
+        assertEquals(1, evidenceIds.size());
+        assertEquals(evidenceIds, treeIds);
+    }
+
     @Test
     void kindIsReadFromBytes() throws Exception {
         var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(

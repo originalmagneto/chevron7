@@ -66,6 +66,19 @@ final class ElectronicOriginalTests: XCTestCase {
         }
     }
 
+    func testEngineFlagForDuplicateEntryNameIsRefused() throws {
+        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf)])
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 1
+        facts.asicDataObjectName = "zmluva.pdf"
+        facts.duplicateDataObjectName = "zmluva.pdf"
+        var xades = signature()
+        xades.signedRevisionLength = nil
+        XCTAssertThrowsError(try original([xades], pdf: facts, name: "zmluva.asice", data: container)) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "zmluva.pdf"))
+        }
+    }
+
     func testQualificationMapsToCodelist54() {
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESIG", qcType: "esign").item.code, "2")
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESEAL", qcType: "eseal").item.code, "5")

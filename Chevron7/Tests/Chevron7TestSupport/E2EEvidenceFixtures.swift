@@ -52,6 +52,7 @@ public enum E2EEvidenceFixtures {
         public var asicDataObjectName: String? = nil
         public var asicDataObjectSigned = false
         public var asicDataObjectCount: Int? = nil
+        public var duplicateDataObjectName: String? = nil
 
         public init() {}
     }
@@ -147,6 +148,7 @@ public enum E2EEvidenceFixtures {
             if let value = pdf.declaredPdfaConformance { facts["declaredPdfaConformance"] = value }
             if let value = pdf.asicDataObjectName { facts["asicDataObjectName"] = value }
             if let value = pdf.asicDataObjectCount { facts["asicDataObjectCount"] = value }
+            if let value = pdf.duplicateDataObjectName { facts["duplicateDataObjectName"] = value }
             if !dataObjects.isEmpty { facts["dataObjects"] = dataObjects.map(dataObjectJSON) }
             evidence["pdf"] = facts
         }
