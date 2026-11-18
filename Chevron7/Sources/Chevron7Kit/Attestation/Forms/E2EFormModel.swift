@@ -18,6 +18,9 @@ public struct E2EFormModel: Sendable, Equatable {
     public var original: ElectronicOriginal
     /// "Druh dokumentu" (record only), e.g. "zmluva o pôžičke".
     public var originalDocumentType: String
+    /// One "Druh dokumentu" per `original.documents` element, in order: a file's own label,
+    /// else the common one, else the document's name. A revision takes its file's type.
+    public var originalDocumentTypes: [String]
     public var newDocument: NewDocument
     public var evidenceNumber: String
     public var usedDevice: String
@@ -50,9 +53,16 @@ public struct E2EFormModel: Sendable, Equatable {
             case .convert: format = (E2ECodelists.pdfa2Format, nil)
             }
         }
+        let types = original.documents.map { document -> String in
+            if let entry = document.fileEntryName,
+               let own = d.originalDocumentTypeLabels[entry]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !own.isEmpty { return own }
+            return typeLabel.isEmpty ? document.name : typeLabel
+        }
         return E2EFormModel(
             original: original,
             originalDocumentType: typeLabel.isEmpty ? (original.documents.first?.name ?? "Dokument") : typeLabel,
+            originalDocumentTypes: types,
             newDocument: NewDocument(name: newDocumentName, format: format.0, formatOther: format.1,
                                      sha256: Data(SHA256.hash(data: newDocumentData))),
             evidenceNumber: evidenceNumber,
@@ -163,10 +173,10 @@ public struct ConversionRecordE2ERenderer: Sendable {
 
     public func render(_ m: E2EFormModel) -> String {
         var x = "<ConversionRecord xmlns=\"\(OfficialForm.recordE2E_1_0.namespace)\">"
-        for document in m.original.documents {
+        for (index, document) in m.original.documents.enumerated() {
             x += "<OriginalDocumentInfo>"
             x += element("OriginalDocumentName", document.name)
-            x += element("OriginalDocumentType", m.originalDocumentType)
+            x += element("OriginalDocumentType", m.originalDocumentTypes[index])
             x += element("OriginalDocumentFormat", document.formatOther ?? document.format.skName)
             x += element("ElectronicFingerprintValue", document.sha256.base64EncodedString())
             x += element("ElectronicFingerprintCalculationMethod", ZakoCodelists.sha256Item.code)

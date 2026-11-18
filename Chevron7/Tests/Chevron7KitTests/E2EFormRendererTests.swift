@@ -168,4 +168,87 @@ final class E2EFormRendererTests: XCTestCase {
         XCTAssertNoThrow(try E2EDeliveryBuilder().clause(model))
         XCTAssertNoThrow(try E2EDeliveryBuilder().record(model))
     }
+
+    // MARK: Containers with several files
+
+    private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x50, count: 40)
+
+    private func pdfBytes(_ fill: UInt8, count: Int = 200) -> Data {
+        Data("%PDF-1.7\n".utf8) + Data(repeating: fill, count: max(0, count - 9))
+    }
+
+    private func multiOriginal(nested: Bool) throws -> ElectronicOriginal {
+        var a = E2EEvidenceFixtures.DataObject(name: "a.pdf", bytes: pdfBytes(0x5A, count: 1000))
+        a.coveredBy = ["C-1"]
+        if nested {
+            var padesSignature = E2EEvidenceFixtures.Signature()
+            padesSignature.id = "P-1"
+            padesSignature.signedRevisionLength = 900
+            padesSignature.signatureValue = Data("pades-P-1".utf8)
+            a.nestedSignatures = [padesSignature]
+        }
+        var b = E2EEvidenceFixtures.DataObject(name: "b.png", bytes: png)
+        b.kind = "png"
+        b.coveredBy = ["C-1"]
+        var container = E2EEvidenceFixtures.Signature()
+        container.id = "C-1"
+        container.format = "XAdES-BASELINE-T"
+        container.signatureValue = Data("container-C-1".utf8)
+        let objects = [a, b]
+        let data = try ASiCEPackager().package(files: objects.map { .init(path: $0.name, data: $0.bytes) })
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = objects.count
+        facts.asicDataObjectName = "a.pdf"
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [container], pdf: facts, dataObjects: objects))
+        return try ElectronicOriginal.make(sourceName: "spis.asice", sourceData: data, evidence: evidence)
+    }
+
+    private func multiModel(_ original: ElectronicOriginal, labels: [String: String] = [:]) throws -> E2EFormModel {
+        var data = attestation()
+        data.originalDocumentTypeLabels = labels
+        return try E2EFormModel.make(original: original, attestation: data, newDocumentName: "spis.pdf",
+                                     newDocumentData: Data("%PDF-converted".utf8), usedDevice: "Chevron7 1.5.0",
+                                     qualifiedReport: nil)
+    }
+
+    func testThreeOriginalsWithNestedSignatureValidateAgainstBothSchemas() throws {
+        let original = try multiOriginal(nested: true)
+        XCTAssertEqual(original.documents.map(\.name), ["a-1", "a-2", "b.png"])
+        let model = try multiModel(original)
+        XCTAssertNoThrow(try E2EDeliveryBuilder().clause(model))
+        XCTAssertNoThrow(try E2EDeliveryBuilder().record(model))
+        let clause = ConversionCertificateE2ERenderer().render(model)
+        XCTAssertEqual(clause.components(separatedBy: "<OriginalDocumentInfo>").count - 1, 3)
+        let record = ConversionRecordE2ERenderer().render(model)
+        XCTAssertEqual(record.components(separatedBy: "<OriginalDocumentInfo>").count - 1, 3)
+        let nestedRange = try XCTUnwrap(clause.range(of: "<AuthorizedDocument><AuthorizedDocumentName>a-1</AuthorizedDocumentName></AuthorizedDocument><AuthorizationState>"))
+        XCTAssertFalse(clause[nestedRange].contains("a-2"))
+    }
+
+    func testRecordCarriesTypePerFile() throws {
+        let original = try multiOriginal(nested: false)
+        let model = try multiModel(original, labels: ["a.pdf": "Zmluva", "b.png": "Iný dokument"])
+        XCTAssertEqual(model.originalDocumentTypes, ["Zmluva", "Iný dokument"])
+        let record = ConversionRecordE2ERenderer().render(model)
+        let first = try XCTUnwrap(record.range(of: "<OriginalDocumentType>Zmluva</OriginalDocumentType>"))
+        let second = try XCTUnwrap(record.range(of: "<OriginalDocumentType>Iný dokument</OriginalDocumentType>"))
+        XCTAssertLessThan(first.lowerBound, second.lowerBound)
+        XCTAssertNoThrow(try E2EDeliveryBuilder().record(model))
+    }
+
+    func testRevisionDocumentTakesItsFilesTypeAndFallsBackToCommonLabel() throws {
+        let original = try multiOriginal(nested: true)
+        let model = try multiModel(original, labels: ["a.pdf": "Zmluva"])
+        XCTAssertEqual(model.originalDocumentTypes, ["Zmluva", "Zmluva", "zmluva o pôžičke"])
+    }
+
+    func testStoredAttestationWithoutLabelsStillDecodes() throws {
+        let data = attestation()
+        let encoder = JSONEncoder()
+        var json = try JSONSerialization.jsonObject(with: encoder.encode(data)) as! [String: Any]
+        json.removeValue(forKey: "originalDocumentTypeLabels")
+        let decoded = try JSONDecoder().decode(AttestationData.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.originalDocumentTypeLabels, [:])
+    }
 }

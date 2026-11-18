@@ -46,6 +46,33 @@ public struct PdfaFromSignedRunner: Sendable {
                          PDFAConverter.sRGBProfileSystemPath, title.isEmpty ? "Dokument" : title]
         if raster { arguments.append("--raster") }
         let result = try (launch ?? Self.engineLaunch())(arguments)
+        return try Self.output(of: result, at: output)
+    }
+
+    /// Merges PDFs and images into one PDF/A-2b (`PdfaFromSigned --merge`): each input becomes
+    /// its own pages, in order, named by `name` in the engine's messages. Inputs reach the engine
+    /// under generated file names, never the (untrusted) entry names.
+    public func merge(_ inputs: [(data: Data, name: String)], title: String, raster: Bool) throws -> Data {
+        guard !inputs.isEmpty else { throw Failure.failed }
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pdfa-merge-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let output = work.appendingPathComponent("out.pdf")
+        var arguments = ["digital.slovensko.autogram.core.PdfaFromSigned", "--merge", output.path,
+                         PDFAConverter.sRGBProfileSystemPath, title.isEmpty ? "Dokument" : title]
+        if raster { arguments.append("--raster") }
+        for (index, input) in inputs.enumerated() {
+            let file = work.appendingPathComponent("in-\(index)")
+            try input.data.write(to: file, options: [.atomic])
+            arguments += [file.path, input.name]
+        }
+        let result = try (launch ?? Self.engineLaunch())(arguments)
+        return try Self.output(of: result, at: output)
+    }
+
+    /// Exit 0 is the written PDF/A, 3 not compliant (rule lines on stderr), 2 unreadable input.
+    private static func output(of result: (status: Int32, stderr: String), at output: URL) throws -> Data {
         switch result.status {
         case 0:
             guard let data = try? Data(contentsOf: output) else { throw Failure.failed }

@@ -57,6 +57,9 @@ public struct AttestationData: Codable, Hashable, Sendable {
     public var originalDocumentName: String
     public var originalDocumentTypeCode: String
     public var originalDocumentTypeLabel: String
+    /// E→E container with several files: the "Druh dokumentu" of each file by its entry name;
+    /// a file without an entry takes `originalDocumentTypeLabel`.
+    public var originalDocumentTypeLabels: [String: String]
     public var noSecurityElementsConfirmed: Bool
     public var originConfirmed: Bool
     public var numberOfSheets: Int
@@ -88,7 +91,7 @@ public struct AttestationData: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case originalDocumentOrder, originalDocumentName, originalDocumentTypeCode,
-             originalDocumentTypeLabel, originConfirmed, noSecurityElementsConfirmed, numberOfSheets,
+             originalDocumentTypeLabel, originalDocumentTypeLabels, originConfirmed, noSecurityElementsConfirmed, numberOfSheets,
              sheetCountingMethod, nonEmptyPageCount, paperSizeBreakdown,
              newDocumentName, newDocumentFormatLabel, conversionExecutionDateTime,
              evidenceNumber, evidenceNumberAllocatedAt, evidenceNumberMode, performingPerson,
@@ -99,6 +102,7 @@ public struct AttestationData: Codable, Hashable, Sendable {
                 originalDocumentName: String = "",
                 originalDocumentTypeCode: String = "",
                 originalDocumentTypeLabel: String = "",
+                originalDocumentTypeLabels: [String: String] = [:],
                 originConfirmed: Bool = false,
                 noSecurityElementsConfirmed: Bool = false,
                 numberOfSheets: Int = 0,
@@ -117,6 +121,7 @@ public struct AttestationData: Codable, Hashable, Sendable {
         self.originalDocumentName = originalDocumentName
         self.originalDocumentTypeCode = originalDocumentTypeCode
         self.originalDocumentTypeLabel = originalDocumentTypeLabel
+        self.originalDocumentTypeLabels = originalDocumentTypeLabels
         self.noSecurityElementsConfirmed = noSecurityElementsConfirmed
         self.originConfirmed = originConfirmed
         self.numberOfSheets = numberOfSheets
@@ -139,6 +144,7 @@ public struct AttestationData: Codable, Hashable, Sendable {
         originalDocumentName = try container.decode(String.self, forKey: .originalDocumentName)
         originalDocumentTypeCode = try container.decode(String.self, forKey: .originalDocumentTypeCode)
         originalDocumentTypeLabel = try container.decode(String.self, forKey: .originalDocumentTypeLabel)
+        originalDocumentTypeLabels = try container.decodeIfPresent([String: String].self, forKey: .originalDocumentTypeLabels) ?? [:]
         noSecurityElementsConfirmed = try container.decodeIfPresent(Bool.self, forKey: .noSecurityElementsConfirmed) ?? false
         originConfirmed = try container.decodeIfPresent(Bool.self, forKey: .originConfirmed) ?? false
         numberOfSheets = try container.decode(Int.self, forKey: .numberOfSheets)
@@ -161,6 +167,7 @@ public struct AttestationData: Codable, Hashable, Sendable {
         try container.encode(originalDocumentName, forKey: .originalDocumentName)
         try container.encode(originalDocumentTypeCode, forKey: .originalDocumentTypeCode)
         try container.encode(originalDocumentTypeLabel, forKey: .originalDocumentTypeLabel)
+        try container.encode(originalDocumentTypeLabels, forKey: .originalDocumentTypeLabels)
         try container.encode(noSecurityElementsConfirmed, forKey: .noSecurityElementsConfirmed)
         try container.encode(originConfirmed, forKey: .originConfirmed)
         try container.encode(numberOfSheets, forKey: .numberOfSheets)
