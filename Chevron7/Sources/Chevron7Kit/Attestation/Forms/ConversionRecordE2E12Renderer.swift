@@ -265,27 +265,45 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         return x
     }
 
-    /// Timestamp names as the form's annotation gives them: "Elektronicka casova peciatka" when
-    /// the record holds exactly one timestamp, else "Casova-peciatka-<N>" in order of appearance
-    /// (document timestamps first, then each authorization's own). One timestamp, by file and
-    /// DSS id, keeps one name; a timestamp without an id is its authorization's own.
+    /// Timestamp names, per element as each annotation says. `Authorization/TimeStamp` is always
+    /// "Casova-peciatka-<N>"; an `OriginalDocumentTimestamp` is "Elektronicka casova peciatka"
+    /// when the record holds exactly one document timestamp and no authorization lists it as its
+    /// `TimeStamp` (one timestamp keeps one name), else "Casova-peciatka-<N>". N counts in order
+    /// of appearance (document timestamps first, then each authorization's own). One timestamp,
+    /// by file and DSS id, keeps one name; a timestamp without an id is its authorization's own.
+    /// The lookup traps on a timestamp it was not built from, so a miss never yields a duplicate.
     static func timestampNames(_ original: ElectronicOriginal) -> (String?, String?, Int?) -> String {
         func key(_ file: String?, _ id: String?, _ authorization: Int?) -> String {
             id.map { "\(file ?? "")\u{0}\($0)" } ?? "authorization\u{0}\(authorization ?? -1)"
         }
-        var order: [String] = []
-        for stamp in original.documentTimestamps where !order.contains(key(stamp.fileEntryName, stamp.id, nil)) {
-            order.append(key(stamp.fileEntryName, stamp.id, nil))
+        var documentKeys: [String] = []
+        for stamp in original.documentTimestamps where !documentKeys.contains(key(stamp.fileEntryName, stamp.id, nil)) {
+            documentKeys.append(key(stamp.fileEntryName, stamp.id, nil))
         }
+        var authorizationKeys: [String] = []
         for (index, authorization) in original.authorizations.enumerated() {
             guard let timestamp = authorization.timestamp else { continue }
             let k = key(authorization.fileEntryName, timestamp.id, index)
-            if !order.contains(k) { order.append(k) }
+            if !documentKeys.contains(k) && !authorizationKeys.contains(k) { authorizationKeys.append(k) }
         }
-        let names = Dictionary(uniqueKeysWithValues: order.enumerated().map { position, k in
-            (k, order.count == 1 ? "Elektronicka casova peciatka" : "Casova-peciatka-\(position + 1)")
-        })
-        return { file, id, authorization in names[key(file, id, authorization)] ?? "Casova-peciatka-\(order.count + 1)" }
+        let sharedWithAuthorization = original.authorizations.enumerated().contains { index, authorization in
+            authorization.timestamp.map { documentKeys.contains(key(authorization.fileEntryName, $0.id, index)) } ?? false
+        }
+        var names: [String: String] = [:]
+        if documentKeys.count == 1 && !sharedWithAuthorization {
+            names[documentKeys[0]] = "Elektronicka casova peciatka"
+        }
+        var counter = 0
+        for k in documentKeys + authorizationKeys where names[k] == nil {
+            counter += 1
+            names[k] = "Casova-peciatka-\(counter)"
+        }
+        return { file, id, authorization in
+            guard let name = names[key(file, id, authorization)] else {
+                preconditionFailure("record 1.2: timestamp without a name")
+            }
+            return name
+        }
     }
 
     /// The elements after a timestamp's name, the same in `OriginalDocumentTimestamp` and `TimeStamp`.

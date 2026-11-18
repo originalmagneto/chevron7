@@ -82,7 +82,8 @@ public enum E2EEvidenceFixtures {
         public var embeddedFileNames: [String] = []
         public var widthPx: Int? = nil
         public var heightPx: Int? = nil
-        /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`.
+        /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`, as
+        /// do document timestamps alone.
         public var nestedSignatures: [Signature] = []
         public var nestedPDF: PDF? = nil
         /// The PDF's own document timestamps, listed in the nested `evidence`.
@@ -202,7 +203,7 @@ public enum E2EEvidenceFixtures {
         if object.kind == "pdf" {
             let own = object.nestedPDF ?? PDF()
             for (key, value) in pdfFacts(own) { json[key] = value }
-            if !object.nestedSignatures.isEmpty {
+            if !object.nestedSignatures.isEmpty || !object.nestedDocumentTimestamps.isEmpty {
                 json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: [],
                                                 documentTimestamps: object.nestedDocumentTimestamps,
                                                 validationTime: object.nestedValidationTime).1

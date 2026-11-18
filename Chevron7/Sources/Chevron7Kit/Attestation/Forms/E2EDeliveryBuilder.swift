@@ -45,6 +45,11 @@ public struct E2EDeliveryBuilder: Sendable {
             if let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(model.original).first {
                 throw Failure.unmappableAuthorization(signer: unmappable.signerName)
             }
+            if let document = model.original.documents.first(where: {
+                ConversionRecordE2E12Renderer.originalDocumentFormat($0) == nil
+            }) {
+                throw Failure.unmappableOriginalDocumentFormat(name: document.name)
+            }
             guard ConversionRecordE2E12Renderer.newDocumentFormat(model.newDocument) != nil else {
                 throw Failure.unmappableNewDocumentFormat
             }
@@ -62,6 +67,7 @@ public struct E2EDeliveryBuilder: Sendable {
     public enum Failure: LocalizedError, Equatable {
         /// The signature's qualification maps to no record 1.2 `AuthorizationType`.
         case unmappableAuthorization(signer: String)
+        case unmappableOriginalDocumentFormat(name: String)
         case unmappableNewDocumentFormat
         case notAnE2ERecordForm
 
@@ -69,6 +75,8 @@ public struct E2EDeliveryBuilder: Sendable {
             switch self {
             case .unmappableAuthorization(let signer):
                 return "Kvalifikáciu podpisu \(signer) sa nepodarilo určiť. Podľa postupu od 1. 1. 2027 ho nemožno zapísať do záznamu. Skúste overenie znova."
+            case .unmappableOriginalDocumentFormat(let name):
+                return "Formát dokumentu \(name) nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
             case .unmappableNewDocumentFormat:
                 return "Formát nového dokumentu nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
             case .notAnE2ERecordForm:

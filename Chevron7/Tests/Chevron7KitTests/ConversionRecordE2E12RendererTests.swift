@@ -254,7 +254,7 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         assertCrossReferencesResolve(xml)
     }
 
-    func testThreeRevisionChainNamesEveryShorterSignature() throws {
+    func testThreeRevisionChainNamesOnlyThePredecessor() throws {
         let original = try pdfOriginal([signature("S-1", revision: 100), signature("S-2", revision: 200),
                                         signature("S-3", revision: pdf.count)])
         let xml = try record12(try model(original))
@@ -276,7 +276,7 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         XCTAssertEqual(original.documentTimestamps.map(\.fileEntryName), ["a.pdf"])
         let xml = try record12(try model(original))
         let p2 = try block(named: "Autorizacia2", in: xml)
-        XCTAssertEqual(values("AuthorizedTimeStampName", in: p2), ["Casova-peciatka-1"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: p2), ["Elektronicka casova peciatka"])
         XCTAssertEqual(p2.components(separatedBy: "<AuthorizedAuthorization>").dropFirst()
             .compactMap { values("AuthorizationName", in: $0).first }, ["Autorizacia1"])
         let outer = try block(named: "signatures001.xml", in: xml)
@@ -317,7 +317,7 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         assertCrossReferencesResolve(xml)
     }
 
-    func testContainerNamesEveryTimestampOfAFileWithoutPAdES() throws {
+    func testContainerNamesTimestampsAfterTheLastPAdES() throws {
         var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
         a.nestedSignatures = [signature("P-1", revision: 300)]
         var early = E2EEvidenceFixtures.DocumentTimestamp()
@@ -327,14 +327,31 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         let original = try container([a], signatures: [containerSignature("C-1", file: "META-INF/signatures001.xml")])
         let xml = try record12(try model(original))
         XCTAssertEqual(values("AuthorizedTimeStampName", in: try block(named: "signatures001.xml", in: xml)),
-                       ["Casova-peciatka-1"])
+                       ["Elektronicka casova peciatka"])
         XCTAssertEqual(values("AuthorizedTimeStampName", in: try block(named: "Autorizacia1", in: xml)), [])
     }
 
-    func testSingleTimestampIsElektronickaCasovaPeciatka() throws {
+    func testSignatureTimestampIsAlwaysNumbered() throws {
         let xml = try record12(try model(try pdfOriginal([signature("S-1", revision: pdf.count)])))
-        XCTAssertEqual(values("TimeStampName", in: xml), ["Elektronicka casova peciatka"])
-        // One document timestamp that DSS also lists under the only signature is still one timestamp.
+        XCTAssertEqual(values("TimeStampName", in: xml), ["Casova-peciatka-1"])
+    }
+
+    func testSingleDocumentTimestampIsElektronickaCasovaPeciatka() throws {
+        var documentStamp = E2EEvidenceFixtures.DocumentTimestamp()
+        documentStamp.id = "T-DOC-1"
+        documentStamp.coveredRevisionLength = 200
+        let xml = try record12(try model(try pdfOriginal(
+            [signature("S-1", revision: 150), signature("S-2", revision: pdf.count)], documentTimestamps: [documentStamp])))
+        XCTAssertTrue(xml.contains("<OriginalDocumentTimestamp><TimeStampName>Elektronicka casova peciatka</TimeStampName>"))
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: xml), ["Elektronicka casova peciatka"])
+        XCTAssertEqual(values("TimeStampName", in: try block(named: "Autorizacia1", in: xml)), ["Casova-peciatka-1"])
+        XCTAssertEqual(values("TimeStampName", in: try block(named: "Autorizacia2", in: xml)), ["Casova-peciatka-2"])
+        assertCrossReferencesResolve(xml)
+    }
+
+    func testSingleDocumentTimestampThatIsASignaturesTimeStampIsNumbered() throws {
+        // DSS lists the document timestamp under the earlier signature, whose TimeStamp it becomes;
+        // that element is always "Casova-peciatka-<N>", and one timestamp keeps one name.
         var documentStamp = E2EEvidenceFixtures.DocumentTimestamp()
         documentStamp.id = "T-DOC-1"
         documentStamp.coveredRevisionLength = 200
@@ -342,9 +359,42 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         first.timestamps = [stamp("T-DOC-1", at: documentStamp.productionTime, type: "DOCUMENT_TIMESTAMP")]
         var second = signature("S-2", revision: pdf.count)
         second.timestamps = []
-        let shared = try record12(try model(try pdfOriginal([first, second], documentTimestamps: [documentStamp])))
-        XCTAssertEqual(values("TimeStampName", in: shared), ["Elektronicka casova peciatka", "Elektronicka casova peciatka"])
-        XCTAssertEqual(values("AuthorizedTimeStampName", in: shared), ["Elektronicka casova peciatka"])
+        let xml = try record12(try model(try pdfOriginal([first, second], documentTimestamps: [documentStamp])))
+        XCTAssertEqual(values("TimeStampName", in: xml), ["Casova-peciatka-1", "Casova-peciatka-1"])
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: xml), ["Casova-peciatka-1"])
+        XCTAssertFalse(xml.contains("Elektronicka casova peciatka"))
+    }
+
+    func testUnmappableOriginalDocumentFormatIsRefused() throws {
+        var original = try pdfOriginal([signature("S-1", revision: pdf.count)])
+        original.documents[0].format = E2ECodelists.otherFormat
+        original.documents[0].formatOther = String(repeating: "X", count: 31)
+        XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(original), form: .recordE2E_1_2)) { error in
+            XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, .unmappableOriginalDocumentFormat(name: "zmluva.pdf"))
+        }
+        original.documents[0].formatOther = nil
+        XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(original), form: .recordE2E_1_2))
+    }
+
+    func testContainerNamesEveryTimestampOfAFileWithoutPAdES() throws {
+        // a.pdf has two document timestamps and no PAdES signature: the container names both.
+        var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
+        var d1 = E2EEvidenceFixtures.DocumentTimestamp()
+        d1.id = "D-1"
+        d1.coveredRevisionLength = 1000
+        var d2 = E2EEvidenceFixtures.DocumentTimestamp()
+        d2.id = "D-2"
+        d2.coveredRevisionLength = 1000
+        a.nestedDocumentTimestamps = [d1, d2]
+        let b = object("b.png", png, kind: "png", coveredBy: ["C-1"])
+        let original = try container([a, b], signatures: [containerSignature("C-1", file: "META-INF/signatures001.xml")])
+        XCTAssertEqual(original.documentTimestamps.map(\.documentName), ["a.pdf", "a.pdf"])
+        XCTAssertEqual(original.authorizations.count, 1)
+        let xml = try record12(try model(original))
+        let outer = try block(named: "signatures001.xml", in: xml)
+        XCTAssertEqual(values("AuthorizedTimeStampName", in: outer), ["Casova-peciatka-1", "Casova-peciatka-2"])
+        XCTAssertEqual(authorized(outer), [])
+        assertCrossReferencesResolve(xml)
     }
 
     func testDocumentTimestampCoveringNoDocumentIsLeftOut() throws {
