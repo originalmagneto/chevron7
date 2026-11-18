@@ -554,4 +554,131 @@ class PdfaFromSignedTest {
             assertTrue(bottom.getRed() > 200 && bottom.getBlue() < 60, bottom.toString());
         }
     }
+
+    /// One A4 page: a blue square that is always shown, and a red square inside the optional
+    /// content group `group`, shown by default only when `visible`. With `baseStateOff` the
+    /// default configuration turns every group off and lists the visible one under `/ON`.
+    private static byte[] optionalContentPdf(String group, boolean visible, boolean baseStateOff) throws Exception {
+        try (var document = new PDDocument()) {
+            var page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+            var properties = new org.apache.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentProperties();
+            var layer = new org.apache.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentGroup(group);
+            properties.addGroup(layer);
+            document.getDocumentCatalog().setOCProperties(properties);
+            if (baseStateOff) {
+                properties.setBaseState(
+                        org.apache.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentProperties.BaseState.OFF);
+                var configuration = (org.apache.pdfbox.cos.COSDictionary) properties.getCOSObject()
+                        .getDictionaryObject(COSName.D);
+                var on = new org.apache.pdfbox.cos.COSArray();
+                if (visible) on.add(layer.getCOSObject());
+                configuration.setItem(COSName.ON, on);
+                configuration.removeItem(COSName.OFF);
+            } else {
+                properties.setGroupEnabled(layer, visible);
+            }
+            try (var content = new PDPageContentStream(document, page)) {
+                content.setNonStrokingColor(0f, 0f, 1f);
+                content.addRect(72, 72, 100, 100);
+                content.fill();
+                content.beginMarkedContent(COSName.OC, layer);
+                content.setNonStrokingColor(1f, 0f, 0f);
+                content.addRect(300, 500, 100, 100);
+                content.fill();
+                content.endMarkedContent();
+            }
+            var output = new ByteArrayOutputStream();
+            document.save(output);
+            return output.toByteArray();
+        }
+    }
+
+    private static java.awt.Color renderedAt(PDDocument document, int page, float x, float y) throws Exception {
+        var rendered = new PDFRenderer(document).renderImageWithDPI(page, 72);
+        return new java.awt.Color(rendered.getRGB(Math.round(x), rendered.getHeight() - Math.round(y)));
+    }
+
+    private static boolean isRed(java.awt.Color color) {
+        return color.getRed() > 200 && color.getGreen() < 60 && color.getBlue() < 60;
+    }
+
+    private void assertLayers(boolean firstShown, boolean secondShown) throws Exception {
+        try (var document = Loader.loadPDF(output())) {
+            assertEquals(2, document.getNumberOfPages());
+            for (var page = 0; page < 2; page++) {
+                var blue = renderedAt(document, page, 122, 122);
+                assertTrue(blue.getBlue() > 200 && blue.getRed() < 60, "page " + page + ": " + blue);
+                var layer = renderedAt(document, page, 350, 550);
+                var shown = page == 0 ? firstShown : secondShown;
+                if (shown) {
+                    assertTrue(isRed(layer), "page " + page + " must show its layer: " + layer);
+                } else {
+                    assertEquals(java.awt.Color.WHITE, layer, "page " + page + " must hide its layer");
+                }
+            }
+        }
+    }
+
+    @Test
+    void mergeKeepsEachSourcesHiddenOptionalContentHidden() throws Exception {
+        var result = merge(false,
+                "skryta.pdf", optionalContentPdf("Vrstva", false, false),
+                "viditelna.pdf", optionalContentPdf("Vrstva", true, false));
+
+        assertTrue(result.compliant(), result.errors().toString());
+        assertLayers(false, true);
+    }
+
+    @Test
+    void mergeKeepsOptionalContentOfSourcesWithBaseStateOff() throws Exception {
+        var result = merge(false,
+                "viditelna.pdf", optionalContentPdf("Vrstva", true, true),
+                "skryta.pdf", optionalContentPdf("Vrstva", false, true));
+
+        assertTrue(result.compliant(), result.errors().toString());
+        assertLayers(true, false);
+    }
+
+    @Test
+    void sourcesWithoutOptionalContentStillMergeWithOneThatHasIt() throws Exception {
+        var result = merge(false,
+                "obycajne.pdf", twoPagePdf(),
+                "skryta.pdf", optionalContentPdf("Vrstva", false, false));
+
+        assertTrue(result.compliant(), result.errors().toString());
+        try (var document = Loader.loadPDF(output())) {
+            assertEquals(java.awt.Color.WHITE, renderedAt(document, 2, 350, 550));
+        }
+    }
+
+    @Test
+    void sourceWithAutoStateIsRenderedWithItsDefaultVisibility() throws Exception {
+        var source = optionalContentPdf("Vrstva", false, false);
+        byte[] withAutoState;
+        try (var document = Loader.loadPDF(source)) {
+            var defaults = (org.apache.pdfbox.cos.COSDictionary) document.getDocumentCatalog().getCOSObject()
+                    .getCOSDictionary(COSName.OCPROPERTIES).getDictionaryObject(COSName.D);
+            var usage = new org.apache.pdfbox.cos.COSDictionary();
+            usage.setItem(COSName.getPDFName("Event"), COSName.getPDFName("View"));
+            usage.setItem(COSName.getPDFName("Category"), new org.apache.pdfbox.cos.COSArray(
+                    List.of(COSName.getPDFName("View"))));
+            usage.setItem(COSName.OCGS, document.getDocumentCatalog().getCOSObject()
+                    .getCOSDictionary(COSName.OCPROPERTIES).getDictionaryObject(COSName.OCGS));
+            defaults.setItem(COSName.getPDFName("AS"), new org.apache.pdfbox.cos.COSArray(List.of(usage)));
+            var output = new ByteArrayOutputStream();
+            document.save(output);
+            withAutoState = output.toByteArray();
+        }
+
+        var result = merge(false, "auto.pdf", withAutoState, "viditelna.pdf", optionalContentPdf("Vrstva", true, false));
+
+        assertTrue(result.compliant(), result.errors().toString());
+        assertLayers(false, true);
+        try (var document = Loader.loadPDF(output())) {
+            // The auto-state source became an image page; only the other source's group remains.
+            assertEquals(1, document.getDocumentCatalog().getOCProperties().getGroupNames().length);
+            assertTrue(new PDFTextStripper().getText(document).isBlank());
+        }
+    }
 }

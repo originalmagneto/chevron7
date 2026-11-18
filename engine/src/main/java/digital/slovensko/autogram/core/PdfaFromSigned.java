@@ -3,8 +3,11 @@ package digital.slovensko.autogram.core;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.pdfa.PDFAStructureValidator;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PageMode;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionGoTo;
@@ -40,6 +43,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -168,12 +172,13 @@ public final class PdfaFromSigned {
         var sources = new ArrayList<PDDocument>();
         try {
             try (var target = new PDDocument()) {
+                var layers = new MergedOptionalContent();
                 var outline = new PDDocumentOutline();
                 target.getDocumentCatalog().setDocumentOutline(outline);
                 for (var input : inputs) {
                     var bytes = Files.readAllBytes(input.file().toPath());
                     var firstPage = switch (MergeInputKind.of(bytes)) {
-                        case PDF -> appendPdf(target, bytes, raster, sources);
+                        case PDF -> appendPdf(target, bytes, raster, sources, layers);
                         case PNG, JPEG -> MergeImagePage.append(target, bytes);
                     };
                     var item = new PDOutlineItem();
@@ -184,6 +189,7 @@ public final class PdfaFromSigned {
                     outline.addLast(item);
                 }
                 target.getDocumentCatalog().setPageMode(PageMode.USE_OUTLINES);
+                layers.writeTo(target);
                 target.save(intermediate);
             }
             PdfaNormalize.normalize(intermediate, output, iccProfile, title);
@@ -225,18 +231,23 @@ public final class PdfaFromSigned {
      * Imports the pages of one PDF into {@code target} and returns the first imported page. The
      * page dictionaries are copied shallowly, so the loaded source stays open (in {@code sources})
      * until the target is saved; every reference back into the source page tree is cut or
-     * re-pointed, so the source's own pages never come along.
+     * re-pointed, so the source's own pages never come along. The source's optional content
+     * groups go to {@code layers} with the visibility its default configuration gives them; a
+     * source whose visibility the merged document cannot state is rendered to images instead,
+     * which shows exactly what its default configuration shows.
      */
-    private static PDPage appendPdf(PDDocument target, byte[] bytes, boolean raster, List<PDDocument> sources)
-            throws IOException {
+    private static PDPage appendPdf(PDDocument target, byte[] bytes, boolean raster, List<PDDocument> sources,
+            MergedOptionalContent layers) throws IOException {
         var source = Loader.loadPDF(bytes);
         sources.add(source);
         PDDocument pages = source;
-        if (raster) {
+        var sourceLayers = raster ? null : SourceOptionalContent.of(source);
+        if (sourceLayers == null) {
             pages = rasterized(source);
             sources.add(pages);
         } else {
             stripAndFlatten(source);
+            layers.add(sourceLayers);
         }
         if (pages.getNumberOfPages() == 0) {
             throw new IOException("PDF without pages");
@@ -270,6 +281,112 @@ public final class PdfaFromSigned {
             copy.setAnnotations(annotations);
         }
         return first;
+    }
+
+    /**
+     * The optional content groups of one merge source and which of them its default
+     * configuration ({@code /D}) hides, or null from {@link #of} when that cannot be stated
+     * faithfully in the merged document: a malformed dictionary, an {@code /AS} array (states
+     * that change by usage), an intent other than View, or a group both on and off.
+     */
+    record SourceOptionalContent(List<COSBase> groups, List<COSBase> hidden) {
+        static final SourceOptionalContent NONE = new SourceOptionalContent(List.of(), List.of());
+
+        static SourceOptionalContent of(PDDocument source) {
+            var properties = source.getDocumentCatalog().getCOSObject().getDictionaryObject(COSName.OCPROPERTIES);
+            if (properties == null) {
+                return NONE;
+            }
+            if (!(properties instanceof COSDictionary dictionary)
+                    || !(dictionary.getDictionaryObject(COSName.OCGS) instanceof COSArray groups)) {
+                return null;
+            }
+            var configuration = dictionary.getDictionaryObject(COSName.D);
+            if (configuration != null && !(configuration instanceof COSDictionary)) {
+                return null;
+            }
+            var defaults = configuration == null ? new COSDictionary() : (COSDictionary) configuration;
+            var states = defaults.getDictionaryObject(COSName.getPDFName("AS"));
+            if (states instanceof COSArray array && array.size() > 0) {
+                return null;
+            }
+            var intent = defaults.getDictionaryObject(COSName.getPDFName("Intent"));
+            if (intent != null && !COSName.getPDFName("View").equals(intent)) {
+                return null;
+            }
+            var on = dereferenced(defaults.getDictionaryObject(COSName.ON));
+            var off = dereferenced(defaults.getDictionaryObject(COSName.OFF));
+            if (on == null || off == null) {
+                return null;
+            }
+            var baseStateOff = COSName.OFF.equals(defaults.getDictionaryObject(COSName.BASE_STATE));
+            var kept = new ArrayList<COSBase>();
+            var hidden = new ArrayList<COSBase>();
+            for (var element : groups) {
+                var group = element instanceof COSObject object ? object.getObject() : element;
+                if (!(group instanceof COSDictionary)) {
+                    return null;
+                }
+                var isOn = on.contains(group);
+                var isOff = off.contains(group);
+                if (isOn && isOff) {
+                    return null;
+                }
+                kept.add(element);
+                if (baseStateOff ? !isOn : isOff) {
+                    hidden.add(element);
+                }
+            }
+            return new SourceOptionalContent(kept, hidden);
+        }
+
+        /// The dictionaries an /ON or /OFF array names, by identity; empty when absent, null when malformed.
+        private static java.util.Set<COSBase> dereferenced(COSBase value) {
+            var set = Collections.newSetFromMap(new IdentityHashMap<COSBase, Boolean>());
+            if (value == null) {
+                return set;
+            }
+            if (!(value instanceof COSArray array)) {
+                return null;
+            }
+            for (var element : array) {
+                set.add(element instanceof COSObject object ? object.getObject() : element);
+            }
+            return set;
+        }
+    }
+
+    /**
+     * The merged document's optional content: every source's groups, and one default
+     * configuration that hides exactly what each source's default configuration hid. PDF/A-2
+     * (ISO 19005-2, 6.9) wants a {@code /Name}, no {@code /AS}, and an {@code /Order} that
+     * lists every group, so the order is the flat list of all groups.
+     */
+    static final class MergedOptionalContent {
+        private final COSArray groups = new COSArray();
+        private final COSArray hidden = new COSArray();
+
+        void add(SourceOptionalContent source) {
+            source.groups().forEach(groups::add);
+            source.hidden().forEach(hidden::add);
+        }
+
+        void writeTo(PDDocument target) {
+            if (groups.size() == 0) {
+                return;
+            }
+            var defaults = new COSDictionary();
+            defaults.setString(COSName.NAME, "Default");
+            defaults.setItem(COSName.BASE_STATE, COSName.ON);
+            defaults.setItem(COSName.OFF, hidden);
+            var order = new COSArray();
+            groups.forEach(order::add);
+            defaults.setItem(COSName.getPDFName("Order"), order);
+            var properties = new COSDictionary();
+            properties.setItem(COSName.OCGS, groups);
+            properties.setItem(COSName.D, defaults);
+            target.getDocumentCatalog().getCOSObject().setItem(COSName.OCPROPERTIES, properties);
+        }
     }
 
     /**
