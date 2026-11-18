@@ -251,4 +251,15 @@ final class E2EFormRendererTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AttestationData.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(decoded.originalDocumentTypeLabels, [:])
     }
+
+    func testSingleFileRevisionsKeepTheOldTypeWithEmptyLabel() throws {
+        var data = attestation()
+        data.originalDocumentTypeLabel = ""
+        let original = try original([signature("S-1", revision: 150), signature("S-2")])
+        let model = try E2EFormModel.make(original: original, attestation: data, newDocumentName: "zmluva.pdf",
+                                          newDocumentData: Data("%PDF-converted".utf8), usedDevice: "x", qualifiedReport: nil)
+        XCTAssertEqual(model.originalDocumentTypes, ["zmluva-1", "zmluva-1"])
+        let record = ConversionRecordE2ERenderer().render(model)
+        XCTAssertEqual(record.components(separatedBy: "<OriginalDocumentType>zmluva-1</OriginalDocumentType>").count - 1, 2)
+    }
 }

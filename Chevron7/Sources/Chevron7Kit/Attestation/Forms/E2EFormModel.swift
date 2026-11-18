@@ -53,9 +53,11 @@ public struct E2EFormModel: Sendable, Equatable {
             case .convert: format = (E2ECodelists.pdfa2Format, nil)
             }
         }
+        let commonType = typeLabel.isEmpty ? (original.documents.first?.name ?? "Dokument") : typeLabel
         let types = original.documents.map { document -> String in
-            if let entry = document.fileEntryName,
-               let own = d.originalDocumentTypeLabels[entry]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            // A single-file original keeps the common value for every document, as before.
+            guard let entry = document.fileEntryName else { return commonType }
+            if let own = d.originalDocumentTypeLabels[entry]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !own.isEmpty { return own }
             return typeLabel.isEmpty ? document.name : typeLabel
         }
