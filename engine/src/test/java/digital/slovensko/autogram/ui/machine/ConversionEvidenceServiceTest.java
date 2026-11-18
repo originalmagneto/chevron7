@@ -131,10 +131,13 @@ class ConversionEvidenceServiceTest {
         assertFalse(pdf.get("asicDataObjectSigned").getAsBoolean());
     }
 
-    private static JsonObject pdfEvidenceOfContainer(byte[] container) throws Exception {
+    private static JsonObject evidenceOfContainer(byte[] container) throws Exception {
         var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
-        return new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
-                .getAsJsonObject("evidence").getAsJsonObject("pdf");
+        return new ConversionEvidenceService(plainValidation(), List::of).evidence(path).getAsJsonObject("evidence");
+    }
+
+    private static JsonObject pdfEvidenceOfContainer(byte[] container) throws Exception {
+        return evidenceOfContainer(container).getAsJsonObject("pdf");
     }
 
     private static String sha256Base64(byte[] bytes) throws Exception {
@@ -155,7 +158,8 @@ class ConversionEvidenceServiceTest {
                 new Entry("priloha.png", ConversionTestContainers.png(120, 80, false)),
                 new Entry("foto.jpg", ConversionTestContainers.jpeg(64, 48, false)));
 
-        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(entries));
+        var evidence = evidenceOfContainer(ConversionTestContainers.xadesAsice(entries));
+        var pdf = evidence.getAsJsonObject("pdf");
 
         assertEquals(3, pdf.get("asicDataObjectCount").getAsInt());
         var objects = pdf.getAsJsonArray("dataObjects");
@@ -175,6 +179,7 @@ class ConversionEvidenceServiceTest {
             assertEquals(signatureId, coveredBy.get(0).getAsString());
             assertFalse(object.has("problem"), object.toString());
         }
+        assertEquals(evidence.getAsJsonArray("signatures").get(0).getAsJsonObject().get("id").getAsString(), signatureId);
         assertEquals(1, objects.get(0).getAsJsonObject().get("pages").getAsInt());
         assertTrue(objects.get(0).getAsJsonObject().has("pdfaCompliant"));
         assertEquals(120, objects.get(1).getAsJsonObject().get("widthPx").getAsInt());
@@ -205,6 +210,44 @@ class ConversionEvidenceServiceTest {
         var objects = pdf.getAsJsonArray("dataObjects");
         assertEquals(1, objects.size());
         assertEquals("other", objects.get(0).getAsJsonObject().get("kind").getAsString());
+        assertEquals(1, objects.get(0).getAsJsonObject().getAsJsonArray("coveredBy").size(), objects.toString());
+    }
+
+    @Test
+    void cadesContainerDataObjectIsCovered() {
+        var objects = evidenceOf("sample_pdf_cades.asice", List.of()).getAsJsonObject("pdf").getAsJsonArray("dataObjects");
+        assertEquals(1, objects.size());
+        assertEquals("pdf", objects.get(0).getAsJsonObject().get("kind").getAsString());
+        assertEquals(1, objects.get(0).getAsJsonObject().getAsJsonArray("coveredBy").size(), objects.toString());
+    }
+
+    @Test
+    void namesWithDiacriticsSpacesAndFoldersAreCovered() throws Exception {
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("Zmluva o dielo č. 1.pdf", ConversionTestPdfs.samplePdf()),
+                new Entry("prilohy/foto 1.jpg", ConversionTestContainers.jpeg(16, 16, false)))));
+
+        assertEquals(1, dataObject(pdf, "Zmluva o dielo č. 1.pdf").getAsJsonArray("coveredBy").size(), pdf.toString());
+        assertEquals(1, dataObject(pdf, "prilohy/foto 1.jpg").getAsJsonArray("coveredBy").size(), pdf.toString());
+    }
+
+    @Test
+    void imageBuildersMakeWhatTheyPromise() throws Exception {
+        var png = ConversionTestContainers.png(4, 3, true);
+        assertEquals(16, png[24], "IHDR bit depth");
+        var jpeg = ConversionTestContainers.jpeg(8, 8, true);
+        var components = -1;
+        for (var index = 2; index + 9 < jpeg.length; ) {
+            if ((jpeg[index] & 0xFF) != 0xFF) break;
+            var marker = jpeg[index + 1] & 0xFF;
+            var length = ((jpeg[index + 2] & 0xFF) << 8) | (jpeg[index + 3] & 0xFF);
+            if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
+                components = jpeg[index + 9] & 0xFF;
+                break;
+            }
+            index += 2 + length;
+        }
+        assertEquals(4, components);
     }
 
     @Test

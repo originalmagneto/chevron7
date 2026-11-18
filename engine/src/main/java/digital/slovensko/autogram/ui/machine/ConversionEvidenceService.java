@@ -25,6 +25,7 @@ import org.w3c.dom.Element;
 
 import javax.imageio.ImageIO;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.TransformerFactory;
@@ -311,7 +312,8 @@ public final class ConversionEvidenceService {
                 onlyPdf = entry.bytes();
             }
         }
-        var facts = onlyPdf != null && entries.size() == 1 ? PdfConversionFacts.read(onlyPdf) : new JsonObject();
+        var onlyPdfFacts = onlyPdf != null && entries.size() == 1 ? PdfConversionFacts.read(onlyPdf) : null;
+        var facts = onlyPdfFacts != null ? onlyPdfFacts.deepCopy() : new JsonObject();
         facts.addProperty("asicDataObjectCount", entries.size());
         if (onlyPdf != null && entries.size() == 1) {
             facts.addProperty("asicDataObjectName", entries.getFirst().name());
@@ -325,7 +327,9 @@ public final class ConversionEvidenceService {
         var coverage = signatureCoverage(diagnostic);
         var dataObjects = new JsonArray();
         for (var entry : entries) {
-            dataObjects.add(dataObjectFacts(entry, coverage.getOrDefault(entry.name(), List.of())));
+            // The only PDF's facts are reused, so veraPDF does not run twice on the same bytes.
+            var known = onlyPdfFacts != null && kindOf(entry.bytes()).equals("pdf") ? onlyPdfFacts : null;
+            dataObjects.add(dataObjectFacts(entry, coverage.getOrDefault(entry.name(), List.of()), known));
         }
         facts.add("dataObjects", dataObjects);
         return facts;
@@ -353,7 +357,7 @@ public final class ConversionEvidenceService {
 
     /// One data object: name, size, hash and the signatures covering it, plus what its kind,
     /// read from its bytes, tells: PDF facts and page count, or image size and resolution.
-    static JsonObject dataObjectFacts(ContainerEntry entry, List<String> coveredBy) {
+    static JsonObject dataObjectFacts(ContainerEntry entry, List<String> coveredBy, JsonObject knownPdfFacts) {
         var bytes = entry.bytes();
         var facts = new JsonObject();
         facts.addProperty("name", entry.name());
@@ -370,7 +374,7 @@ public final class ConversionEvidenceService {
         }
         switch (kind) {
             case "pdf" -> {
-                var pdf = PdfConversionFacts.read(bytes);
+                var pdf = knownPdfFacts != null ? knownPdfFacts : PdfConversionFacts.read(bytes);
                 if (pdf.has("readable") && !pdf.get("readable").getAsBoolean()) {
                     facts.addProperty("kind", "other");
                     facts.addProperty("problem", "UNREADABLE");
@@ -406,8 +410,7 @@ public final class ConversionEvidenceService {
     /// Adds `widthPx`, `heightPx` and, when the file states a resolution, `dpiX` and `dpiY`.
     /// False when no image reader can read the header.
     private static boolean addImageFacts(JsonObject facts, byte[] bytes) {
-        try (var input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
-            if (input == null) return false;
+        try (var input = new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes))) {
             var readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext()) return false;
             var reader = readers.next();

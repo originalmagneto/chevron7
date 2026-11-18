@@ -104,7 +104,8 @@ public final class ConversionTestContainers {
         return output.toByteArray();
     }
 
-    /// A JPEG of the given size, RGB or (four components, Adobe marker) CMYK.
+    /// A JPEG of the given size, RGB (JFIF) or CMYK: four components, written by ImageIO from a
+    /// four-band raster without a JFIF or Adobe APP14 marker.
     public static byte[] jpeg(int width, int height, boolean cmyk) throws IOException {
         var writer = ImageIO.getImageWritersByFormatName("jpeg").next();
         var output = new ByteArrayOutputStream();
