@@ -57,7 +57,7 @@ public final class ConversionTestContainers {
     }
 
     /// One XAdES Baseline B signature over every entry with an AllDataObjectsTimeStamp from
-    /// `authority` in its signed properties (the content timestamp Chevron7 adds under QTS).
+    /// `authority` in its signed properties (the content timestamp the app adds under QTS).
     public static byte[] xadesAsiceWithContentTimestamp(List<Entry> entries,
             eu.europa.esig.dss.spi.x509.tsp.TSPSource authority) throws Exception {
         return signed(entries, new Date(), authority, null);

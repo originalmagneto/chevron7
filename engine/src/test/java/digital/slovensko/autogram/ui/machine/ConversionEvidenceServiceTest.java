@@ -652,7 +652,7 @@ class ConversionEvidenceServiceTest {
         assertEquals(timestamped.length, innerTimestamps.get(0).getAsJsonObject().get("coveredRevisionLength").getAsLong());
     }
 
-    /// Chevron7's own PAdES content timestamp: a document timestamp revision before the only
+    /// The app's own PAdES content timestamp: a document timestamp revision before the only
     /// PAdES signature. It is listed with the revision it covers and is none of the signature's
     /// own timestamps (DSS lists only those produced after the signature).
     @Test
