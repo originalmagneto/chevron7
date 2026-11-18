@@ -99,6 +99,12 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var validationEvidencePath: String?
     /// E→E: who produced that evidence, e.g. "Chevron7 (DSS 6.4)" or a qualified service's name.
     public var validationEvidenceSource: String?
+    /// What the client received; nil for rows written before the one-PDF output (a container).
+    public var clientOutput: AppSettings.ZakoClientOutput?
+    /// One-PDF output: the byte length of the unchanged first revision, the unsigned content
+    /// PDF/A (2b) before the clause revision was appended, whose SHA-256 is the fingerprint;
+    /// nil for any other row.
+    public var revisionOneLength: Int?
 
     public var evidenceURI: String? {
         guard let evidenceNumber, !evidenceNumber.isEmpty else { return nil }
@@ -159,7 +165,9 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
                  submissionMessageID: String? = nil,
                  ezzkResultCode: Int? = nil,
                  ezzkResultDescription: String? = nil,
-                 lastLookupAt: Date? = nil) {
+                 lastLookupAt: Date? = nil,
+                 clientOutput: AppSettings.ZakoClientOutput? = nil,
+                 revisionOneLength: Int? = nil) {
         self.id = id
         self.createdAt = createdAt
         self.updatedAt = createdAt
@@ -187,6 +195,8 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
         self.ezzkResultCode = ezzkResultCode
         self.ezzkResultDescription = ezzkResultDescription
         self.lastLookupAt = lastLookupAt
+        self.clientOutput = clientOutput
+        self.revisionOneLength = revisionOneLength
     }
 }
 

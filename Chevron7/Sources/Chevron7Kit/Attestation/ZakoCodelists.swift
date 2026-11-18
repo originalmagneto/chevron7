@@ -101,6 +101,11 @@ public enum ZakoCodelists {
     public static let record12NewDocumentFormatCode = "https://metais.vicepremier.gov.sk/set/codelist/CL009009"
     /// CL009009 item 2 (1 PDF/A-1, 2 PDF/A-2, 3 PDF/A-3, 4 PNG).
     public static let record12PDFA2Item = ZakoCodelistItem(code: "2", skName: "PDF/A-2")
+    /// The format text of the one-PDF output: the clause's `NewDocumentFormatOther`, record 1.0's
+    /// format and the E→E forms.
+    public static let pdfa3FormatName = "PDF/A-3"
+    /// CL009009 item 3, PDF/A-3 (the one-PDF output).
+    public static let record12PDFA3Item = ZakoCodelistItem(code: "3", skName: "PDF/A-3")
     /// CL009005, "Hašovacia funkcia".
     public static let record12FingerprintMethodCode = "https://metais.vicepremier.gov.sk/set/codelist/CL009005"
     public static let record12SHA256Item = ZakoCodelistItem(code: "2.16.840.1.101.3.4.2.1", skName: "sha-256")

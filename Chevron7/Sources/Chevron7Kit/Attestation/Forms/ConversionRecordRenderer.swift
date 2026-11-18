@@ -33,7 +33,7 @@ public struct ConversionRecordRenderer: Sendable {
         }
         x += "</OriginalDocumentInfo><NewDocumentInfo>"
         x += element("NewDocumentName", m.newDocumentName)
-        x += element("NewDocumentFormat", m.newDocumentFormat.skName)
+        x += element("NewDocumentFormat", m.deliversPDFA3 ? ZakoCodelists.pdfa3FormatName : m.newDocumentFormat.skName)
         x += element("ElectronicFingerprintValue", m.fingerprintBase64)
         x += element("ElectronicFingerprintCalculationMethod", m.fingerprintMethod.code)
         x += "</NewDocumentInfo>"

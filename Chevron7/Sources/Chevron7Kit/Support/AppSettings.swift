@@ -97,6 +97,14 @@ public struct AppSettings: Codable, Sendable {
         case combined
     }
 
+    /// What the client receives after a guaranteed conversion.
+    public enum ZakoClientOutput: String, Codable, CaseIterable, Sendable {
+        /// The PDF/A and the clause as two data objects of one ASiC-E.
+        case asicContainer
+        /// One PDF/A-3 carrying the clause as an attachment.
+        case singlePDF
+    }
+
     public var aiMode: AIMode
     public var aiPrompt: String?
     public var omlxURL: String
@@ -146,6 +154,8 @@ public struct AppSettings: Codable, Sendable {
     /// Runs ZaKo in the order and with the record form of 1. 1. 2027 before that date, in Demo
     /// and Testovacia evidencia only (`ZakoRegime.resolve`); production ignores it.
     public var zakoRecordFirstPreview: Bool
+    /// The form of the client's output after a guaranteed conversion (container by default).
+    public var zakoClientOutput: ZakoClientOutput
     /// Qualified validation services the advocate contracted (vyhláška 70/2021 § 3 ods. 4);
     /// an E→E conversion in Ostrá evidencia needs a sealed report from one of them.
     public var qualifiedValidationServices: [QualifiedValidationService] = []
@@ -182,6 +192,7 @@ public struct AppSettings: Codable, Sendable {
         case webSigningSavesLocally, webSigningOutputPath, webSigningRetentionDays
         case batchASiCPackaging
         case zakoRecordFirstPreview
+        case zakoClientOutput
         case qualifiedValidationServices
     }
 
@@ -216,7 +227,8 @@ public struct AppSettings: Codable, Sendable {
                 webSigningOutputPath: String = "",
                 webSigningRetentionDays: Int = 0,
                 batchASiCPackaging: BatchASiCPackaging = .perDocument,
-                zakoRecordFirstPreview: Bool = false) {
+                zakoRecordFirstPreview: Bool = false,
+                zakoClientOutput: ZakoClientOutput = .asicContainer) {
         self.aiMode = aiMode
         self.aiPrompt = aiPrompt
         self.omlxURL = omlxURL
@@ -249,6 +261,7 @@ public struct AppSettings: Codable, Sendable {
         self.webSigningRetentionDays = webSigningRetentionDays
         self.batchASiCPackaging = batchASiCPackaging
         self.zakoRecordFirstPreview = zakoRecordFirstPreview
+        self.zakoClientOutput = zakoClientOutput
     }
 
     public init(from decoder: Decoder) throws {
@@ -308,6 +321,7 @@ public struct AppSettings: Codable, Sendable {
         self.batchASiCPackaging = (try? container.decodeIfPresent(
             BatchASiCPackaging.self, forKey: .batchASiCPackaging)) ?? .perDocument
         self.zakoRecordFirstPreview = try container.decodeIfPresent(Bool.self, forKey: .zakoRecordFirstPreview) ?? false
+        self.zakoClientOutput = (try? container.decodeIfPresent(ZakoClientOutput.self, forKey: .zakoClientOutput)) ?? .asicContainer
         self.qualifiedValidationServices = (try? container.decodeIfPresent(
             [QualifiedValidationService].self, forKey: .qualifiedValidationServices)) ?? []
     }
@@ -346,6 +360,7 @@ public struct AppSettings: Codable, Sendable {
         try container.encode(webSigningRetentionDays, forKey: .webSigningRetentionDays)
         try container.encode(batchASiCPackaging, forKey: .batchASiCPackaging)
         try container.encode(zakoRecordFirstPreview, forKey: .zakoRecordFirstPreview)
+        try container.encode(zakoClientOutput, forKey: .zakoClientOutput)
         try container.encode(qualifiedValidationServices, forKey: .qualifiedValidationServices)
     }
 

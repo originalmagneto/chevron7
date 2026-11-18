@@ -31,6 +31,29 @@ struct RecordFirstPending: Sendable {
     let tsaURL: String?
     /// The form as it was signed into the record: the clause must say the same.
     let attestation: AttestationData
+    /// The client output chosen when the conversion started; a resume never reads the setting.
+    let clientOutput: AppSettings.ZakoClientOutput
+    /// One PDF: the clause pages and XDC rendered and checked before the record was signed.
+    let appendedClause: AppendedClause?
+    /// One PDF: the delivered file's name, fixed before the clause and the record named it.
+    let fixedTarget: URL?
+    /// The client signature's authorities: the record's for the container, the PAdES order
+    /// (BOSA first) for one PDF.
+    let clientTimestampServers: [String]?
+    let clientTSAURL: String?
+}
+
+/// The client signature of a record-first conversion failed after EZZK processed the record:
+/// the record stays there and the conversion is finished with "Dokončiť konverziu".
+struct RecordFirstClientSignatureError: LocalizedError, Equatable {
+    let detail: String
+
+    var errorDescription: String? {
+        let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentence = detail.isEmpty || detail.hasSuffix(".") ? detail : detail + "."
+        return (sentence.isEmpty ? "" : sentence + " ")
+            + "Záznam o konverzii zostáva v EZZK. Kliknite znova na Dokončiť konverziu, alebo začnite novú konverziu."
+    }
 }
 
 extension ZakoSessionStore {
@@ -39,6 +62,8 @@ extension ZakoSessionStore {
     static let recordFirstFormChangedMessage = "Údaje konverzie sa zmenili po podpise záznamu o konverzii. Doložka musí zodpovedať podpísanému záznamu: vráťte zmeny alebo začnite konverziu znova."
     static let recordFirstWaitStoppedMessage = "Čakanie na EZZK je zastavené. Záznam je odoslaný a Chevron7 ho overuje aj na pozadí. Keď ho EZZK spracuje, kliknite znova na Autorizovať konverziu a doložka sa podpíše."
     static let recordFirstTimedOutMessage = "EZZK záznam zatiaľ nespracovalo. Chevron7 ho overuje aj na pozadí; neskôr kliknite znova na Autorizovať konverziu a konverzia sa dokončí."
+    static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Dokončiť konverziu a dokument sa podpíše znova."
+    static let recordFirstSinglePDFIncompleteMessage = "Uložená konverzia nemá pripravenú doložku pre jeden PDF, preto ju nemožno dokončiť. Začnite konverziu znova."
     static let recordFirstMissingRowMessage = "Záznam tejto konverzie sa v Registri konverzií nenašiel, preto ju nemožno dokončiť. Začnite konverziu znova."
 
     static func recordFirstRejectedMessage(code: Int?, description: String?) -> String {
@@ -90,7 +115,10 @@ extension ZakoSessionStore {
             formPack: FormPackStamp(pack: formPack),
             securityReview: securityReview,
             ezzkMode: pending.mode,
-            evidenceNumberAllocatedAt: pending.attestation.evidenceNumberAllocatedAt)
+            evidenceNumberAllocatedAt: pending.attestation.evidenceNumberAllocatedAt,
+            clientOutput: pending.clientOutput,
+            // Revision 1 of the one PDF is the fingerprinted PDF/A: a reader cuts it here.
+            revisionOneLength: pending.clientOutput == .singlePDF ? pending.finalPDF.count : nil)
         do {
             // Held from the first write until the send, so the periodic check cannot send it twice.
             let held = settingsStore.statusChecker.hold(record.id)
@@ -155,7 +183,20 @@ extension ZakoSessionStore {
             pending.stage = .signingClientContainer
             recordFirstPending = pending
         }
-        try await signClientContainer(pending)
+        do {
+            try await signClientContainer(pending)
+        } catch let error as SigningError where Self.recordFirstClientMessagesSayHowToGoOn.contains(error) {
+            throw error
+        } catch {
+            // EZZK holds the processed record: the message says so and how to finish.
+            throw RecordFirstClientSignatureError(detail: error.localizedDescription)
+        }
+    }
+
+    /// Client signature failures whose own message already says what happens next.
+    private static var recordFirstClientMessagesSayHowToGoOn: [SigningError] {
+        [.signingFailed(recordFirstMissingRowMessage), .signingFailed(recordFirstSinglePDFIncompleteMessage),
+         .signingFailed(recordFirstSinglePDFPrefixChangedMessage)]
     }
 
     /// Polls the row until EZZK reports it processed. Returns false when the wait ended
@@ -243,32 +284,66 @@ extension ZakoSessionStore {
         let held = settingsStore.statusChecker.hold(pending.recordID)
         defer { if held { settingsStore.statusChecker.release(pending.recordID) } }
         analysisProgressText = "Autorizujem kvalifikovaným podpisom…"
-        let signed = try await middlewareInput.during(asksEIDForBOK) {
-            try await signingProvider.sign(SigningRequest(
-                pdfData: pending.finalPDF,
-                identityID: identityID,
-                includeTimestamp: pending.stampsSignatures,
-                tsaURL: pending.tsaURL,
-                pin: signingPIN.isEmpty ? nil : signingPIN,
-                extraFiles: pending.containerFiles,
-                filename: pending.containerDocumentName,
-                signsExtraFilesAsDataObjects: true,
-                timestampServers: pending.timestampServers))
-        }
-        guard let asic = signed.asicData else {
-            throw SigningError.signingFailed("Podpis doložky a dokumentu nevrátil kontajner ASiC-E.")
-        }
-        let containerCheck = ASiCEContainerVerifier().verify(asic)
-        guard containerCheck.isValid else {
-            throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
-        }
+        let signed: SignedConversionResult
+        let deliveredTarget: URL
+        if pending.clientOutput == .singlePDF {
+            // Never the container instead: the record already names the one PDF.
+            guard let appendedClause = pending.appendedClause, let fixedTarget = pending.fixedTarget else {
+                throw SigningError.signingFailed(Self.recordFirstSinglePDFIncompleteMessage)
+            }
+            // A resume may run with another signer than the one the conversion started with.
+            guard signingProvider.supportsAppendedClause else {
+                throw SigningError.signingFailed(ZakoSinglePDFDelivery.engineRefusal)
+            }
+            // The engine appends the stored clause to the PDF/A and signs the whole as PAdES.
+            signed = try await middlewareInput.during(asksEIDForBOK) {
+                try await signingProvider.sign(SigningRequest(
+                    pdfData: pending.finalPDF,
+                    identityID: identityID,
+                    includeTimestamp: pending.stampsSignatures,
+                    tsaURL: pending.clientTSAURL,
+                    outputFormat: .embeddedPAdES,
+                    pin: signingPIN.isEmpty ? nil : signingPIN,
+                    filename: pending.containerDocumentName,
+                    timestampServers: pending.clientTimestampServers,
+                    appendedClause: appendedClause))
+            }
+            guard Self.singlePDFKeepsSource(signed, source: pending.finalPDF) else {
+                throw SigningError.signingFailed(Self.recordFirstSinglePDFPrefixChangedMessage)
+            }
+            analysisProgressText = "Ukladám a zapisujem do evidencie…"
+            try FileManager.default.createDirectory(at: pending.directory, withIntermediateDirectories: true)
+            // The record names the fixed file; should a file have taken it meanwhile, the PDF goes
+            // beside it under a unique name and never replaces it.
+            deliveredTarget = try Self.writeWithoutOverwriting(signed.pdfData, preferred: fixedTarget)
+        } else {
+            signed = try await middlewareInput.during(asksEIDForBOK) {
+                try await signingProvider.sign(SigningRequest(
+                    pdfData: pending.finalPDF,
+                    identityID: identityID,
+                    includeTimestamp: pending.stampsSignatures,
+                    tsaURL: pending.clientTSAURL,
+                    pin: signingPIN.isEmpty ? nil : signingPIN,
+                    extraFiles: pending.containerFiles,
+                    filename: pending.containerDocumentName,
+                    signsExtraFilesAsDataObjects: true,
+                    timestampServers: pending.clientTimestampServers))
+            }
+            guard let asic = signed.asicData else {
+                throw SigningError.signingFailed("Podpis doložky a dokumentu nevrátil kontajner ASiC-E.")
+            }
+            let containerCheck = ASiCEContainerVerifier().verify(asic)
+            guard containerCheck.isValid else {
+                throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
+            }
 
-        analysisProgressText = "Ukladám a zapisujem do evidencie…"
-        try FileManager.default.createDirectory(at: pending.directory, withIntermediateDirectories: true)
-        let deliveredTarget = ConversionOutputNaming.uniqueURL(
-            in: pending.directory,
-            fileName: ConversionOutputNaming.asicFileName(pdfFileName: pending.containerDocumentName))
-        try asic.write(to: deliveredTarget, options: [.atomic])
+            analysisProgressText = "Ukladám a zapisujem do evidencie…"
+            try FileManager.default.createDirectory(at: pending.directory, withIntermediateDirectories: true)
+            deliveredTarget = ConversionOutputNaming.uniqueURL(
+                in: pending.directory,
+                fileName: ConversionOutputNaming.asicFileName(pdfFileName: pending.containerDocumentName))
+            try asic.write(to: deliveredTarget, options: [.atomic])
+        }
         outputDirectory = pending.directory
 
         if var row = evidenceStore.record(id: pending.recordID) {

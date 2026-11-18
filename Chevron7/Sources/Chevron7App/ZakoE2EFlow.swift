@@ -16,8 +16,10 @@ enum E2EProductionPolicy {
 
 /// Guaranteed conversion of an electronic document to a new electronic document (E→E,
 /// § 35 ods. 1 písm. c) and § 36 ods. 4 zákona č. 305/2013 Z. z.). The client's signatures are
-/// verified first, the PDF stays byte for byte when it is PDF/A without attachments (else a new
-/// PDF/A-2b), and the clause and record follow the official E→E forms. Signing, the register
+/// verified first, the PDF stays byte for byte when it is PDF/A without attachments and the
+/// output is the ASiC-E container (else a new PDF/A-2b; the one-PDF output always converts,
+/// because pages appended after the client's signatures would leave them changed after
+/// signing), and the clause and record follow the official E→E forms. Signing, the register
 /// and EZZK are the P→E path. Spec: `docs/superpowers/specs/2026-10-16-zako-e2e-design.md`.
 extension ZakoSessionStore {
     static let e2eMobileMessage = "Zaručenú konverziu elektronického dokumentu autorizujte kartou s mandátnym certifikátom."
@@ -165,6 +167,16 @@ extension ZakoSessionStore {
             lastError = E2EProductionPolicy.refusalMessage
             return
         }
+        // The client output is read once: the whole conversion delivers what was chosen here.
+        let deliversSinglePDF = settings.zakoClientOutput == .singlePDF
+        // One PDF needs the engine and a card and is not yet run in Ostrá evidencia: refused
+        // before anything is converted or a number is allocated.
+        if deliversSinglePDF,
+           let refusal = ZakoSinglePDFDelivery.refusal(mode: ezzkMode, viaMobile: viaMobile,
+                                                       provider: signingProvider) {
+            lastError = refusal
+            return
+        }
         guard let original = electronicOriginal, canContinueFromVerification else {
             lastError = e2eNeedsQualifiedReport && qualifiedReport == nil
                 ? Self.e2eNeedsQualifiedValidationMessage
@@ -182,12 +194,18 @@ extension ZakoSessionStore {
         }
         // § 36 ods. 4 písm. c): the new document, made before an evidence number is allocated so
         // a failed conversion never costs one. A PDF/A without attachments stays byte for byte
-        // with the client's signatures; anything else becomes a new PDF/A-2b.
-        let newDocument: Data
+        // with the client's signatures; anything else becomes a new PDF/A-2b. One PDF always
+        // converts: the clause pages and attachment appended after the client's signatures would
+        // leave them reported as changed after signing (spec 2026-11-17, 5.4).
+        let keepsOriginal: Bool
         switch original.plan {
-        case .keep:
+        case .keep: keepsOriginal = !deliversSinglePDF
+        case .convert: keepsOriginal = false
+        }
+        let newDocument: Data
+        if keepsOriginal {
             newDocument = original.pdfData
-        case .convert:
+        } else {
             analysisProgressText = "Konvertujem do PDF/A…"
             do {
                 newDocument = try pdfaFromSignedRunner.convert(original.pdfData, title: attestation.newDocumentName,
@@ -201,13 +219,29 @@ extension ZakoSessionStore {
                 return
             }
         }
-        let containerDocumentName = ConversionOutputNaming.containerDocumentName(
+        let directory = ConversionOutputNaming.outputDirectory(
+            sourceURL: sourceURL,
+            preferredDirectory: outputDirectoryOverride,
+            fallback: settingsStore.outputDirectory)
+        var containerDocumentName = ConversionOutputNaming.containerDocumentName(
             newDocumentName: attestation.newDocumentName,
             fallback: attestation.originalDocumentName)
+        // One PDF: the delivered file's name is fixed before any clause names it, so clause,
+        // record and file agree; a name already taken in the folder (the client's own PDF
+        // usually) is never reused.
+        let singlePDFTarget: URL?
+        if deliversSinglePDF {
+            let target = ZakoSinglePDFDelivery.fixedTarget(in: directory, containerDocumentName: containerDocumentName)
+            containerDocumentName = target.lastPathComponent
+            singlePDFTarget = target
+        } else {
+            singlePDFTarget = nil
+        }
         // Both forms are rendered and checked against the official schemas with a placeholder
         // number before EZZK is asked for a real one, so a form error never costs a number.
         if let issue = dryRunE2EForms(original: original, newDocument: newDocument,
-                                      containerDocumentName: containerDocumentName) {
+                                      containerDocumentName: containerDocumentName,
+                                      deliveredAsSinglePDF: deliversSinglePDF) {
             lastError = issue.advice
             if let detail = issue.technicalDetail {
                 Self.e2eLogger.error("E→E form dry run failed: \(detail, privacy: .public)")
@@ -248,7 +282,8 @@ extension ZakoSessionStore {
             let model = try E2EFormModel.make(original: original, attestation: attestation,
                                               newDocumentName: containerDocumentName, newDocumentData: newDocument,
                                               usedDevice: attestation.usedDeviceDescription,
-                                              qualifiedReport: qualifiedReport?.data)
+                                              qualifiedReport: qualifiedReport?.data,
+                                              deliveredAsSinglePDF: deliversSinglePDF)
             let builder = E2EDeliveryBuilder()
             let clause: E2EDeliveryBuilder.Clause
             let recordDelivery: ZakoRecordDelivery
@@ -260,6 +295,21 @@ extension ZakoSessionStore {
                 let issue = E2EFormIssue.from(error)
                 lastError = issue.advice
                 return
+            }
+
+            // One PDF: the clause's readable pages, rendered from the very clause XML that is
+            // attached, before anything is signed.
+            let appendedClause: AppendedClause?
+            if deliversSinglePDF {
+                analysisProgressText = "Pripravujem strany osvedčovacej doložky…"
+                appendedClause = try await ZakoSinglePDFDelivery.appendedClause(
+                    clauseXML: Data(clause.xml.utf8),
+                    clauseXDCF: clause.xdcf,
+                    clauseFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber),
+                    form: .clauseE2E_1_3,
+                    renderer: clausePageRenderer)
+            } else {
+                appendedClause = nil
             }
 
             analysisProgressText = "Autorizujem kvalifikovaným podpisom…"
@@ -277,36 +327,59 @@ extension ZakoSessionStore {
                 return
             }
             guard let identityID = selectedIdentityID else { throw SigningError.identityUnavailable }
+            // The record is XAdES; the one PDF is PAdES and keeps the PAdES order (BOSA first).
             let timestamps = try zakoTimestampChoice()
 
-            let directory = ConversionOutputNaming.outputDirectory(
-                sourceURL: sourceURL,
-                preferredDirectory: outputDirectoryOverride,
-                fallback: settingsStore.outputDirectory)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let containerFiles = ASiCEPackager().zakoContainer(
-                pdfData: newDocument,
-                pdfFileName: containerDocumentName,
-                dolozkaXML: clause.xdcf,
-                dolozkaFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber))
-            let signed = try await middlewareInput.during(asksEIDForBOK) {
-                try await signingProvider.sign(SigningRequest(
+            let signed: SignedConversionResult
+            let asic: Data?
+            if let appendedClause {
+                // The engine appends the clause to the PDF/A and signs the whole as PAdES.
+                let clientTimestamps = try zakoTimestampChoice(signsPAdES: true)
+                signed = try await middlewareInput.during(asksEIDForBOK) {
+                    try await signingProvider.sign(SigningRequest(
+                        pdfData: newDocument,
+                        identityID: identityID,
+                        includeTimestamp: clientTimestamps.stamps,
+                        tsaURL: clientTimestamps.tsaURL,
+                        outputFormat: .embeddedPAdES,
+                        pin: signingPIN.isEmpty ? nil : signingPIN,
+                        filename: containerDocumentName,
+                        timestampServers: clientTimestamps.servers,
+                        appendedClause: appendedClause))
+                }
+                // The clause fingerprints the new document, so the signed file must begin with
+                // exactly those bytes (revision 1) and carry the clause and signature after them.
+                guard Self.singlePDFKeepsSource(signed, source: newDocument) else {
+                    throw SigningError.signingFailed(Self.singlePDFPrefixChangedMessage)
+                }
+                asic = nil
+            } else {
+                let containerFiles = ASiCEPackager().zakoContainer(
                     pdfData: newDocument,
-                    identityID: identityID,
-                    includeTimestamp: timestamps.stamps,
-                    tsaURL: timestamps.tsaURL,
-                    pin: signingPIN.isEmpty ? nil : signingPIN,
-                    extraFiles: containerFiles,
-                    filename: containerDocumentName,
-                    signsExtraFilesAsDataObjects: true,
-                    timestampServers: timestamps.servers))
-            }
-            guard let asic = signed.asicData else {
-                throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
-            }
-            let containerCheck = ASiCEContainerVerifier().verify(asic)
-            guard containerCheck.isValid else {
-                throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
+                    pdfFileName: containerDocumentName,
+                    dolozkaXML: clause.xdcf,
+                    dolozkaFileName: ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber))
+                signed = try await middlewareInput.during(asksEIDForBOK) {
+                    try await signingProvider.sign(SigningRequest(
+                        pdfData: newDocument,
+                        identityID: identityID,
+                        includeTimestamp: timestamps.stamps,
+                        tsaURL: timestamps.tsaURL,
+                        pin: signingPIN.isEmpty ? nil : signingPIN,
+                        extraFiles: containerFiles,
+                        filename: containerDocumentName,
+                        signsExtraFilesAsDataObjects: true,
+                        timestampServers: timestamps.servers))
+                }
+                guard let container = signed.asicData else {
+                    throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
+                }
+                let containerCheck = ASiCEContainerVerifier().verify(container)
+                guard containerCheck.isValid else {
+                    throw ComplianceValidationError(domain: "ASiC-E kontajner", issues: containerCheck.issues)
+                }
+                asic = container
             }
             if let number = attestation.evidenceNumber {
                 evidenceNumberPool.remove(number)
@@ -314,10 +387,19 @@ extension ZakoSessionStore {
             saveProfileFromForm()
 
             analysisProgressText = "Ukladám a zapisujem do evidencie…"
-            let deliveredTarget = ConversionOutputNaming.uniqueURL(
-                in: directory,
-                fileName: ConversionOutputNaming.asicFileName(pdfFileName: containerDocumentName))
-            try asic.write(to: deliveredTarget, options: [.atomic])
+            let deliveredTarget: URL
+            if let singlePDFTarget {
+                // The name was fixed before the clause; should a file have taken it meanwhile,
+                // the PDF goes beside it under a unique name and never replaces it.
+                deliveredTarget = try Self.writeWithoutOverwriting(signed.pdfData, preferred: singlePDFTarget)
+            } else if let asic {
+                deliveredTarget = ConversionOutputNaming.uniqueURL(
+                    in: directory,
+                    fileName: ConversionOutputNaming.asicFileName(pdfFileName: containerDocumentName))
+                try asic.write(to: deliveredTarget, options: [.atomic])
+            } else {
+                throw SigningError.signingFailed("Podpis nevrátil kontajner ASiC-E.")
+            }
             outputDirectory = directory
 
             var record = EvidenceRecord(
@@ -337,7 +419,10 @@ extension ZakoSessionStore {
                 pdfFileName: containerDocumentName,
                 deliveredFileName: deliveredTarget.lastPathComponent,
                 ezzkMode: attestation.evidenceNumberMode ?? ezzkMode,
-                evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt)
+                evidenceNumberAllocatedAt: attestation.evidenceNumberAllocatedAt,
+                clientOutput: deliversSinglePDF ? .singlePDF : .asicContainer,
+                // Revision 1 of the one PDF is the fingerprinted new document: a reader cuts it here.
+                revisionOneLength: deliversSinglePDF ? newDocument.count : nil)
             if let qualifiedReport {
                 record.validationEvidencePath = try evidenceStore.storeValidationEvidence(
                     qualifiedReport.data, fileExtension: qualifiedReport.fileExtension, for: record.id)
@@ -399,10 +484,21 @@ extension ZakoSessionStore {
     static let rasterOfferMessage = "Prevod do PDF/A nevytvoril platné PDF/A (zvyčajne pre písma, ktoré dokument nevkladá). Môžete použiť rastrový PDF/A: strany sa uložia ako obrázky a text sa nebude dať označiť."
     static let e2eLogger = Logger(subsystem: "app.slovensko.chevron7", category: "ZaKo")
 
+    /// veraPDF's rules behind a refused PDF/A-3b check of the appended clause, paths removed,
+    /// under the ZaKo category (`log show --predicate 'category == "ZaKo"'`). Returns what it logged.
+    @discardableResult
+    static func logPDFACheckFailure(_ lines: [String]) -> [String] {
+        let loggable = EngineDiagnosticText.loggableLines(lines.joined(separator: "\n"))
+        for line in loggable {
+            e2eLogger.error("PDF/A-3b check of the clause failed: \(line, privacy: .public)")
+        }
+        return loggable
+    }
+
     /// The clause and the record rendered and schema-validated with a placeholder number and
     /// the Mac's clock: nil when both pass, else the advice for the advocate.
     func dryRunE2EForms(original: ElectronicOriginal, newDocument: Data,
-                        containerDocumentName: String) -> E2EFormIssue? {
+                        containerDocumentName: String, deliveredAsSinglePDF: Bool = false) -> E2EFormIssue? {
         var draft = attestation
         draft.evidenceNumber = "0000-000000-0"
         draft.conversionExecutionDateTime = Date()
@@ -410,7 +506,8 @@ extension ZakoSessionStore {
             let model = try E2EFormModel.make(original: original, attestation: draft,
                                               newDocumentName: containerDocumentName, newDocumentData: newDocument,
                                               usedDevice: draft.usedDeviceDescription,
-                                              qualifiedReport: qualifiedReport?.data)
+                                              qualifiedReport: qualifiedReport?.data,
+                                              deliveredAsSinglePDF: deliveredAsSinglePDF)
             let builder = E2EDeliveryBuilder()
             _ = try builder.clause(model)
             _ = try builder.record(model)
@@ -421,16 +518,20 @@ extension ZakoSessionStore {
     }
 
     /// The timestamp authorities of a ZaKo signature: in Demo the switch and the chosen
-    /// authority, outside Demo the built-in qualified ones, Sectigo first, BOSA last.
-    func zakoTimestampChoice() throws -> (stamps: Bool, servers: [String]?, tsaURL: String?) {
+    /// authority, outside Demo the built-in qualified ones, Sectigo first and BOSA last for
+    /// XAdES, BOSA first for PAdES (`signsPAdES`, the one PDF).
+    func zakoTimestampChoice(signsPAdES: Bool = false) throws -> (stamps: Bool, servers: [String]?, tsaURL: String?) {
         let stamps = usesQualifiedTimestamp
         if settingsStore.ezzkAccountController.isDemoMode {
             if stamps, settings.selectedTSAURL.trimmingCharacters(in: .whitespaces).isEmpty {
                 throw SigningError.timestampFailed
             }
-            return (stamps, nil, stamps ? settings.timestampAuthority(signsXAdES: true).url : nil)
+            return (stamps, nil, stamps ? settings.timestampAuthority(signsXAdES: !signsPAdES).url : nil)
         }
-        let qualified = TimestampAuthority.zakoQualifiedURLs.map(\.absoluteString)
+        // A PAdES signature (the one PDF) keeps BOSA first, which slovensko.sk sees in PAdES;
+        // XAdES puts Sectigo first because slovensko.sk does not see a BOSA timestamp there.
+        let qualified = (signsPAdES ? TimestampAuthority.zakoPAdESQualifiedURLs
+                                    : TimestampAuthority.zakoQualifiedURLs).map(\.absoluteString)
         guard let first = qualified.first else { throw SigningError.timestampFailed }
         return (stamps, qualified, first)
     }

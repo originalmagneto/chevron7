@@ -84,6 +84,24 @@ final class IntegrationReadServiceTests: XCTestCase {
         } catch { XCTAssertEqual((error as? IntegrationError)?.code, "CURSOR_EXPIRED") }
     }
 
+    /// A one-PDF row says what the client received and how many bytes its fingerprint covers;
+    /// a row from before the one PDF carries both as null.
+    func testRegisterRowCarriesClientOutputAndFirstRevisionLength() {
+        var single = record("single", time: 100)
+        single.clientOutput = .singlePDF
+        single.revisionOneLength = 48213
+        let json = IntegrationReadService.record(single)
+        XCTAssertEqual(json["clientOutput"], .string("singlePDF"))
+        XCTAssertEqual(json["revisionOneLength"], .number(48213))
+        var container = record("container", time: 100)
+        container.clientOutput = .asicContainer
+        XCTAssertEqual(IntegrationReadService.record(container)["clientOutput"], .string("asicContainer"))
+        XCTAssertEqual(IntegrationReadService.record(container)["revisionOneLength"], .null)
+        let old = IntegrationReadService.record(record("old", time: 100))
+        XCTAssertEqual(old["clientOutput"], .null)
+        XCTAssertEqual(old["revisionOneLength"], .null)
+    }
+
     func testInvalidPaginationAndUnreadableRegisterDoNotLookEmpty() async throws {
         let service = IntegrationReadService(settingsStore: makeSettingsStore())
         for limit in [JSONValue.number(0), .number(101), .number(1.5), .string("25")] {

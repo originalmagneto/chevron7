@@ -80,6 +80,15 @@ extension ZakoSessionStore {
         guard !externalSigningIsBusy() else { return }
         guard !isAuthorizing, cardPrompt == nil else { return }
         lastError = nil
+        // A one PDF that cannot be delivered (Ostrá evidencia, no engine) is refused before the
+        // card, its PIN or its certificates are asked for. A record-first resume is decided by the
+        // output it started with, so a changed setting never stops it here.
+        if recordFirstPending == nil, settings.zakoClientOutput == .singlePDF,
+           let refusal = ZakoSinglePDFDelivery.refusal(mode: settingsStore.ezzkAccountController.mode,
+                                                       viaMobile: false, provider: signingProvider) {
+            lastError = refusal
+            return
+        }
         guard !signingProviderIsDemo else {
             await authorizeAndSign()
             return
@@ -91,6 +100,8 @@ extension ZakoSessionStore {
     /// The authorize button is live before a card is in: the card is a step of the flow.
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
+        if recordFirstPending == nil, settings.zakoClientOutput == .singlePDF,
+           singlePDFProductionRefusal != nil { return false }
         if direction == .electronicToElectronic { return e2eReadyToAuthorize }
         let result = AttestationPreflight.evaluate(
             attestation,

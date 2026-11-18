@@ -19,13 +19,15 @@ public struct ZakoClauseDeliveryBuilder: Sendable {
     }
 
     public func build(finalPDF: Data, attestation: AttestationData, securityElements: [SecurityElement],
-                      originalNonEmptyPageIndices: [Int]?, usedDevice: String) throws -> ZakoClauseDelivery {
+                      originalNonEmptyPageIndices: [Int]?, usedDevice: String,
+                      deliveredAsSinglePDF: Bool = false) throws -> ZakoClauseDelivery {
         let model = try ConversionFormModel.make(
             attestation: attestation,
             securityElements: securityElements,
             newDocumentSHA256Hex: AttestationClauseGenerator.sha256Hex(of: finalPDF),
             originalNonEmptyPageIndices: originalNonEmptyPageIndices,
-            usedDevice: usedDevice)
+            usedDevice: usedDevice,
+            deliveredAsSinglePDF: deliveredAsSinglePDF)
         let xml = ConversionCertificateRenderer().render(model)
         try validator.validate(Data(xml.utf8), against: .clause_1_3)
         return ZakoClauseDelivery(model: model, clauseXML: xml,

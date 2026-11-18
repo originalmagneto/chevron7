@@ -269,6 +269,33 @@ struct AuthorizeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent("Výstup pre klienta") {
+                    Picker("Výstup pre klienta", selection: clientOutputSelection) {
+                        ForEach(AppSettings.ZakoClientOutput.allCases, id: \.self) { output in
+                            Text(UXLabels.clientOutputLabel(output) ?? "").tag(output)
+                                .selectionDisabled(output == .singlePDF && store.singlePDFProductionRefusal != nil)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .disabled(store.isAuthorizing || store.recordFirstPending != nil)
+                }
+                // Ostrá evidencia does not run the one PDF yet: said here, before any card step.
+                if let refusal = store.singlePDFProductionRefusal, store.recordFirstPending == nil {
+                    Label(refusal, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(store.settings.zakoClientOutput == .singlePDF ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if store.settings.zakoClientOutput == .singlePDF {
+                    Text("Jeden PDF, ktorého súčasťou je osvedčovacia doložka ako príloha XML a ako posledné strany (§ 37 ods. 4 zákona č. 305/2013 Z. z., § 2 ods. 3 vyhlášky č. 70/2021 Z. z.). Vhodné napríklad pre Obchodný register, ktorý neprijíma kontajnery s viacerými súbormi.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if store.showsQualifiedTimestampToggle {
                 // With the engine the card always timestamps, so the Demo switch shows on and locked.
                 let timestampLocked = store.signingProvider.alwaysAddsQualifiedTimestamp
@@ -303,6 +330,17 @@ struct AuthorizeView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard(padding: 14)
         .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// The output picker's selection: the one PDF cannot be chosen while Ostrá evidencia refuses
+    /// it, and a selection already on it can always switch back to the container.
+    private var clientOutputSelection: Binding<AppSettings.ZakoClientOutput> {
+        Binding(
+            get: { store.settings.zakoClientOutput },
+            set: { output in
+                if output == .singlePDF, store.singlePDFProductionRefusal != nil { return }
+                store.settingsStore.settings.zakoClientOutput = output
+            })
     }
 
     private var authorizationCardHint: String {
@@ -354,8 +392,11 @@ struct AuthorizeView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil)
-            .help("Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
+            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil
+                || store.mobileRefusalForClientOutput != nil)
+            .help(store.mobileRefusalForClientOutput
+                  ?? "Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
+            .accessibilityHint(store.mobileRefusalForClientOutput ?? "")
         }
     }
 }
@@ -443,6 +484,13 @@ struct DoneView: View {
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    if let renamed = ZakoSinglePDFDelivery.renamedNotice(
+                        for: store.evidenceStore.record(id: store.currentRecordID)) {
+                        Label(renamed, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     HStack(spacing: 12) {
                         Button {
@@ -606,7 +654,7 @@ struct DoneView: View {
         }
     }
 
-    /// "Uložiť ako…": a copy of the file the client got (the ASiC-E, or the PDF/A on the
+    /// "Uložiť ako…": a copy of the file the client got (the ASiC-E, the one PDF, or the PDF/A on the
     /// phone route; rows from before the single output name only the PDF/A).
     private func exportAs() {
         exportError = nil

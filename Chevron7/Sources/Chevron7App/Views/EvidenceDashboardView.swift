@@ -729,6 +729,18 @@ struct RecordDetailView: View {
             row("Evidenčné číslo", record.evidenceNumber ?? "nezískané")
             row("Osvedčujúca osoba", record.performingPersonName.isEmpty ? "neurčená" : record.performingPersonName)
             row("Nový dokument", record.newDocumentName)
+            if let output = UXLabels.clientOutputLabel(record.clientOutput) {
+                row("Výstup pre klienta", output)
+            }
+            if let renamed = ZakoSinglePDFDelivery.renamedNotice(for: record) {
+                GridRow {
+                    Text("Uložený súbor").foregroundStyle(.secondary)
+                    Text(renamed)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
             if record.direction == .electronicToElectronic {
                 row("Druh konverzie", "Z elektronickej do elektronickej podoby")
                 row("Overenie podpisov", record.validationEvidenceSource ?? "neuložené")
@@ -746,7 +758,8 @@ struct RecordDetailView: View {
     private func fingerprintRow(_ record: EvidenceRecord) -> some View {
         let short = String(record.fingerprintSHA256Hex.prefix(24)) + "…"
         GridRow {
-            Text("SHA-256 odtlačok")
+            Text(UXLabels.fingerprintLabel(clientOutput: record.clientOutput,
+                                           revisionOneLength: record.revisionOneLength))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 Text(short)

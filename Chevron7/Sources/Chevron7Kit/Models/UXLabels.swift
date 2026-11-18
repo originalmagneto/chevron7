@@ -44,4 +44,21 @@ public enum UXLabels {
         case .late: return "Oneskorený"
         }
     }
+
+    /// The register detail's "Výstup pre klienta"; nil for a row without a recorded output.
+    public static func clientOutputLabel(_ output: AppSettings.ZakoClientOutput?) -> String? {
+        switch output {
+        case .asicContainer: return "Kontajner ASiC-E"
+        case .singlePDF: return "Jeden PDF s doložkou"
+        case nil: return nil
+        }
+    }
+
+    /// The register's fingerprint label. A one-PDF row's fingerprint is the SHA-256 of its first
+    /// revision only (the unsigned content PDF/A), which a reader gets by cutting the delivered
+    /// file after `revisionOneLength` bytes, so the label says so.
+    public static func fingerprintLabel(clientOutput: AppSettings.ZakoClientOutput?, revisionOneLength: Int?) -> String {
+        guard clientOutput == .singlePDF, let revisionOneLength else { return "SHA-256 odtlačok" }
+        return "SHA-256 prvej revízie (prvých \(revisionOneLength) bajtov)"
+    }
 }

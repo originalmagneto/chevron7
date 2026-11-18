@@ -97,6 +97,16 @@ public struct TimestampAuthority: Codable, Hashable, Identifiable, Sendable {
         return xadesQualifiedURLs + lastResort.compactMap { URL(string: $0.url) }
     }
 
+    /// ZaKo's authorities for the one-PDF PAdES signature, in the order tried: BOSA (the PAdES
+    /// default, which slovensko.sk shows), then Sectigo Qualified, then the other qualified built-ins.
+    public static var zakoPAdESQualifiedURLs: [URL] {
+        let qualified = builtIn.filter { $0.isQualified }
+        let ordered = qualified.filter { $0.url == bosaURL }
+            + qualified.filter { $0.url == sectigoQualifiedURL }
+            + qualified.filter { $0.url != bosaURL && $0.url != sectigoQualifiedURL }
+        return ordered.compactMap { URL(string: $0.url) }
+    }
+
     /// Shown under the pickers while BOSA is chosen for (or could reach) an ASiC-E signature.
     public static let xadesSubstitutionNote =
         "Podpis ASiC-E (XAdES) dostane časovú pečiatku od Sectigo: pečiatku BOSA v ASiC-E slovensko.sk nezobrazí. PAdES ostáva na BOSA."

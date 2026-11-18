@@ -68,6 +68,16 @@ public final class MachineRequestValidator {
         if (hasAttachments && (request.eform() != null || !request.signatureLevel().startsWith("XAdES_"))) {
             throw invalidRequest();
         }
+        // The clause is appended to the PDF and signed as one more revision of it: PAdES only, and
+        // nothing that adds a revision or a data object of its own (a content timestamp is a
+        // document timestamp revision before the signature).
+        var appendsClause = request.files().stream().anyMatch(file -> file != null && file.appendClause() != null);
+        if (appendsClause && (request.eform() != null || !request.signatureLevel().startsWith("PAdES_")
+                || request.timestamp() != null && request.timestamp().content()
+                || request.files().stream().anyMatch(file -> file != null && file.appendClause() != null
+                        && (!file.attachments().isEmpty() || file.visibleAppearance() != null)))) {
+            throw invalidRequest();
+        }
         return new ValidatedSignRequest(request, validateFiles(request.files()));
     }
 
@@ -98,7 +108,8 @@ public final class MachineRequestValidator {
                     || !targets.add(normalizeTarget(target))) {
                 throw invalidRequest();
             }
-            validated.add(new ValidatedMachineFile(file, source, target, validateAttachments(source, file.attachments())));
+            validated.add(new ValidatedMachineFile(file, source, target, validateAttachments(source, file.attachments()),
+                    validateAppendClause(file.appendClause())));
         }
         return List.copyOf(validated);
     }
@@ -119,6 +130,17 @@ public final class MachineRequestValidator {
             attachments.add(attachment);
         }
         return List.copyOf(attachments);
+    }
+
+    private static ValidatedClauseAppend validateAppendClause(ClauseAppend clause) {
+        if (clause == null) {
+            return null;
+        }
+        if (isBlank(clause.attachmentName()) || isBlank(clause.attachmentMimeType())) {
+            throw invalidRequest();
+        }
+        return new ValidatedClauseAppend(canonicalSource(clause.pages()), canonicalSource(clause.attachment()),
+                clause.attachmentName(), clause.attachmentMimeType());
     }
 
     private static void requireDataObjectEntry(Path document, Set<String> entryNames) {
@@ -207,8 +229,13 @@ public final class MachineRequestValidator {
 record ValidatedSignRequest(SignRequest request, List<ValidatedMachineFile> files) {
 }
 
-record ValidatedMachineFile(MachineFile file, Path source, Path target, List<Path> attachments) {
+record ValidatedMachineFile(MachineFile file, Path source, Path target, List<Path> attachments,
+        ValidatedClauseAppend appendClause) {
     ValidatedMachineFile(MachineFile file, Path source, Path target) {
-        this(file, source, target, List.of());
+        this(file, source, target, List.of(), null);
     }
+}
+
+/// An appended clause whose pages and attachment are canonical regular files.
+record ValidatedClauseAppend(Path pages, Path attachment, String attachmentName, String attachmentMimeType) {
 }

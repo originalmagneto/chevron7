@@ -253,11 +253,13 @@ struct ZakoVerificationView: View {
             Divider()
             switch original.plan {
             case .keep:
-                Label("Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh.", systemImage: "doc.on.doc")
+                Label(ZakoVerificationPresentation.keepNote(output: store.settings.zakoClientOutput),
+                      systemImage: "doc.on.doc")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             case .convert(let reason):
-                Label("\(reason), preto vznikne nový PDF/A-2b. Podpisy klienta zostanú zapísané v doložke.",
+                Label(ZakoVerificationPresentation.convertNote(reason: reason,
+                                                               output: store.settings.zakoClientOutput),
                       systemImage: "doc.badge.arrow.up")
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
@@ -584,8 +586,10 @@ struct E2EAttestationFormView: View {
 
     private var newDocumentLine: String {
         switch store.electronicOriginal?.plan {
-        case .keep(let format, let other): return "\(other ?? format.skName), nezmenený s podpismi klienta"
-        case .convert: return "nový PDF/A-2b"
+        case .keep(let format, let other):
+            return ZakoVerificationPresentation.keptDocumentLine(formatName: other ?? format.skName,
+                                                                 output: store.settings.zakoClientOutput)
+        case .convert: return ZakoVerificationPresentation.convertedDocumentLine(output: store.settings.zakoClientOutput)
         case .none: return ""
         }
     }
@@ -648,5 +652,28 @@ struct E2EAttestationFormView: View {
                 .font(.system(size: 10, weight: .semibold, design: .serif))
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Wording of the verification screen for the new document. An original that is already a valid
+/// PDF/A is converted with the one-PDF output, because the clause becomes the last pages of a new
+/// PDF/A-3; an original that must be converted becomes a PDF/A-2b, or that PDF/A-3 for the one PDF.
+enum ZakoVerificationPresentation {
+    static func convertNote(reason: String, output: AppSettings.ZakoClientOutput) -> String {
+        "\(reason), preto vznikne \(convertedDocumentLine(output: output)). Podpisy klienta zostanú zapísané v doložke."
+    }
+
+    static func convertedDocumentLine(output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF ? "nový PDF/A-3 s doložkou" : "nový PDF/A-2b"
+    }
+
+    static func keepNote(output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF
+            ? "Pri výstupe ako jeden PDF sa prevedie na nový PDF/A a doložka sa pripojí na koniec."
+            : "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh."
+    }
+
+    static func keptDocumentLine(formatName: String, output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF ? "nový PDF/A-3 s doložkou" : "\(formatName), nezmenený s podpismi klienta"
     }
 }

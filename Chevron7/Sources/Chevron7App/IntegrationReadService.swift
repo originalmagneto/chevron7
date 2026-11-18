@@ -164,6 +164,9 @@ final class IntegrationReadService {
                  "direction": .string(record.direction.rawValue), "conversionTime": date(record.conversionTime),
                  "updatedAt": date(record.updatedAt), "mode": optional(record.ezzkMode?.rawValue),
                  "fingerprintSHA256": .string(record.fingerprintSHA256Hex),
+                 // A one PDF's fingerprint covers its first `revisionOneLength` bytes only.
+                 "clientOutput": optional(record.clientOutput?.rawValue),
+                 "revisionOneLength": record.revisionOneLength.map { .number(Double($0)) } ?? .null,
                  "ezzkResultCode": record.ezzkResultCode.map { .number(Double($0)) } ?? .null])
     }
 

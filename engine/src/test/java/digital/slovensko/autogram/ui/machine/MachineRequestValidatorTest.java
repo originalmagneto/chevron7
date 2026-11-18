@@ -1,5 +1,6 @@
 package digital.slovensko.autogram.ui.machine;
 
+import digital.slovensko.autogram.ui.machine.v2.VisibleSignatureAppearance;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -241,6 +242,72 @@ class MachineRequestValidatorTest {
         assertEquals("TIMESTAMP_REQUIRED", failureCode(timestampNotRequired));
         assertEquals("TSA_REQUIRED", failureCode(unsupportedTsa));
         assertEquals("TSA_REQUIRED", failureCode(mixedTsaList));
+    }
+
+    /// The clause is appended to a PDF and signed in the same revision chain, so only PAdES can carry it.
+    @Test
+    void appendClauseNeedsPades() throws Exception {
+        for (var level : List.of("XAdES_BASELINE_T", "XAdES_BASELINE_B")) {
+            assertInvalid(signRequest(level, List.of(appendClauseFile("doc.pdf", "out-" + level + ".pdf"))));
+        }
+        for (var level : List.of("PAdES_BASELINE_T", "PAdES_BASELINE_B")) {
+            var validated = MachineRequestValidator.validateSign(signRequest(level,
+                    List.of(appendClauseFile("doc.pdf", "out-" + level + ".pdf"))));
+            var clause = validated.files().getFirst().appendClause();
+            assertEquals(temporaryDirectory.toRealPath().resolve("pages.pdf"), clause.pages());
+            assertEquals(temporaryDirectory.toRealPath().resolve("dolozka.xml.xdcf"), clause.attachment());
+            assertEquals("1563-261016-7.xml.xdcf", clause.attachmentName());
+            assertEquals("application/vnd.gov.sk.xmldatacontainer+xml", clause.attachmentMimeType());
+        }
+    }
+
+    @Test
+    void appendClauseRefusesAttachmentsEformOrAppearance() throws Exception {
+        var clause = appendClause();
+        var withAttachments = signRequest("PAdES_BASELINE_T", List.of(new MachineFile("doc", pdf("doc.pdf").toString(),
+                target("out.pdf").toString(), null, List.of(xdcf("a.xml.xdcf").toString()), clause)));
+        var withAppearance = signRequest("PAdES_BASELINE_T", List.of(new MachineFile("doc", pdf("doc.pdf").toString(),
+                target("out.pdf").toString(), new VisibleSignatureAppearance.Snapshot(null, new byte[0]), List.of(),
+                clause)));
+        var withEform = new SignRequest("fake", "123", "1234".toCharArray(), "PAdES_BASELINE_T",
+                new QualifiedTimestampRequest(true, List.of("https://tsa.example.test")),
+                List.of(new MachineFile("doc", pdf("doc.pdf").toString(), target("out.pdf").toString(), null, List.of(),
+                        clause)),
+                new EFormRequest("http://data.gov.sk/def/container/xmldatacontainer+xml/1.1",
+                        null, null, "http://probe.local/form/1.0", null, null, null, null, null,
+                        false, false, null, null));
+        // A content timestamp would add a third revision after the source, which the output check refuses.
+        var withContentTimestamp = new SignRequest("fake", "123", "1234".toCharArray(), "PAdES_BASELINE_T",
+                new QualifiedTimestampRequest(true, List.of("https://tsa.example.test"), null, true),
+                List.of(new MachineFile("doc", pdf("doc.pdf").toString(), target("out.pdf").toString(), null, List.of(),
+                        clause)));
+        var relativePages = signRequest("PAdES_BASELINE_T", List.of(new MachineFile("doc", pdf("doc.pdf").toString(),
+                target("out.pdf").toString(), null, List.of(), new ClauseAppend("pages.pdf", clause.attachment(),
+                        clause.attachmentName(), clause.attachmentMimeType()))));
+        var missingAttachment = signRequest("PAdES_BASELINE_T", List.of(new MachineFile("doc", pdf("doc.pdf").toString(),
+                target("out.pdf").toString(), null, List.of(), new ClauseAppend(clause.pages(),
+                        temporaryDirectory.toRealPath().resolve("missing.xdcf").toString(), clause.attachmentName(),
+                        clause.attachmentMimeType()))));
+        var blankName = signRequest("PAdES_BASELINE_T", List.of(new MachineFile("doc", pdf("doc.pdf").toString(),
+                target("out.pdf").toString(), null, List.of(), new ClauseAppend(clause.pages(), clause.attachment(),
+                        " ", clause.attachmentMimeType()))));
+
+        assertInvalid(withAttachments);
+        assertInvalid(withAppearance);
+        assertInvalid(withEform);
+        assertInvalid(withContentTimestamp);
+        assertInvalid(relativePages);
+        assertInvalid(missingAttachment);
+        assertInvalid(blankName);
+    }
+
+    private MachineFile appendClauseFile(String source, String target) throws IOException {
+        return new MachineFile("doc", pdf(source).toString(), target(target).toString(), null, List.of(), appendClause());
+    }
+
+    private ClauseAppend appendClause() throws IOException {
+        return new ClauseAppend(pdf("pages.pdf").toString(), xdcf("dolozka.xml.xdcf").toString(),
+                "1563-261016-7.xml.xdcf", "application/vnd.gov.sk.xmldatacontainer+xml");
     }
 
     private SignRequest request(Path source, Path target, boolean required, List<String> servers) {

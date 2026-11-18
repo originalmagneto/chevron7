@@ -1356,3 +1356,88 @@ final class EngineBridgeSignerIssuerTests: XCTestCase {
         XCTAssertNil(signed.signerIssuer)
     }
 }
+
+/// ZaKo "one PDF": the engine appends the clause to the PDF/A and signs one PAdES document.
+final class EngineBridgeAppendedClauseTests: XCTestCase {
+    private let clause = AppendedClause(pages: TestPDFBuilder.singlePageWhitePDF(),
+                                        attachment: Data("<XMLDataContainer/>".utf8),
+                                        attachmentName: "260923-X.xml.xdcf")
+
+    private func request(_ output: SigningOutputFormat = .embeddedPAdES,
+                         extraFiles: [ASiCEPackager.Entry] = [],
+                         eform: EFormSigningAttributes? = nil,
+                         stamp: VisualStampSpec? = nil) -> SigningRequest {
+        SigningRequest(pdfData: TestPDFBuilder.singlePageWhitePDF(), identityID: "engine:eid",
+                       includeTimestamp: true, outputFormat: output, extraFiles: extraFiles,
+                       visualStamp: stamp, eform: eform, filename: "dokument.pdf", appendedClause: clause)
+    }
+
+    func testMachineRequestCarriesAppendClause() async throws {
+        let engine = RecordingSigningEngine()
+        let provider = EngineBridgeSigningProvider(engine: engine)
+
+        _ = try await provider.sign(request())
+
+        let captured = try XCTUnwrap(engine.capturedRequest)
+        XCTAssertEqual(captured.outputFormat, .pades)
+        XCTAssertEqual(AutogramCLIEngine.levelAndTimestamp(for: captured, endpoints: ["https://tsa.example"]).level,
+                       "PAdES_BASELINE_T")
+        let file = try XCTUnwrap(captured.files.first)
+        XCTAssertTrue(file.attachmentURLs.isEmpty)
+        let append = try XCTUnwrap(file.appendClause)
+        XCTAssertEqual(append.attachmentName, "260923-X.xml.xdcf")
+        XCTAssertEqual(append.attachmentMimeType, AppendedClause.xdcMimeType)
+
+        let json = AutogramCLIEngine().machineFile(id: "document", sourceURL: file.sourceURL,
+                                                   targetURL: file.sourceURL, appendClause: append)
+        guard case .object(let fields) = json, case .object(let clauseJSON)? = fields["appendClause"],
+              case .object(let attachment)? = clauseJSON["attachment"] else {
+            return XCTFail("appendClause missing")
+        }
+        XCTAssertNil(fields["attachments"])
+        XCTAssertEqual(Set(fields.keys), ["id", "source", "target", "appendClause"])
+        XCTAssertEqual(clauseJSON["pages"], .string(EnginePaths.canonical(append.pagesURL).path))
+        XCTAssertEqual(Set(attachment.keys), ["source", "name", "mimeType"])
+        XCTAssertEqual(attachment["name"], .string("260923-X.xml.xdcf"))
+        XCTAssertEqual(attachment["mimeType"], .string(AppendedClause.xdcMimeType))
+    }
+
+    func testAppendedClauseRefusesASiCOutputOrExtras() async throws {
+        let provider = EngineBridgeSigningProvider(engine: RecordingSigningEngine())
+        let stamp = VisualStampSpec(fullName: "A", timestamp: Date(), pageIndex: 0,
+                                    normalizedRect: NormalizedRect(x: 0, y: 0, width: 0.2, height: 0.1))
+        let refused: [SigningRequest] = [
+            request(.attachedASIC),
+            request(extraFiles: [ASiCEPackager.Entry(path: "a.txt", data: Data("a".utf8))]),
+            request(eform: EFormSigningAttributes(containerXmlns: "urn:x")),
+            request(stamp: stamp)
+        ]
+        for refusedRequest in refused {
+            do {
+                _ = try await provider.sign(refusedRequest)
+                XCTFail("expected a refusal")
+            } catch let error as SigningError {
+                guard case .signingFailed = error else { return XCTFail("wrong error \(error)") }
+            }
+        }
+    }
+
+    func testAppendedClauseReturnsPdfWithoutAsic() async throws {
+        let provider = EngineBridgeSigningProvider(engine: RecordingSigningEngine())
+        let result = try await provider.sign(request())
+        XCTAssertNil(result.asicData)
+        XCTAssertEqual(result.pdfData, Data("signed".utf8))
+        XCTAssertTrue(provider.supportsAppendedClause)
+    }
+
+    func testPdfaInvalidHasSlovakMessage() {
+        let message = AutogramCLIEngine.fileFailureMessage(code: "PDFA_INVALID")
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(message)
+        XCTAssertTrue(mapped.contains("nespĺňa PDF/A-3b"))
+        // The number is not always unused (a 2027 resume has spent it), so the message never says so;
+        // it names the way out instead.
+        XCTAssertFalse(mapped.contains("evidenčné číslo"))
+        XCTAssertTrue(mapped.hasSuffix("Zvoľte výstup ako kontajner ASiC-E alebo dokument skúste previesť znova."))
+        XCTAssertFalse(mapped.contains("\u{2014}"))
+    }
+}

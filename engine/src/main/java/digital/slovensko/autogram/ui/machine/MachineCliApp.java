@@ -227,7 +227,12 @@ public final class MachineCliApp {
             }
             var file = element.getAsJsonObject();
             var hasAttachments = file.has("attachments");
-            if (file.size() != (hasAttachments ? 4 : 3) || !file.has("id") || !file.has("source") || !file.has("target")
+            var hasAppendClause = file.has("appendClause");
+            if (hasAttachments && hasAppendClause) {
+                throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
+            }
+            if (file.size() != (hasAttachments || hasAppendClause ? 4 : 3)
+                    || !file.has("id") || !file.has("source") || !file.has("target")
                     || !isNonBlankString(file.get("id")) || !isNonBlankString(file.get("source"))
                     || !isNonBlankString(file.get("target"))) {
                 throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
@@ -245,6 +250,7 @@ public final class MachineCliApp {
                     attachments.add(attachment.getAsString());
                 }
             }
+            var appendClause = hasAppendClause ? requiredAppendClause(file.get("appendClause")) : null;
             var source = file.get("source").getAsString();
             var target = file.get("target").getAsString();
             try {
@@ -253,12 +259,36 @@ public final class MachineCliApp {
                 for (var attachment : attachments) {
                     java.nio.file.Path.of(attachment);
                 }
+                if (appendClause != null) {
+                    java.nio.file.Path.of(appendClause.pages());
+                    java.nio.file.Path.of(appendClause.attachment());
+                }
             } catch (java.nio.file.InvalidPathException exception) {
                 throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST", exception);
             }
-            files.add(new MachineFile(file.get("id").getAsString(), source, target, null, attachments));
+            files.add(new MachineFile(file.get("id").getAsString(), source, target, null, attachments, appendClause));
         }
         return List.copyOf(files);
+    }
+
+    /// `{"pages": <path>, "attachment": {"source": <path>, "name": <entry name>, "mimeType": <mime>}}`,
+    /// exactly these keys at both levels.
+    private static ClauseAppend requiredAppendClause(JsonElement value) {
+        if (value == null || !value.isJsonObject()) {
+            throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
+        }
+        var clause = value.getAsJsonObject();
+        if (clause.size() != 2 || !isNonBlankString(clause.get("pages")) || !clause.has("attachment")
+                || !clause.get("attachment").isJsonObject()) {
+            throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
+        }
+        var attachment = clause.getAsJsonObject("attachment");
+        if (attachment.size() != 3 || !isNonBlankString(attachment.get("source"))
+                || !isNonBlankString(attachment.get("name")) || !isNonBlankString(attachment.get("mimeType"))) {
+            throw new MachineProtocolException("PROTOCOL_INVALID_REQUEST");
+        }
+        return new ClauseAppend(clause.get("pages").getAsString(), attachment.get("source").getAsString(),
+                attachment.get("name").getAsString(), attachment.get("mimeType").getAsString());
     }
 
     private static QualifiedTimestampRequest requiredTimestamp(JsonObject timestamp) {
