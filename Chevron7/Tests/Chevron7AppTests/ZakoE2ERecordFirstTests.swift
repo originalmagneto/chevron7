@@ -105,11 +105,12 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
     /// The one PDF is checked as PDF/A-3b before the record is signed, as P→E does.
     func testE2ESinglePDFIsCheckedBeforeTheRecord() async throws {
         try requireXMLLint()
-        let (store, provider, source, settingsStore) = try makeStore(output: .singlePDF)
+        let (store, provider, source, settingsStore, transport) = try makeTestModeStore(output: .singlePDF)
         store.pdfaFromSignedRunner = Self.convertingRunner(Data("%PDF-1.7 converted".utf8))
         store.pdfClauseCheckRunner = PdfClauseCheckRunner(launch: { _ in (3, "6.8-1 embedded file\n") })
         await store.loadElectronicOriginal(at: source)
         prepareForAuthorization(store)
+        let number = seedNumber(store: store, settingsStore: settingsStore)
 
         await store.authorizeAndSign()
 
@@ -118,6 +119,60 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty, "no record is signed")
         XCTAssertTrue(settingsStore.evidenceStore.records.isEmpty)
         XCTAssertNil(store.recordFirstPending)
+        XCTAssertEqual(settingsStore.evidenceNumberPool.reusable(mode: .test, at: Date(), excluding: [])?.number, number)
+        XCTAssertEqual(transport.operations, ["GetOptions"], "nothing but the server time reaches EZZK")
+    }
+
+    /// The row is built from the values the record was rendered from: a change to the session
+    /// while the record is being signed never reaches it.
+    func testE2ERowIsBuiltFromTheSignedValues() async throws {
+        try requireXMLLint()
+        let (store, provider, source, settingsStore) = try makeStore()
+        store.pdfaFromSignedRunner = Self.convertingRunner(Data("%PDF-1.7 converted".utf8))
+        waitsForEver(store, settingsStore: settingsStore)
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        let signedName = store.attestation.originalDocumentName
+        let signedPerson = store.attestation.performingPerson.fullName
+        provider.onRecordSigning = {
+            store.attestation.originalDocumentName = "iny-dokument.pdf"
+            store.attestation.performingPerson = AdvocateProfile(fullName: "Iná osoba", position: "advokát",
+                                                                 registrationNumber: "1", ico: "35764102")
+        }
+
+        await store.authorizeAndSign()
+
+        let row = try XCTUnwrap(settingsStore.evidenceStore.record(id: store.currentRecordID))
+        XCTAssertEqual(row.originalName, signedName)
+        XCTAssertEqual(row.performingPersonName, signedPerson)
+        XCTAssertTrue(row.attestationXML.contains(signedName))
+        XCTAssertEqual(store.recordFirstPending?.attestation.originalDocumentName, signedName)
+    }
+
+    /// A record container that cannot be stored leaves no row and no validation evidence file,
+    /// and keeps the number.
+    func testE2EUnstorableRecordLeavesNoValidationEvidence() async throws {
+        try requireXMLLint()
+        let (store, provider, source, settingsStore, transport) = try makeTestModeStore()
+        store.pdfaFromSignedRunner = Self.convertingRunner(Data("%PDF-1.7 converted".utf8))
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        let number = seedNumber(store: store, settingsStore: settingsStore)
+        // A file where the records folder belongs makes storing the record container fail.
+        let evidenceFolder = settingsStore.storageRoot.appendingPathComponent("Evidence", isDirectory: true)
+        try Data("not a folder".utf8).write(to: evidenceFolder.appendingPathComponent("records"))
+
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(provider.requests.map(\.signsAsRecordContainer), [true])
+        XCTAssertNotNil(store.lastError)
+        XCTAssertTrue(settingsStore.evidenceStore.records.isEmpty)
+        let validation = evidenceFolder.appendingPathComponent("validation", isDirectory: true)
+        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: validation.path)) ?? [], [],
+                       "no orphan validation evidence")
+        XCTAssertNil(store.recordFirstPending)
+        XCTAssertEqual(settingsStore.evidenceNumberPool.reusable(mode: .test, at: Date(), excluding: [])?.number, number)
+        XCTAssertEqual(transport.operations, ["GetOptions"])
     }
 
     func testE2ERejectedRecordDeliversNothing() async throws {
@@ -462,7 +517,8 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
 
     /// Testovacia evidencia with the preview: the server time comes from the script, sending
     /// finds no credentials.
-    private func makeTestModeStore(signature: E2EEvidenceFixtures.Signature = E2EEvidenceFixtures.Signature()) throws
+    private func makeTestModeStore(signature: E2EEvidenceFixtures.Signature = E2EEvidenceFixtures.Signature(),
+                                   output: AppSettings.ZakoClientOutput = .asicContainer) throws
         -> (ZakoSessionStore, E2ERecordFirstProvider, URL, AppSettingsStore, ScriptedTransport) {
         let transport = ScriptedTransport([Self.optionsReply])
         let controller = EZZKAccountController(mode: .test, credentialStore: MemoryCredentialStore(),
@@ -472,7 +528,7 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         var signature = signature
         signature.signedRevisionLength = data.count
         let provider = E2ERecordFirstProvider(payload: E2EEvidenceFixtures.payload(signatures: [signature]))
-        let store = configure(settingsStore, provider: provider, output: .asicContainer, preview: true)
+        let store = configure(settingsStore, provider: provider, output: output, preview: true)
         return (store, provider, source, settingsStore, transport)
     }
 
@@ -509,7 +565,7 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
 
 /// The engine double of an E→E conversion: answers EVIDENCE from a fixture and signs as the
 /// one-PDF double does; can refuse the record or the client output and runs a hook when the
-/// client output is signed.
+/// record or the client output is signed.
 private final class E2ERecordFirstProvider: QualifiedSigningProviding, @unchecked Sendable {
     private let signer = SinglePDFRecordingProvider()
     private let lock = NSLock()
@@ -517,6 +573,7 @@ private final class E2ERecordFirstProvider: QualifiedSigningProviding, @unchecke
     let payload: Data
     nonisolated(unsafe) var refusesRecord = false
     nonisolated(unsafe) var onClientSigning: (@MainActor () -> Void)?
+    nonisolated(unsafe) var onRecordSigning: (@MainActor () -> Void)?
 
     init(payload: Data) {
         self.payload = payload
@@ -539,6 +596,7 @@ private final class E2ERecordFirstProvider: QualifiedSigningProviding, @unchecke
 
     func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
         lock.withLock { received.append(request) }
+        if request.signsAsRecordContainer, let onRecordSigning { await onRecordSigning() }
         if request.signsAsRecordContainer, refusesRecord {
             throw SigningError.signingFailed("Karta bola vybratá počas podpisu záznamu.")
         }

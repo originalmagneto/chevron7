@@ -311,10 +311,15 @@ extension ZakoSessionStore {
             attestation.conversionExecutionDateTime = conversionTime
 
             analysisProgressText = "Vytváram osvedčovaciu doložku…"
-            let model = try E2EFormModel.make(original: original, attestation: attestation,
+            // The register row is built from the values the forms were rendered from, captured
+            // here before any further await, so it can never differ from the signed record.
+            let signedAttestation = attestation
+            let signedReport = qualifiedReport
+            let documentPageCount = document?.pageCount
+            let model = try E2EFormModel.make(original: original, attestation: signedAttestation,
                                               newDocumentName: containerDocumentName, newDocumentData: newDocument,
-                                              usedDevice: attestation.usedDeviceDescription,
-                                              qualifiedReport: qualifiedReport?.data,
+                                              usedDevice: signedAttestation.usedDeviceDescription,
+                                              qualifiedReport: signedReport?.data,
                                               deliveredAsSinglePDF: deliversSinglePDF)
             let builder = E2EDeliveryBuilder()
             let clause: E2EDeliveryBuilder.Clause
@@ -334,7 +339,7 @@ extension ZakoSessionStore {
 
             // One PDF: the clause's readable pages, rendered from the very clause XML that is
             // attached, before anything is signed.
-            let clauseFileName = ConversionOutputNaming.containerClauseName(evidenceNumber: attestation.evidenceNumber)
+            let clauseFileName = ConversionOutputNaming.containerClauseName(evidenceNumber: signedAttestation.evidenceNumber)
             let appendedClause: AppendedClause?
             if deliversSinglePDF {
                 analysisProgressText = "Pripravujem strany osvedčovacej doložky…"
@@ -380,14 +385,14 @@ extension ZakoSessionStore {
 
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             if regime.regime == .recordFirst {
-                guard let number = attestation.evidenceNumber else { throw SigningError.identityUnavailable }
+                guard let number = signedAttestation.evidenceNumber else { throw SigningError.identityUnavailable }
                 let pending = RecordFirstPending(
                     recordID: currentRecordID,
                     stage: .awaitingEZZK,
                     direction: .electronicToElectronic,
                     originalFingerprints: original.documents.map(\.sha256),
                     // The row is looked up in the EZZK that allocated the number.
-                    mode: attestation.evidenceNumberMode ?? ezzkMode,
+                    mode: signedAttestation.evidenceNumberMode ?? ezzkMode,
                     evidenceNumber: number,
                     conversionTime: conversionTime,
                     finalPDF: newDocument,
@@ -398,7 +403,7 @@ extension ZakoSessionStore {
                     stampsSignatures: timestamps.stamps,
                     timestampServers: timestamps.servers,
                     tsaURL: timestamps.tsaURL,
-                    attestation: attestation,
+                    attestation: signedAttestation,
                     clientOutput: clientOutput,
                     appendedClause: appendedClause,
                     fixedTarget: singlePDFTarget,
@@ -406,7 +411,9 @@ extension ZakoSessionStore {
                     clientTSAURL: clientTimestamps.tsaURL)
                 try await startRecordFirst(pending, recordDelivery: recordDelivery, identityID: identityID) {
                     // The PDF's name and the delivered file are written once the client output is signed.
-                    try e2eSignedRow(id: pending.recordID, original: original, newDocument: newDocument,
+                    try e2eSignedRow(id: pending.recordID, attestation: pending.attestation,
+                                     qualifiedReport: signedReport, documentPageCount: documentPageCount,
+                                     original: original, newDocument: newDocument,
                                      containerDocumentName: containerDocumentName,
                                      fingerprint: pending.fingerprint, recordXML: recordDelivery.recordXML,
                                      conversionTime: conversionTime, pdfFileName: nil, deliveredFileName: nil,
@@ -426,7 +433,7 @@ extension ZakoSessionStore {
                 timestampServers: clientTimestamps.servers,
                 prefixChangedMessage: Self.singlePDFPrefixChangedMessage)
             let signed = output.signed
-            if let number = attestation.evidenceNumber {
+            if let number = signedAttestation.evidenceNumber {
                 evidenceNumberPool.remove(number)
             }
             saveProfileFromForm()
@@ -437,13 +444,15 @@ extension ZakoSessionStore {
                                                                   containerDocumentName: containerDocumentName)
             outputDirectory = directory
 
-            var record = try e2eSignedRow(id: currentRecordID, original: original, newDocument: newDocument,
+            var record = try e2eSignedRow(id: currentRecordID, attestation: signedAttestation,
+                                          qualifiedReport: signedReport, documentPageCount: documentPageCount,
+                                          original: original, newDocument: newDocument,
                                           containerDocumentName: containerDocumentName,
                                           fingerprint: Self.hex(model.newDocument.sha256),
                                           recordXML: recordDelivery.recordXML, conversionTime: conversionTime,
                                           pdfFileName: containerDocumentName,
                                           deliveredFileName: deliveredTarget.lastPathComponent,
-                                          mode: attestation.evidenceNumberMode ?? ezzkMode,
+                                          mode: signedAttestation.evidenceNumberMode ?? ezzkMode,
                                           formPack: formPack, clientOutput: clientOutput)
 
             let rowID = record.id
@@ -505,7 +514,10 @@ extension ZakoSessionStore {
 
     /// The `.signed` register row of an E→E conversion, with the verification evidence stored
     /// beside it (the qualified service's report when attached, else Chevron7's ETSI report).
-    private func e2eSignedRow(id: UUID, original: ElectronicOriginal, newDocument: Data, containerDocumentName: String,
+    /// Built only from the values the forms were rendered from, never from the live session.
+    private func e2eSignedRow(id: UUID, attestation: AttestationData, qualifiedReport: QualifiedValidationReport?,
+                              documentPageCount: Int?,
+                              original: ElectronicOriginal, newDocument: Data, containerDocumentName: String,
                               fingerprint: String, recordXML: String, conversionTime: Date,
                               pdfFileName: String?, deliveredFileName: String?, mode: AppSettings.EZZKMode,
                               formPack: ConversionFormPack,
@@ -524,7 +536,7 @@ extension ZakoSessionStore {
             securityElementCount: 0,
             totalPages: original.kind == .asicEMultiple
                 ? PDFDocument(data: newDocument)?.pageCount ?? 0
-                : document?.pageCount ?? 0,
+                : documentPageCount ?? 0,
             totalSheets: 0,
             pdfFileName: pdfFileName,
             deliveredFileName: deliveredFileName,

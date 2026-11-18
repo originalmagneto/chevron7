@@ -70,6 +70,7 @@ extension ZakoSessionStore {
     static let recordFirstTimedOutMessage = "EZZK záznam zatiaľ nespracovalo. Chevron7 ho overuje aj na pozadí; neskôr kliknite znova na Autorizovať konverziu a konverzia sa dokončí."
     static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Dokončiť konverziu a dokument sa podpíše znova."
     static let recordFirstSinglePDFIncompleteMessage = "Uložená konverzia nemá pripravenú doložku pre jeden PDF, preto ju nemožno dokončiť. Začnite konverziu znova."
+    static let recordFirstRowMismatchMessage = "Riadok Registra konverzií nezodpovedá podpísanému záznamu, preto sa nezapísal. Začnite konverziu znova."
     static let recordFirstMissingRowMessage = "Záznam tejto konverzie sa v Registri konverzií nenašiel, preto ju nemožno dokončiť. Začnite konverziu znova."
 
     static func recordFirstRejectedMessage(code: Int?, description: String?) -> String {
@@ -106,13 +107,21 @@ extension ZakoSessionStore {
         }
 
         var record = try makeRow()
-        assert(record.id == pending.recordID && record.status == .signed, "the row is the pending conversion's signed row")
         do {
+            guard record.id == pending.recordID, record.status == .signed else {
+                throw SigningError.signingFailed(Self.recordFirstRowMismatchMessage)
+            }
             // Held from the first write until the send, so the periodic check cannot send it twice.
             let held = settingsStore.statusChecker.hold(record.id)
             defer { if held { settingsStore.statusChecker.release(record.id) } }
             record.recordContainerPath = try evidenceStore.storeRecordContainer(asic, for: record.id)
             evidenceStore.upsert(record)
+        } catch {
+            // No row is written: the validation evidence `makeRow` stored beside it goes too.
+            if let path = record.validationEvidencePath {
+                evidenceStore.removeValidationEvidence(at: path)
+            }
+            throw error
         }
         // The signed record carries the number from here on, so the pool never offers it again.
         evidenceNumberPool.remove(pending.evidenceNumber)
