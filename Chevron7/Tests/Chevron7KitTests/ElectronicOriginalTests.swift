@@ -53,6 +53,19 @@ final class ElectronicOriginalTests: XCTestCase {
         XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
     }
 
+    func testLegacyPayloadWithDuplicateZipEntryIsRefused() throws {
+        let container = try ASiCEPackager().package(files: [.init(path: "zmluva.pdf", data: pdf),
+                                                            .init(path: "zmluva.pdf", data: pdf)])
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.asicDataObjectCount = 1
+        facts.asicDataObjectName = "zmluva.pdf"
+        var xades = signature()
+        xades.signedRevisionLength = nil
+        XCTAssertThrowsError(try original([xades], pdf: facts, name: "zmluva.asice", data: container)) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "zmluva.pdf"))
+        }
+    }
+
     func testQualificationMapsToCodelist54() {
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESIG", qcType: "esign").item.code, "2")
         XCTAssertEqual(ElectronicOriginal.authorizationType(qualification: "QESEAL", qcType: "eseal").item.code, "5")
@@ -266,8 +279,65 @@ final class ElectronicOriginalTests: XCTestCase {
         }
         var large = object("velke.pdf", pdfBytes(0x43))
         large.problem = "TOO_LARGE"
-        XCTAssertThrowsError(try container([large])) {
-            XCTAssertEqual($0 as? ElectronicOriginalError, .unreadableDataObject(name: "velke.pdf"))
+        XCTAssertThrowsError(try container([large])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .tooLargeDataObject(name: "velke.pdf"))
+            XCTAssertEqual(error.localizedDescription, "Súbor velke.pdf je príliš veľký (viac ako 100 MB).")
+        }
+    }
+
+    // MARK: Names that would point at two originals
+
+    private func signedPDF(_ name: String, fill: UInt8, id: String) -> Object {
+        var file = object(name, pdfBytes(fill, count: 1000))
+        file.nestedSignatures = [pades(id, revision: 900)]
+        return file
+    }
+
+    func testSameStemInTwoCasesWithRevisionsIsRefused() {
+        XCTAssertThrowsError(try container([signedPDF("x.pdf", fill: 0x41, id: "P-1"),
+                                            signedPDF("x.PDF", fill: 0x42, id: "P-2")])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .duplicateDocumentName(name: "x-1"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Súbory v kontajneri by mali v doložke rovnaký názov (x-1). Takýto kontajner Chevron7 nekonvertuje.")
+        }
+    }
+
+    func testRevisionNameEqualToAnotherEntryIsRefused() {
+        XCTAssertThrowsError(try container([signedPDF("a.pdf", fill: 0x41, id: "P-1"),
+                                            object("a-1", png, kind: "png")])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateDocumentName(name: "a-1"))
+        }
+    }
+
+    func testLongPathsCutToOnePrefixAreRefused() {
+        let folder = String(repeating: "dlhy-priecinok/", count: 20)
+        XCTAssertGreaterThan(folder.count, 255)
+        XCTAssertThrowsError(try container([object(folder + "a/zmluva.pdf", pdfBytes(0x41)),
+                                            object(folder + "b/zmluva.pdf", pdfBytes(0x42))])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError,
+                           .duplicateDocumentName(name: String((folder + "a/zmluva.pdf").prefix(255))))
+        }
+    }
+
+    func testDuplicateEntryNamesInTheEvidenceAreRefused() {
+        let a = object("a.pdf", pdfBytes(0x41))
+        XCTAssertThrowsError(try container([a, a, object("b.png", png, kind: "png")])) { error in
+            XCTAssertEqual(error as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
+            XCTAssertEqual(error.localizedDescription,
+                           "Kontajner obsahuje viac súborov s rovnakým názvom (a.pdf). Takýto kontajner Chevron7 nekonvertuje.")
+        }
+    }
+
+    func testDuplicateEntryNamesInTheZipAreRefused() {
+        let a = object("dir/a.pdf", pdfBytes(0x41))
+        let b = object("b.png", png, kind: "png")
+        // Identical bytes under one name twice: the engine lists one entry, the zip holds two.
+        XCTAssertThrowsError(try container([a, b], zipped: [a, a, b])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
+        }
+        // The one-unsigned-PDF path is refused the same way.
+        XCTAssertThrowsError(try container([a], zipped: [a, a])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .duplicateEntryName(name: "a.pdf"))
         }
     }
 

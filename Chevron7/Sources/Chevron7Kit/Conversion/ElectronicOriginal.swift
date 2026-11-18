@@ -16,6 +16,9 @@ public enum ElectronicOriginalError: LocalizedError, Equatable {
     case nestedSignaturesUnreadable(name: String)
     case tooManyDocuments(Int)
     case tooManyAuthorizations(Int)
+    case tooLargeDataObject(name: String)
+    case duplicateEntryName(name: String)
+    case duplicateDocumentName(name: String)
 
     public var errorDescription: String? {
         switch self {
@@ -24,7 +27,7 @@ public enum ElectronicOriginalError: LocalizedError, Equatable {
         case .notPDFOrContainer:
             return "Pôvodný dokument musí byť PDF alebo kontajner ASiC-E."
         case .containerWithoutPDF:
-            return "Kontajner neobsahuje PDF. Chevron7 zatiaľ konvertuje len kontajner s jedným PDF."
+            return "Kontajner neobsahuje súbor PDF, ktorý uvádza výsledok overenia podpisov. Skúste overenie znova."
         case .changedAfterLastSignature(let changes):
             let kinds = changes.map(ElectronicOriginal.changeLabel).joined(separator: ", ")
             return "Dokument bol po poslednom podpise zmenený (\(kinds)). Tieto zmeny nikto neautorizoval, preto ho nemožno konvertovať."
@@ -42,6 +45,12 @@ public enum ElectronicOriginalError: LocalizedError, Equatable {
             return "Kontajner obsahuje \(count) dokumentov. Formulár doložky ich pripúšťa najviac 999."
         case .tooManyAuthorizations(let count):
             return "Dokument má \(count) autorizácií. Formulár doložky ich pripúšťa najviac 99."
+        case .tooLargeDataObject(let name):
+            return "Súbor \(name) je príliš veľký (viac ako 100 MB)."
+        case .duplicateEntryName(let name):
+            return "Kontajner obsahuje viac súborov s rovnakým názvom (\(name)). Takýto kontajner Chevron7 nekonvertuje."
+        case .duplicateDocumentName(let name):
+            return "Súbory v kontajneri by mali v doložke rovnaký názov (\(name)). Takýto kontajner Chevron7 nekonvertuje."
         }
     }
 }
@@ -162,6 +171,11 @@ public struct ElectronicOriginal: Sendable, Equatable {
             return try makeSingle(sourceName: sourceName, kind: .pdf, pdfData: sourceData, evidence: evidence)
         }
         let objects = pdf.dataObjects
+        // Two entries under one name make "the file" ambiguous: refuse before any branch reads one.
+        if let duplicate = firstDuplicate(objects.map(\.name))
+            ?? ASiCEContainerVerifier.readEntries(sourceData).flatMap({ firstDuplicate($0.map(\.name)) }) {
+            throw ElectronicOriginalError.duplicateEntryName(name: displayName(duplicate))
+        }
         if objects.isEmpty {
             // A payload without `dataObjects` describes only a container with one unsigned PDF.
             guard pdf.asicDataObjectCount == 1, !pdf.asicDataObjectSigned else {
@@ -269,6 +283,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
             switch object.problem {
             case nil: break
             case "NESTED_UNREADABLE": throw ElectronicOriginalError.nestedSignaturesUnreadable(name: name)
+            case "TOO_LARGE": throw ElectronicOriginalError.tooLargeDataObject(name: name)
             default: throw ElectronicOriginalError.unreadableDataObject(name: name)
             }
             guard object.kind != .other else { throw ElectronicOriginalError.unsupportedDataObject(name: name) }
@@ -299,6 +314,14 @@ public struct ElectronicOriginal: Sendable, Equatable {
         }
         let documentCount = lengthsByFile.reduce(0) { $0 + $1.count }
         guard documentCount <= maximumDocuments else { throw ElectronicOriginalError.tooManyDocuments(documentCount) }
+        // Every clause name must point at one document: `x.pdf` and `x.PDF` with revisions, `a.pdf`
+        // with revisions beside an entry `a-1`, or two long paths cut to one prefix would not.
+        let allDocumentNames = objects.indices.flatMap { index in
+            documentNames(fileName: names[index], count: lengthsByFile[index].count)
+        }
+        if let duplicate = firstDuplicate(allDocumentNames) {
+            throw ElectronicOriginalError.duplicateDocumentName(name: duplicate)
+        }
 
         let entries = try entries(sourceData)
         var files: [File] = []
@@ -314,9 +337,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
             case .jpeg: format = (E2ECodelists.otherFormat, E2ECodelists.jpegFormatOther)
             default: format = (object.pdf ?? object.nested?.pdf).map(documentFormat) ?? (E2ECodelists.pdfFormat, nil)
             }
-            let stem = (name as NSString).deletingPathExtension
-            let fileDocuments = lengths.enumerated().map { position, length in
-                Document(name: lengths.count == 1 ? name : "\(stem)-\(position + 1)", format: format.item,
+            let fileDocuments = zip(documentNames(fileName: name, count: lengths.count), lengths).map { documentName, length in
+                Document(name: documentName, format: format.item,
                          formatOther: format.other, sha256: Data(SHA256.hash(data: data.prefix(length))),
                          fileEntryName: object.name)
             }
@@ -407,6 +429,19 @@ public struct ElectronicOriginal: Sendable, Equatable {
             guard let fact = facts.first(where: { $0.id == signature.id }) else { throw refused }
             return (signature, fact)
         }
+    }
+
+    /// A file's document names: the file name for one document, else `<stem>-1` ... `<stem>-n`.
+    private static func documentNames(fileName: String, count: Int) -> [String] {
+        guard count != 1 else { return [fileName] }
+        let stem = (fileName as NSString).deletingPathExtension
+        return (1...count).map { "\(stem)-\($0)" }
+    }
+
+    /// The first value that occurs more than once, in order.
+    private static func firstDuplicate(_ values: [String]) -> String? {
+        var seen = Set<String>()
+        return values.first { !seen.insert($0).inserted }
     }
 
     /// Entry names reduced to their file name; entries sharing one keep their full path.
