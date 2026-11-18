@@ -40,6 +40,8 @@ struct ZakoSection<Content: View>: View {
 struct ZakoVerificationView: View {
     @Bindable var store: ZakoSessionStore
     @State private var confirmingUndetermined = false
+    /// Measured heights of the file rows, so the reorderable list shows every row in the inspector.
+    @State private var fileRowHeights: [String: CGFloat] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +64,9 @@ struct ZakoVerificationView: View {
                             ZakoNotice(title: "Podpisy sa nepodarilo overiť", message: error, tone: .failure)
                         } else if let original = store.electronicOriginal {
                             verdictCard(original)
+                            if original.kind == .asicEMultiple {
+                                filesSection(original)
+                            }
                             authorizationsSection(original)
                             documentSection(original)
                             qualifiedSection
@@ -190,14 +195,19 @@ struct ZakoVerificationView: View {
     private func authorizationsSection(_ original: ElectronicOriginal) -> some View {
         ZakoSection(title: original.authorizations.count == 1 ? "Podpis" : "Podpisy a pečate",
                     symbol: "signature") {
-            ForEach(Array(original.authorizations.enumerated()), id: \.element.signatureID) { index, authorization in
+            // By position: the same signed PDF placed twice in a container repeats its signature id.
+            ForEach(Array(original.authorizations.enumerated()), id: \.offset) { index, authorization in
                 if index > 0 { Divider() }
-                authorizationRow(authorization, showsDocument: original.documents.count > 1)
+                authorizationRow(authorization, showsDocument: original.documents.count > 1,
+                                 fileName: authorization.fileEntryName.flatMap { entry in
+                                     original.files.first { $0.entryName == entry }?.displayName
+                                 })
             }
         }
     }
 
-    private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool) -> some View {
+    private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool,
+                                  fileName: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: icon(authorization.state))
@@ -223,6 +233,9 @@ struct ZakoVerificationView: View {
                 } else {
                     Text("Bez časovej pečiatky")
                 }
+                if let fileName {
+                    Text("Podpis v súbore \(fileName)")
+                }
                 if showsDocument {
                     Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
                 }
@@ -233,6 +246,150 @@ struct ZakoVerificationView: View {
             .padding(.leading, 24)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// The files of a container with several files, in the order the new document joins them.
+    /// The advocate reorders them by dragging or with the buttons (keyboard and VoiceOver).
+    private func filesSection(_ original: ElectronicOriginal) -> some View {
+        ZakoSection(title: "Súbory v kontajneri", symbol: "doc.on.doc") {
+            Text("V tomto poradí sa súbory spoja do nového dokumentu a v tomto poradí ich uvedie doložka aj záznam.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            List {
+                ForEach(Array(original.files.enumerated()), id: \.element.entryName) { index, file in
+                    fileRow(file, index: index, original: original)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            fileRowHeights[file.entryName] = height
+                        }
+                        .listRowInsets(EdgeInsets(top: Self.fileRowPadding, leading: 0,
+                                                  bottom: Self.fileRowPadding, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+                .onMove { source, destination in
+                    store.moveE2EFile(from: source, to: destination)
+                }
+                .moveDisabled(store.isAuthorizing)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(height: original.files.reduce(0) { total, file in
+                total + (fileRowHeights[file.entryName] ?? Self.estimatedFileRowHeight) + 2 * Self.fileRowPadding + 1
+            })
+        }
+    }
+
+    private static let fileRowPadding: CGFloat = 6
+    private static let estimatedFileRowHeight: CGFloat = 110
+
+    private func fileRow(_ file: ElectronicOriginal.File, index: Int, original: ElectronicOriginal) -> some View {
+        let containerSigners = original.authorizations
+            .filter { $0.fileEntryName == nil && file.documentNames.last.map($0.documentNames.contains) == true }
+            .map(\.signerName)
+        let nested = original.authorizations.filter { $0.fileEntryName == file.entryName }
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(index + 1).")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Image(systemName: file.kind == .pdf ? "doc.richtext" : "photo")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(file.displayName)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(file.entryName)
+                Spacer(minLength: 8)
+                Button {
+                    store.moveE2EFile(from: IndexSet(integer: index), to: index - 1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == 0 || store.isAuthorizing)
+                .help("Posunúť vyššie")
+                .accessibilityLabel("Posunúť vyššie")
+                Button {
+                    store.moveE2EFile(from: IndexSet(integer: index), to: index + 2)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(index == original.files.count - 1 || store.isAuthorizing)
+                .help("Posunúť nižšie")
+                .accessibilityLabel("Posunúť nižšie")
+            }
+            Group {
+                Text(ZakoVerificationPresentation.fileFacts(file, original: original))
+                if !containerSigners.isEmpty {
+                    Text("Podpis kontajnera: \(containerSigners.joined(separator: ", "))")
+                }
+                if !file.embeddedFileNames.isEmpty {
+                    Text("Prílohy v PDF sa do nového dokumentu neprenesú: \(file.embeddedFileNames.joined(separator: ", ")).")
+                }
+                if !file.changedAfterSignature.isEmpty {
+                    Text("Po podpise PAdES boli v súbore zmeny (\(file.changedAfterSignature.map(ElectronicOriginal.changeLabel).joined(separator: ", "))); celý súbor pokrýva podpis kontajnera.")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 24)
+            ForEach(Array(nested.enumerated()), id: \.offset) { _, authorization in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: icon(authorization.state))
+                        .foregroundStyle(tint(authorization.state))
+                        .accessibilityHidden(true)
+                    Text("\(authorization.signerName) · \(authorization.state.rawValue) · \(authorization.documentNames.joined(separator: ", "))")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .padding(.leading, 40)
+                .accessibilityElement(children: .combine)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Druh dokumentu")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Druh dokumentu", text: documentTypeBinding(file.entryName),
+                          prompt: Text(E2EAttestationFormView.documentKinds.last ?? ""))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .frame(maxWidth: 200)
+                Menu {
+                    ForEach(E2EAttestationFormView.documentKinds, id: \.self) { kind in
+                        Button(kind) { documentTypeBinding(file.entryName).wrappedValue = kind }
+                    }
+                } label: {
+                    Image(systemName: "list.bullet")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Vybrať druh dokumentu")
+                .accessibilityLabel("Vybrať druh dokumentu pre \(file.displayName)")
+            }
+            .padding(.leading, 24)
+            .disabled(store.isAuthorizing)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// The record's `OriginalDocumentType` of one file: its own value, else the common one.
+    private func documentTypeBinding(_ entryName: String) -> Binding<String> {
+        Binding(
+            get: { store.attestation.originalDocumentTypeLabels[entryName] ?? store.attestation.originalDocumentTypeLabel },
+            set: { value in
+                if value.trimmingCharacters(in: .whitespaces).isEmpty {
+                    store.attestation.originalDocumentTypeLabels.removeValue(forKey: entryName)
+                } else {
+                    store.attestation.originalDocumentTypeLabels[entryName] = value
+                }
+            })
     }
 
     private func documentSection(_ original: ElectronicOriginal) -> some View {
@@ -619,7 +776,7 @@ struct E2EAttestationFormView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Divider()
                     previewRow("Pôvodný dokument", store.electronicOriginal?.documents.map(\.name).joined(separator: ", ") ?? "")
-                    ForEach(store.electronicOriginal?.authorizations ?? [], id: \.signatureID) { authorization in
+                    ForEach(Array((store.electronicOriginal?.authorizations ?? []).enumerated()), id: \.offset) { _, authorization in
                         previewRow("Autorizácia", "\(authorization.type.skName), \(authorization.personID), \(authorization.state.rawValue)"
                                    + (authorization.timestamp.map { ", časová pečiatka \(E2EDateText.string($0.created))" } ?? ""))
                     }
@@ -659,6 +816,28 @@ struct E2EAttestationFormView: View {
 /// PDF/A is converted with the one-PDF output, because the clause becomes the last pages of a new
 /// PDF/A-3; an original that must be converted becomes a PDF/A-2b, or that PDF/A-3 for the one PDF.
 enum ZakoVerificationPresentation {
+    /// A file of a container with several files: its format and its page count, or "Obrázok".
+    static func fileFacts(_ file: ElectronicOriginal.File, original: ElectronicOriginal) -> String {
+        let document = original.documents.last { $0.fileEntryName == file.entryName }
+        let format = document.map { $0.formatOther ?? $0.format.skName } ?? "PDF"
+        switch file.kind {
+        case .png, .jpeg:
+            return "\(format) · Obrázok"
+        default:
+            let pages = original.evidence.pdf?.dataObjects.first { $0.name == file.entryName }?.pages
+            return pages.map { "\(format) · \(pageCount($0))" } ?? format
+        }
+    }
+
+    /// "1 strana", "2 strany", "5 strán".
+    static func pageCount(_ count: Int) -> String {
+        switch count {
+        case 1: return "1 strana"
+        case 2...4: return "\(count) strany"
+        default: return "\(count) strán"
+        }
+    }
+
     static func convertNote(reason: String, output: AppSettings.ZakoClientOutput) -> String {
         "\(reason), preto vznikne \(convertedDocumentLine(output: output)). Podpisy klienta zostanú zapísané v doložke."
     }

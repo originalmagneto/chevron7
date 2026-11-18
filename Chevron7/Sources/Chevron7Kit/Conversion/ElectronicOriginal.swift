@@ -521,7 +521,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         String(((name as NSString).lastPathComponent).prefix(255))
     }
 
-    static func changeLabel(_ change: String) -> String {
+    public static func changeLabel(_ change: String) -> String {
         switch change {
         case "ANNOTATION": return "poznámky alebo anotácie"
         case "SIGNATURE_OR_FORM_FILL": return "vyplnený formulár alebo nové pole"

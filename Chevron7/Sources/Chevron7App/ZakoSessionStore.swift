@@ -2131,3 +2131,18 @@ func resetSession(keepingProfile: Bool) {
 private struct NoOpClassifier: ElementClassifying {
     func classify(crop: CGImage, hint: SecurityElement.Kind?) async throws -> ElementJudgement { .unsure }
 }
+
+extension ZakoSessionStore {
+    /// Moves files of a container with several files, which sets the order of the new
+    /// document's pages and of the originals in the clause and the record. Refused while
+    /// authorizing, so what is signed is what was shown.
+    func moveE2EFile(from source: IndexSet, to destination: Int) {
+        guard !isAuthorizing, let original = electronicOriginal, original.kind == .asicEMultiple,
+              source.allSatisfy({ original.files.indices.contains($0) }),
+              (0...original.files.count).contains(destination) else { return }
+        var order = original.files.map(\.entryName)
+        order.move(fromOffsets: source, toOffset: destination)
+        guard order != original.files.map(\.entryName) else { return }
+        electronicOriginal = original.reordered(entryNames: order)
+    }
+}
