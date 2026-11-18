@@ -151,8 +151,8 @@ public struct ConversionRecordE2E12Renderer: Sendable {
         }
     }
 
-    /// XAdES content timestamps a container signature carries in its signed properties, which it
-    /// therefore authorizes (`AuthorizedTimeStamp`).
+    /// Content timestamps a container signature carries in its signed data (XAdES signed
+    /// properties or the CAdES signed attribute), which it therefore authorizes (`AuthorizedTimeStamp`).
     static func authorizedContentTimestamps(of authorization: ElectronicOriginal.Authorization,
                                             in original: ElectronicOriginal) -> [ElectronicOriginal.ContentTimestamp] {
         guard !isPAdES(authorization, in: original) else { return [] }

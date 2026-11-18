@@ -663,8 +663,10 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         // A PAdES signature has no container carrier: the timestamp is listed but tied to nothing.
         XCTAssertEqual(stamped.contentTimestamps.map(\.isResolved), [false])
         XCTAssertThrowsError(try E2EDeliveryBuilder().record(try model(stamped), form: .recordE2E_1_2)) { error in
-            XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, .unresolvedContentTimestamp)
+            XCTAssertEqual(error as? E2EDeliveryBuilder.Failure, .pdfContentTimestamp)
         }
+        XCTAssertEqual(E2EDeliveryBuilder.Failure.pdfContentTimestamp.errorDescription,
+                       "Podpis dokumentu obsahuje časovú pečiatku údajov. Podľa postupu od 1. 1. 2027 ju zatiaľ nevieme zapísať do záznamu. Evidenčné číslo sa nepoužilo.")
         // Record 1.0 and the clause are byte for byte those of the same PDF without it.
         let plain = try pdfOriginal(signatures)
         XCTAssertEqual(try E2EDeliveryBuilder().record(try model(stamped)).recordXML,

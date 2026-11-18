@@ -59,6 +59,10 @@ public struct E2EDeliveryBuilder: Sendable {
             }
             // Every timestamp covering the originals is listed: one the record cannot tie to its
             // documents is refused, never left out.
+            // A PDF original's PAdES content timestamp has no container carrier to tie it to.
+            if model.original.kind == .pdf, !model.original.contentTimestamps.isEmpty {
+                throw Failure.pdfContentTimestamp
+            }
             if model.original.contentTimestamps.contains(where: { !$0.isResolved }) {
                 throw Failure.unresolvedContentTimestamp
             }
@@ -89,6 +93,8 @@ public struct E2EDeliveryBuilder: Sendable {
         case missingSignatureValue(signer: String)
         /// A content timestamp the record cannot tie to the original's documents.
         case unresolvedContentTimestamp
+        /// A content timestamp inside the PAdES signature of a PDF original.
+        case pdfContentTimestamp
         /// A content timestamp inside the PAdES signature of a container's PDF.
         case nestedContentTimestamp(name: String)
         /// A timestamp the record 1.2 renderer has no name for (an internal inconsistency).
@@ -107,6 +113,8 @@ public struct E2EDeliveryBuilder: Sendable {
                 return "Hodnotu podpisu \(signer) sa nepodarilo prečítať. Podľa postupu od 1. 1. 2027 ju záznam musí obsahovať. Skúste overenie znova."
             case .unresolvedContentTimestamp:
                 return "Časovú pečiatku údajov v kontajneri sa nepodarilo priradiť k jeho súborom. Podľa postupu od 1. 1. 2027 ju nemožno zapísať do záznamu. Skúste overenie znova."
+            case .pdfContentTimestamp:
+                return "Podpis dokumentu obsahuje časovú pečiatku údajov. Podľa postupu od 1. 1. 2027 ju zatiaľ nevieme zapísať do záznamu. Evidenčné číslo sa nepoužilo."
             case .nestedContentTimestamp(let name):
                 return "Súbor \(name) obsahuje časovú pečiatku údajov vo vnútri podpisu. Podľa postupu od 1. 1. 2027 ju zatiaľ nevieme zapísať do záznamu."
             case .unnamedTimestamp:

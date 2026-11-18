@@ -623,6 +623,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
         let coverage = Dictionary((original.evidence.pdf?.dataObjects ?? []).map { ($0.name, $0.coveredBy) },
                                   uniquingKeysWith: { first, _ in first })
         return original.evidence.contentTimestamps.map { stamp in
+            // Setting aside any top-level ASiC manifest is enough: each remaining file must still
+            // be a known data object that the carrier itself covers (`coveredBy`, checked below).
             let files = stamp.type == "CONTENT_TIMESTAMP"
                 ? stamp.coveredDataObjects.filter { !isASiCManifest($0) } : stamp.coveredDataObjects
             let names = files.compactMap { wholeFile[$0] }

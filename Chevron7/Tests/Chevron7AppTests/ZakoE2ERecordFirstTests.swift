@@ -398,9 +398,11 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
 
         await store.authorizeAndSign()
 
-        XCTAssertEqual(store.lastError, E2EDeliveryBuilder.Failure.unresolvedContentTimestamp.errorDescription)
+        XCTAssertEqual(store.lastError, E2EDeliveryBuilder.Failure.pdfContentTimestamp.errorDescription)
         XCTAssertNil(store.attestation.evidenceNumber, "no number is spent on a refusal")
         XCTAssertTrue(provider.requests.isEmpty)
+        // The dry run checks the converted PDF/A, so the conversion before the number runs once, never again.
+        XCTAssertEqual(calls.value, 1)
     }
 
     func testE2EPhoneRefusedInNewOrder() async throws {
