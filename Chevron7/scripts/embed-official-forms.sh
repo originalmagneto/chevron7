@@ -20,6 +20,8 @@ files = [
     ("recordE2ESchema", forms / "record-e2e-1.0/schema.xsd"),
     ("recordE2EValidationSchema", forms / "record-e2e-1.0/schema.validation.xsd"),
     ("recordE2EPresentation", forms / "record-e2e-1.0/form101.sb.xslt"),
+    ("recordE2E12Schema", forms / "record-e2e-1.2/schema.xsd"),
+    ("recordE2E12Presentation", forms / "record-e2e-1.2/form101.sb.xslt"),
     ("clauseE2ESchema", forms / "clause-e2e-1.3/schema.xsd"),
     ("clauseE2EPresentation", forms / "clause-e2e-1.3/form.19.html2.xslt"),
 ]

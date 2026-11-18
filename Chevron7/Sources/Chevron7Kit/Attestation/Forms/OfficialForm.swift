@@ -60,6 +60,20 @@ public struct OfficialForm: Sendable, Equatable {
         schemaDigestBase64: OfficialFormFiles.recordE2ESchemaDigest,
         presentationDigestBase64: OfficialFormFiles.recordE2EPresentationDigest)
 
+    /// E→E record 1.2 (`_2021.sk`), the record form from 1. 1. 2027, sent before the clause. Like
+    /// P→E record 1.2 it has the `https://` codelist codes and libxml2 compiles its official
+    /// schema as is. The signer presentation is the manifest's TXT `sign` entry.
+    public static let recordE2E_1_2 = OfficialForm(
+        identifier: "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk/1.2",
+        namespace: "http://schemas.gov.sk/form/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk/1.2",
+        version: "1.2",
+        schema: OfficialFormFiles.recordE2E12Schema,
+        validationSchema: OfficialFormFiles.recordE2E12Schema,
+        presentation: OfficialFormFiles.recordE2E12Presentation,
+        presentationMediaDestination: "TXT",
+        schemaDigestBase64: OfficialFormFiles.recordE2E12SchemaDigest,
+        presentationDigestBase64: OfficialFormFiles.recordE2E12PresentationDigest)
+
     /// E→E clause 1.3; its HTML signer presentation is the one with the attestation sentence.
     public static let clauseE2E_1_3 = OfficialForm(
         identifier: "http://data.gov.sk/doc/eform/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3",

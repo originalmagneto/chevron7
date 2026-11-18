@@ -239,8 +239,52 @@ public struct FormPackRepository: Sendable {
         newDocumentFormatItem: ZakoCodelists.pdfa2FormatItem,
         fingerprintMethodItem: ZakoCodelists.sha256Item)
 
+    /// E→E until `ZakoRegime.recordFirstFrom`: record 1.0 and clause 1.3. Not in the default
+    /// repository (E→E rows carry no pack until the flow stamps them); chosen by `e2ePack(at:)`.
+    public static let e2eRecord10Unverified = ConversionFormPack(
+        id: "chevron7-e2e-record-1.0",
+        direction: .electronicToElectronic,
+        recordVersion: OfficialForm.recordE2E_1_0.version,
+        clauseVersion: OfficialForm.clauseE2E_1_3.version,
+        namespace: OfficialForm.recordE2E_1_0.namespace,
+        eFormIdentifier: OfficialForm.recordE2E_1_0.identifier,
+        effectiveFrom: Date(timeIntervalSince1970: 0),
+        effectiveUntil: ZakoRegime.recordFirstFrom,
+        verificationState: .unverified,
+        acceptanceState: .unknown,
+        renderer: .legacySwift,
+        outputProfile: .pilotPDFA2b,
+        newDocumentFormatItem: ZakoCodelists.pdfa2FormatItem,
+        fingerprintMethodItem: ZakoCodelists.sha256Item)
+
+    /// E→E from 1. 1. 2027: record 1.2 (`_2021.sk`) sent before the clause, which stays 1.3.
+    public static let e2eRecord12Unverified = ConversionFormPack(
+        id: "chevron7-e2e-record-1.2",
+        direction: .electronicToElectronic,
+        recordVersion: OfficialForm.recordE2E_1_2.version,
+        clauseVersion: OfficialForm.clauseE2E_1_3.version,
+        namespace: OfficialForm.recordE2E_1_2.namespace,
+        eFormIdentifier: OfficialForm.recordE2E_1_2.identifier,
+        effectiveFrom: ZakoRegime.recordFirstFrom,
+        verificationState: .unverified,
+        acceptanceState: .unknown,
+        renderer: .legacySwift,
+        outputProfile: .pilotPDFA2b,
+        newDocumentFormatItem: ZakoCodelists.pdfa2FormatItem,
+        fingerprintMethodItem: ZakoCodelists.sha256Item)
+
+    /// The E→E pack in force at `date` (the conversion time): record 1.0 before
+    /// `ZakoRegime.recordFirstFrom`, record 1.2 from that instant.
+    public static func e2ePack(at date: Date) -> ConversionFormPack {
+        date >= ZakoRegime.recordFirstFrom ? e2eRecord12Unverified : e2eRecord10Unverified
+    }
+
     /// The record form a pack's records are written in.
     public static func recordForm(of pack: ConversionFormPack) -> OfficialForm {
-        pack.recordVersion == OfficialForm.record_1_2.version ? .record_1_2 : .record_1_0
+        let is12 = pack.recordVersion == OfficialForm.record_1_2.version
+        if pack.direction == .electronicToElectronic {
+            return is12 ? .recordE2E_1_2 : .recordE2E_1_0
+        }
+        return is12 ? .record_1_2 : .record_1_0
     }
 }

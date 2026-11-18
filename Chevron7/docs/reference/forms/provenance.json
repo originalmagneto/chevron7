@@ -25,6 +25,12 @@
       "url": "https://www.slovensko.sk/static/eform/dataset/50349287.ConversionCertificateOfElectronicDocumentToElectronicDocument.sk/1.3.zip",
       "sha256": "d2da1181950ee4047c3ea0c59507db646974bcfd91ab2ec60dd09e2c61fcbcd1",
       "retrieved_at": "2026-10-16"
+    },
+    "record-e2e-1.2": {
+      "url": "https://www.slovensko.sk/static/eform/dataset/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk/1.2.zip",
+      "sha256": "cfcf60e1f27dcec319e43cbbf6e2e48d882798f1058f22aea383a0af251453b8",
+      "retrieved_at": "2026-11-18",
+      "in_force": "1. 1. 2027 as the E→E counterpart of the P→E record 1.2; the package's meta.xml says inForceFrom 2024-10-01"
     }
   },
   "files": {
@@ -77,6 +83,14 @@
     "clause-e2e-1.3/form.19.html2.xslt": {
       "package_path": "Content/form.19.html2.xslt",
       "sha256": "33fff925a885a34a2c22df0669041e1809f32b675e38418c3790806802c3363e"
+    },
+    "record-e2e-1.2/schema.xsd": {
+      "package_path": "schema.xsd",
+      "sha256": "d3106308ab300e92e9c9a7f0628e643461c118492b9825445aaf94a88d1723ec"
+    },
+    "record-e2e-1.2/form101.sb.xslt": {
+      "package_path": "Content/form101.sb.xslt",
+      "sha256": "d840830a39b1c13beb87b6febb998eea537d50ec7c5607218b00fdb6fad19949"
     }
   }
 }
