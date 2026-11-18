@@ -434,6 +434,21 @@ final class ConversionRecordE2E12RendererTests: XCTestCase {
         }
     }
 
+    /// The renderer never substitutes a value: rendered directly, an unmappable type or format
+    /// is written empty, and the official schema refuses the record.
+    func testUnmappedValuesRenderedDirectlyFailTheSchema() throws {
+        var one = signature("S-1", revision: pdf.count)
+        one.qualification = "INDETERMINATE_QESIG"
+        let unmappedType = ConversionRecordE2E12Renderer().render(try model(try pdfOriginal([one])))
+        XCTAssertTrue(unmappedType.contains("<AuthorizationType></AuthorizationType>"))
+        XCTAssertThrowsError(try FormSchemaValidator().validate(Data(unmappedType.utf8), against: .recordE2E_1_2))
+        var kept = try pdfOriginal([signature("S-1", revision: pdf.count)])
+        kept.plan = .keep(format: E2ECodelists.otherFormat, formatOther: "XYZ")
+        let unmappedFormat = ConversionRecordE2E12Renderer().render(try model(kept))
+        XCTAssertTrue(unmappedFormat.contains("<ItemCode></ItemCode>"))
+        XCTAssertThrowsError(try FormSchemaValidator().validate(Data(unmappedFormat.utf8), against: .recordE2E_1_2))
+    }
+
     func testNestedUndeterminedQualificationIsUnmappable() throws {
         var a = object("a.pdf", pdfBytes(0x5A, count: 1000), coveredBy: ["C-1"])
         var nested = signature("P-1", revision: 900)
