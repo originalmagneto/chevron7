@@ -177,10 +177,11 @@ public enum E2EEvidenceFixtures {
         return json
     }
 
-    /// The tree's entry for a data object: its PAdES signatures nested, as the engine's inspection lists them.
+    /// The tree's entry for a data object: as the engine's inspection lists them, every PDF
+    /// carries `nested` with its PAdES signatures, an empty list for an unsigned one.
     private static func treeDocumentJSON(_ object: DataObject) -> [String: Any] {
         var json: [String: Any] = ["name": object.name]
-        if object.treeNested && !object.nestedSignatures.isEmpty {
+        if object.treeNested && object.kind == "pdf" {
             let tree = evidenceBody(signatures: object.nestedSignatures, pdf: nil, dataObjects: []).0
             json["nested"] = ["kind": "PDF", "signatures": tree, "documents": [Any]()] as [String: Any]
         }

@@ -372,11 +372,14 @@ public struct ElectronicOriginal: Sendable, Equatable {
     }
 
     /// The only data object stays on today's path when it is a PDF without signatures of its own.
+    /// The engine's tree lists every PDF data object as `.signed` with its nested tree, empty when
+    /// the PDF has no signatures.
     private static func isUnsignedPDF(_ object: ConversionEvidence.DataObject, tree: SignatureTree) -> Bool {
         guard object.kind == .pdf, object.problem == nil, object.nested == nil else { return false }
         switch tree.documents.first(where: { $0.name == object.name })?.content {
         case nil, .plain?: return true
-        default: return false
+        case .signed(_, let nested)?: return nested.signatures.isEmpty && nested.documents.isEmpty
+        case .skipped?, .failed?: return false
         }
     }
 

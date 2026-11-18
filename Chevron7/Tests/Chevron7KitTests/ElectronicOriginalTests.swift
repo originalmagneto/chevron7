@@ -376,7 +376,11 @@ final class ElectronicOriginalTests: XCTestCase {
         only.nestedPDF = facts
         let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
             signatures: [containerSignature()], pdf: facts, dataObjects: [only]))
+        guard case .signed(.pdf, let nested)? = evidence.tree.documents.first?.content, nested.signatures.isEmpty else {
+            return XCTFail("the engine lists an unsigned PDF data object with an empty nested tree")
+        }
         let kept = try ElectronicOriginal.make(sourceName: "zmluva.asice", sourceData: container, evidence: evidence)
+        XCTAssertEqual(kept.kind, .asicE(entryName: "zmluva.pdf"))
         XCTAssertEqual(kept.plan, .keep(format: E2ECodelists.pdfa2Format, formatOther: nil))
     }
 
