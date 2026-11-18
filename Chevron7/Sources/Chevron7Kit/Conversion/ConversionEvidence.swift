@@ -63,6 +63,36 @@ public struct ConversionEvidence: Sendable, Equatable {
         public var asicDataObjectName: String?
         public var asicDataObjectSigned: Bool
         public var asicDataObjectCount: Int?
+        /// Every data object of a container in zip entry order; empty for a PDF source or an old payload.
+        public var dataObjects: [DataObject] = []
+    }
+
+    /// One file of a container: what its bytes are, who signed it, and for a PDF or an image what it holds.
+    public struct DataObject: Sendable, Equatable {
+        public enum Kind: String, Sendable { case pdf, png, jpeg, other }
+
+        public var name: String
+        public var size: Int
+        public var sha256: Data
+        public var kind: Kind
+        /// Ids of the container signatures whose scope names this file.
+        public var coveredBy: [String]
+        /// `TOO_LARGE`, `UNREADABLE` or `NESTED_UNREADABLE` (a PDF whose own signatures could not be read).
+        public var problem: String?
+        public var pdf: PDFFacts?
+        public var pages: Int?
+        public var embeddedFileNames: [String]
+        public var widthPx: Int?
+        public var heightPx: Int?
+        /// The PDF's own PAdES signatures, validated on their own (JSON key `evidence`).
+        public var nested: NestedEvidence?
+    }
+
+    public struct NestedEvidence: Sendable, Equatable {
+        public var validationTime: Date
+        public var etsiReport: Data
+        public var signatures: [Signature]
+        public var pdf: PDFFacts
     }
 
     public var tree: SignatureTree
@@ -139,6 +169,51 @@ extension ConversionEvidence {
             var asicDataObjectName: String?
             var asicDataObjectSigned: Bool?
             var asicDataObjectCount: Int?
+            var dataObjects: [RawDataObject]?
+        }
+
+        struct RawNested: Decodable {
+            var validationTime: String
+            var etsiReportBase64: String
+            var signatures: [RawSignature]
+            var pdf: RawPDF?
+        }
+
+        /// A data object's JSON carries the PDF facts flat beside its own keys.
+        struct RawDataObject: Decodable {
+            var name: String
+            var size: Int?
+            var sha256Base64: String?
+            var kind: String?
+            var coveredBy: [String]?
+            var problem: String?
+            var pages: Int?
+            var embeddedFileNames: [String]?
+            var widthPx: Int?
+            var heightPx: Int?
+            var evidence: RawNested?
+            var pdf: RawPDF?
+
+            private enum CodingKeys: String, CodingKey {
+                case name, size, sha256Base64, kind, coveredBy, problem, pages, embeddedFileNames
+                case widthPx, heightPx, evidence
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                name = try container.decode(String.self, forKey: .name)
+                size = try container.decodeIfPresent(Int.self, forKey: .size)
+                sha256Base64 = try container.decodeIfPresent(String.self, forKey: .sha256Base64)
+                kind = try container.decodeIfPresent(String.self, forKey: .kind)
+                coveredBy = try container.decodeIfPresent([String].self, forKey: .coveredBy)
+                problem = try container.decodeIfPresent(String.self, forKey: .problem)
+                pages = try container.decodeIfPresent(Int.self, forKey: .pages)
+                embeddedFileNames = try container.decodeIfPresent([String].self, forKey: .embeddedFileNames)
+                widthPx = try container.decodeIfPresent(Int.self, forKey: .widthPx)
+                heightPx = try container.decodeIfPresent(Int.self, forKey: .heightPx)
+                evidence = try container.decodeIfPresent(RawNested.self, forKey: .evidence)
+                pdf = (kind == "pdf") ? try RawPDF(from: decoder) : nil
+            }
         }
 
         var validationTime: String
@@ -147,45 +222,68 @@ extension ConversionEvidence {
         var signatures: [RawSignature]
         var pdf: RawPDF?
 
-        func evidence(tree: SignatureTree) throws -> ConversionEvidence {
+        private static func parseDate(_ text: String?) -> Date? {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let plain = ISO8601DateFormatter()
-            guard let time = formatter.date(from: validationTime) ?? plain.date(from: validationTime),
-                  let report = Data(base64Encoded: etsiReportBase64) else {
+            return text.flatMap { formatter.date(from: $0) ?? plain.date(from: $0) }
+        }
+
+        private static func signature(_ raw: RawSignature) throws -> Signature {
+            guard let value = raw.signatureValueBase64.flatMap({ Data(base64Encoded: $0) }),
+                  let slim = raw.etsiSignatureReportBase64.flatMap({ Data(base64Encoded: $0) }) else {
                 throw ProtocolFailure.malformedPayload
             }
-            let date = { (text: String?) -> Date? in
-                text.flatMap { formatter.date(from: $0) ?? plain.date(from: $0) }
+            return Signature(id: raw.id, signatureValue: value, signedRevisionLength: raw.signedRevisionLength,
+                             signerCommonName: raw.signerCommonName, signerSerialNumber: raw.signerSerialNumber,
+                             mandants: raw.mandants ?? [], policies: raw.policies ?? [], mandate: raw.mandate,
+                             qcCompliance: raw.qcCompliance ?? false, qcType: raw.qcType,
+                             productionPlace: raw.productionPlace,
+                             trustedListUnavailable: raw.trustedListUnavailable ?? false,
+                             trustServiceTypes: raw.trustServiceTypes ?? [], slimReport: slim,
+                             timestamps: (raw.timestamps ?? []).map {
+                                 Timestamp(id: $0.id, type: $0.type, productionTime: parseDate($0.productionTime),
+                                           producerCommonName: $0.producerCommonName, indication: $0.indication,
+                                           qualification: $0.qualification)
+                             })
+        }
+
+        private static func facts(_ raw: RawPDF) throws -> PDFFacts {
+            PDFFacts(declaredPdfaPart: raw.declaredPdfaPart, declaredPdfaConformance: raw.declaredPdfaConformance,
+                     pdfaCompliant: raw.pdfaCompliant ?? false, pdfaErrors: raw.pdfaErrors ?? [],
+                     hasEmbeddedFiles: raw.hasEmbeddedFiles ?? false,
+                     changesAfterLastSignature: raw.changesAfterLastSignature ?? [],
+                     asicDataObjectName: raw.asicDataObjectName, asicDataObjectSigned: raw.asicDataObjectSigned ?? false,
+                     asicDataObjectCount: raw.asicDataObjectCount,
+                     dataObjects: try (raw.dataObjects ?? []).map(dataObject))
+        }
+
+        private static func dataObject(_ raw: RawDataObject) throws -> DataObject {
+            guard let hash = raw.sha256Base64.flatMap({ Data(base64Encoded: $0) }), let size = raw.size else {
+                throw ProtocolFailure.malformedPayload
             }
-            let signatures = try self.signatures.map { raw -> Signature in
-                guard let value = raw.signatureValueBase64.flatMap({ Data(base64Encoded: $0) }),
-                      let slim = raw.etsiSignatureReportBase64.flatMap({ Data(base64Encoded: $0) }) else {
+            var nested: NestedEvidence?
+            if let item = raw.evidence {
+                guard let time = parseDate(item.validationTime), let report = Data(base64Encoded: item.etsiReportBase64),
+                      let pdf = item.pdf else {
                     throw ProtocolFailure.malformedPayload
                 }
-                return Signature(id: raw.id, signatureValue: value, signedRevisionLength: raw.signedRevisionLength,
-                                 signerCommonName: raw.signerCommonName, signerSerialNumber: raw.signerSerialNumber,
-                                 mandants: raw.mandants ?? [], policies: raw.policies ?? [], mandate: raw.mandate,
-                                 qcCompliance: raw.qcCompliance ?? false, qcType: raw.qcType,
-                                 productionPlace: raw.productionPlace,
-                                 trustedListUnavailable: raw.trustedListUnavailable ?? false,
-                                 trustServiceTypes: raw.trustServiceTypes ?? [], slimReport: slim,
-                                 timestamps: (raw.timestamps ?? []).map {
-                                     Timestamp(id: $0.id, type: $0.type, productionTime: date($0.productionTime),
-                                               producerCommonName: $0.producerCommonName, indication: $0.indication,
-                                               qualification: $0.qualification)
-                                 })
+                nested = NestedEvidence(validationTime: time, etsiReport: report,
+                                        signatures: try item.signatures.map(signature), pdf: try facts(pdf))
             }
-            let pdf = self.pdf.map {
-                PDFFacts(declaredPdfaPart: $0.declaredPdfaPart, declaredPdfaConformance: $0.declaredPdfaConformance,
-                         pdfaCompliant: $0.pdfaCompliant ?? false, pdfaErrors: $0.pdfaErrors ?? [],
-                         hasEmbeddedFiles: $0.hasEmbeddedFiles ?? false,
-                         changesAfterLastSignature: $0.changesAfterLastSignature ?? [],
-                         asicDataObjectName: $0.asicDataObjectName, asicDataObjectSigned: $0.asicDataObjectSigned ?? false,
-                         asicDataObjectCount: $0.asicDataObjectCount)
+            return DataObject(name: raw.name, size: size, sha256: hash, kind: raw.kind.flatMap(DataObject.Kind.init) ?? .other,
+                              coveredBy: raw.coveredBy ?? [], problem: raw.problem, pdf: try raw.pdf.map(facts),
+                              pages: raw.pages, embeddedFileNames: raw.embeddedFileNames ?? [],
+                              widthPx: raw.widthPx, heightPx: raw.heightPx, nested: nested)
+        }
+
+        func evidence(tree: SignatureTree) throws -> ConversionEvidence {
+            guard let time = Self.parseDate(validationTime), let report = Data(base64Encoded: etsiReportBase64) else {
+                throw ProtocolFailure.malformedPayload
             }
             return ConversionEvidence(tree: tree, validationTime: time, dssVersion: dssVersion, etsiReport: report,
-                                      signatures: signatures, pdf: pdf)
+                                      signatures: try signatures.map(Self.signature),
+                                      pdf: try pdf.map(Self.facts))
         }
     }
 }

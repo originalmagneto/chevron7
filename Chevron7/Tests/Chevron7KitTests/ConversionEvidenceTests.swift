@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import CryptoKit
 import XCTest
 import Chevron7TestSupport
 @testable import Chevron7Kit
@@ -35,6 +36,83 @@ final class ConversionEvidenceTests: XCTestCase {
         let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(signatures: [signature]))
         XCTAssertEqual(evidence.signatures.first?.trustedListUnavailable, true)
         XCTAssertEqual(evidence.tree.signatures.first?.state, .indeterminate)
+    }
+
+    func testDecodesDataObjectsInOrder() throws {
+        var pdf = E2EEvidenceFixtures.DataObject(name: "zmluva.pdf")
+        pdf.pages = 3
+        pdf.embeddedFileNames = ["priloha.xml"]
+        var image = E2EEvidenceFixtures.DataObject(name: "sken.png", bytes: Data([0x89, 0x50, 0x4E, 0x47]))
+        image.kind = "png"
+        image.widthPx = 1240
+        image.heightPx = 1754
+        image.coveredBy = ["S-1"]
+        var other = E2EEvidenceFixtures.DataObject(name: "poznamka.txt", bytes: Data("x".utf8))
+        other.kind = "other"
+        other.problem = "UNREADABLE"
+        var container = E2EEvidenceFixtures.PDF()
+        container.asicDataObjectCount = 3
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], pdf: container, dataObjects: [pdf, image, other]))
+
+        let objects = try XCTUnwrap(evidence.pdf?.dataObjects)
+        XCTAssertEqual(objects.map(\.name), ["zmluva.pdf", "sken.png", "poznamka.txt"])
+        XCTAssertEqual(objects.map(\.kind), [.pdf, .png, .other])
+        XCTAssertEqual(objects[0].size, pdf.bytes.count)
+        XCTAssertEqual(objects[0].sha256, Data(SHA256.hash(data: pdf.bytes)))
+        XCTAssertEqual(objects[0].pages, 3)
+        XCTAssertEqual(objects[0].embeddedFileNames, ["priloha.xml"])
+        XCTAssertNotNil(objects[0].pdf)
+        XCTAssertNil(objects[0].nested)
+        XCTAssertEqual(objects[1].widthPx, 1240)
+        XCTAssertEqual(objects[1].heightPx, 1754)
+        XCTAssertEqual(objects[1].coveredBy, ["S-1"])
+        XCTAssertNil(objects[1].pdf)
+        XCTAssertEqual(objects[2].problem, "UNREADABLE")
+    }
+
+    func testDecodesNestedEvidenceSignatures() throws {
+        var nested = E2EEvidenceFixtures.Signature()
+        nested.id = "N-1"
+        nested.signedRevisionLength = 2048
+        nested.signatureValue = Data("nested-value".utf8)
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [nested]
+        var nestedFacts = E2EEvidenceFixtures.PDF()
+        nestedFacts.changesAfterLastSignature = ["FORM_FILL"]
+        object.nestedPDF = nestedFacts
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], dataObjects: [object]))
+
+        let decoded = try XCTUnwrap(evidence.pdf?.dataObjects.first)
+        let inner = try XCTUnwrap(decoded.nested)
+        XCTAssertEqual(inner.validationTime, ISO8601DateFormatter().date(from: E2EEvidenceFixtures.validationTime))
+        XCTAssertEqual(inner.signatures.map(\.id), ["N-1"])
+        XCTAssertEqual(inner.signatures.first?.signatureValue, Data("nested-value".utf8))
+        XCTAssertEqual(inner.signatures.first?.signedRevisionLength, 2048)
+        XCTAssertEqual(inner.signatures.first?.slimReport, Data("<ValidationReport id=\"N-1\"/>".utf8))
+        XCTAssertFalse(inner.etsiReport.isEmpty)
+        XCTAssertEqual(inner.pdf.changesAfterLastSignature, ["FORM_FILL"])
+        XCTAssertEqual(decoded.pdf?.changesAfterLastSignature, ["FORM_FILL"])
+    }
+
+    func testOldPayloadHasNoDataObjects() throws {
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()]))
+        XCTAssertEqual(evidence.pdf?.dataObjects, [])
+    }
+
+    func testTolerantOfUnknownKeys() throws {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()])) as? [String: Any])
+        var evidence = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var pdf = try XCTUnwrap(evidence["pdf"] as? [String: Any])
+        pdf["pages"] = 2
+        pdf["embeddedFileNames"] = ["a.xml"]
+        pdf["somethingNew"] = true
+        evidence["pdf"] = pdf
+        json["evidence"] = evidence
+        XCTAssertNoThrow(try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json)))
     }
 
     func testMissingEvidenceIsMalformed() {
