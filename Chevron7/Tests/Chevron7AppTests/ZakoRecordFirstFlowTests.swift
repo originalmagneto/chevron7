@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
-import Chevron7Kit
+import Chevron7TestSupport
+import CryptoKit
 import Foundation
 import PDFKit
 import XCTest
 @testable import Chevron7App
+@testable import Chevron7Kit
 
 /// ZaKo under the order of 1. 1. 2027 (`ZakoRegime.recordFirst`): the record 1.2 is signed and
 /// sent first, the clause and the PDF/A are signed only after EZZK has processed the record.
@@ -247,6 +249,63 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         store.resetSession(keepingProfile: true)
 
         XCTAssertNil(store.recordFirstPending)
+    }
+
+    /// E→E: the record names the original's documents in order, so a resume after they changed
+    /// (here the order of two files) refuses and signs nothing.
+    func testE2EPendingRefusesAfterOriginalChange() async throws {
+        let settingsStore = makeSettingsStore()
+        let provider = OrderRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore)
+        store.direction = .electronicToElectronic
+        let a = Data(SHA256.hash(data: Data("a".utf8)))
+        let b = Data(SHA256.hash(data: Data("b".utf8)))
+        store.electronicOriginal = try Self.electronicOriginal(fingerprints: [b, a])
+        store.recordFirstPending = Self.e2ePending(attestation: store.attestation, fingerprints: [a, b])
+
+        await store.resumeRecordFirst(viaMobile: false)
+
+        XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstOriginalChangedMessage)
+        XCTAssertEqual(store.lastError, "Pôvodný dokument alebo poradie jeho súborov sa od podpisu záznamu zmenili. Dokončite konverziu s pôvodným stavom alebo začnite novú.")
+        XCTAssertTrue(provider.kinds.isEmpty, "nothing is signed")
+        XCTAssertNotNil(store.recordFirstPending, "the conversion can still be finished with the original state")
+
+        // The same documents in the signed order pass this check (and stop later, at the missing row).
+        store.lastError = nil
+        store.electronicOriginal = try Self.electronicOriginal(fingerprints: [a, b])
+        await store.resumeRecordFirst(viaMobile: false)
+        XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstMissingRowMessage)
+        XCTAssertTrue(provider.kinds.isEmpty)
+    }
+
+    /// An E→E original whose documents carry `fingerprints`, in that order.
+    private static func electronicOriginal(fingerprints: [Data]) throws -> ElectronicOriginal {
+        let pdf = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 200)
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.signedRevisionLength = pdf.count
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(signatures: [signature]))
+        var original = try ElectronicOriginal.make(sourceName: "zmluva.pdf", sourceData: pdf, evidence: evidence)
+        let template = try XCTUnwrap(original.documents.first)
+        original.documents = fingerprints.enumerated().map { index, fingerprint in
+            var document = template
+            document.name = "zmluva-\(index + 1)"
+            document.sha256 = fingerprint
+            return document
+        }
+        return original
+    }
+
+    private static func e2ePending(attestation: AttestationData, fingerprints: [Data]) -> RecordFirstPending {
+        RecordFirstPending(
+            recordID: UUID(), stage: .awaitingEZZK,
+            direction: .electronicToElectronic, originalFingerprints: fingerprints,
+            mode: .demo, evidenceNumber: "1563-261118-1", conversionTime: Date(),
+            finalPDF: Data("%PDF-1.7\n".utf8), fingerprint: "00", containerDocumentName: "zmluva.pdf",
+            containerFiles: [], directory: FileManager.default.temporaryDirectory,
+            stampsSignatures: false, timestampServers: nil, tsaURL: nil, attestation: attestation,
+            clientOutput: .asicContainer, appendedClause: nil, fixedTarget: nil,
+            clientTimestampServers: nil, clientTSAURL: nil)
     }
 
     // MARK: - One PDF (AppSettings.ZakoClientOutput.singlePDF)

@@ -107,6 +107,8 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var created: Date
         public var publisherCommonName: String
         public var validationTime: Date
+        /// DSS's timestamp id, which names one timestamp across the signatures that list it.
+        public var id: String? = nil
 
         public var typeItem: ZakoCodelistItem {
             qualified ? E2ECodelists.qualifiedTimestamp : E2ECodelists.nonQualifiedTimestamp
@@ -135,10 +137,49 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var trustedListUnavailable: Bool
         /// The container entry of a nested PAdES signature; nil for a container or a top-level signature.
         public var fileEntryName: String? = nil
+        /// DSS `SignatureQualification` as the validation gave it, e.g. `QESIG` or `INDETERMINATE_QESIG`.
+        public var qualification: String? = nil
+        /// `esign` or `eseal` from the certificate's QcType.
+        public var qcType: String? = nil
+        /// The container's signature file, e.g. `META-INF/signatures001.xml`; nil for PAdES.
+        public var signatureFilename: String? = nil
+        /// End of a PAdES signature's `/ByteRange`; nil for a container signature.
+        public var signedRevisionLength: Int? = nil
 
         public var otherInfo: String {
             "Kvalifikovaný certifikát: \(qualifiedCertificate ? "áno" : "nie")"
         }
+    }
+
+    /// A PDF document timestamp of the original (DSS `DOCUMENT_TIMESTAMP`) with the document it
+    /// covers: the longest document of its file whose revision lies within the timestamped bytes,
+    /// or the file's first document when it covers less (a timestamp revision before the first
+    /// PAdES signature, as Chevron7's own content timestamp).
+    public struct DocumentTimestamp: Sendable, Equatable {
+        public var id: String
+        public var timestamp: Timestamp
+        public var coveredRevisionLength: Int
+        /// The container entry of the PDF; nil for a PDF original.
+        public var fileEntryName: String?
+        public var documentName: String
+    }
+
+    /// A content timestamp in a signature's signed data (XAdES `AllDataObjectsTimeStamp` or
+    /// `IndividualDataObjectsTimeStamp`, CAdES or PAdES `id-aa-ets-contentTimestamp`) with the
+    /// whole-file document of each file it covers.
+    public struct ContentTimestamp: Sendable, Equatable {
+        public var id: String
+        /// The container signature that carries it.
+        public var signatureID: String
+        public var timestamp: Timestamp
+        /// The covered files, as the engine named them.
+        public var fileEntryNames: [String]
+        /// The whole-file document of each covered file; empty when the timestamp cannot be tied
+        /// to the original's documents (no time, no coverage, a file or carrier the original does
+        /// not hold), which record 1.2 refuses rather than leave the timestamp out.
+        public var documentNames: [String]
+
+        public var isResolved: Bool { !documentNames.isEmpty }
     }
 
     public enum NewDocumentPlan: Sendable, Equatable {
@@ -163,9 +204,21 @@ public struct ElectronicOriginal: Sendable, Equatable {
     public var evidence: ConversionEvidence
     /// The files of an `.asicEMultiple` container; empty otherwise.
     public var files: [File] = []
+    /// Document timestamps of the PDF original or of the container's PDFs, in file order; a
+    /// timestamp without a time or a covered length is left out.
+    public var documentTimestamps: [DocumentTimestamp] = []
+    /// Content timestamps in the signatures' signed data, in the engine's order.
+    public var contentTimestamps: [ContentTimestamp] = []
 
     public static func make(sourceName: String, sourceData: Data,
                             evidence: ConversionEvidence) throws -> ElectronicOriginal {
+        var original = try makeOriginal(sourceName: sourceName, sourceData: sourceData, evidence: evidence)
+        original.contentTimestamps = contentTimestamps(of: original)
+        return original
+    }
+
+    private static func makeOriginal(sourceName: String, sourceData: Data,
+                                     evidence: ConversionEvidence) throws -> ElectronicOriginal {
         guard let pdf = evidence.pdf else { throw ElectronicOriginalError.notPDFOrContainer }
         if sourceData.starts(with: Data("%PDF".utf8)) {
             return try makeSingle(sourceName: sourceName, kind: .pdf, pdfData: sourceData, evidence: evidence)
@@ -195,14 +248,16 @@ public struct ElectronicOriginal: Sendable, Equatable {
             }
             let data = try bytes(of: only, in: try entries(sourceData))
             return try makeSingle(sourceName: sourceName, kind: .asicE(entryName: only.name), pdfData: data,
-                                  evidence: evidence)
+                                  evidence: evidence, nested: only.nested)
         }
         return try makeMultiple(sourceName: sourceName, sourceData: sourceData, facts: pdf, evidence: evidence)
     }
 
-    /// A signed PDF, or a container with one unsigned PDF: today's path, unchanged.
+    /// A signed PDF, or a container with one unsigned PDF: today's path, unchanged. `nested` is
+    /// the container PDF's own evidence, which holds only its document timestamps there.
     private static func makeSingle(sourceName: String, kind: Kind, pdfData: Data,
-                                   evidence: ConversionEvidence) throws -> ElectronicOriginal {
+                                   evidence: ConversionEvidence,
+                                   nested: ConversionEvidence.NestedEvidence? = nil) throws -> ElectronicOriginal {
         guard let pdf = evidence.pdf else { throw ElectronicOriginalError.notPDFOrContainer }
         let sourceData = pdfData
         guard !evidence.tree.signatures.isEmpty else { throw ElectronicOriginalError.unsigned }
@@ -216,11 +271,18 @@ public struct ElectronicOriginal: Sendable, Equatable {
 
         var documents: [Document] = []
         var documentBySignature: [String: String] = [:]
+        var documentTimestamps: [DocumentTimestamp] = []
         switch kind {
         case .asicE(let entry):
             documents = [Document(name: displayName(entry), format: format.item, formatOther: format.other,
                                   sha256: Data(SHA256.hash(data: pdfData)))]
             for signature in evidence.tree.signatures { documentBySignature[signature.id] = documents[0].name }
+            // The PDF's own document timestamps, which only the container signature authorizes.
+            if let nested {
+                documentTimestamps = self.documentTimestamps(nested.documentTimestamps, lengths: [pdfData.count],
+                                                             documentNames: [documents[0].name], fileEntryName: entry,
+                                                             validationTime: nested.validationTime)
+            }
         case .pdf, .asicEMultiple:
             var lengths: [Int] = []
             for signature in evidence.tree.signatures {
@@ -243,6 +305,9 @@ public struct ElectronicOriginal: Sendable, Equatable {
                     documentBySignature[signature.id] = documents[index].name
                 }
             }
+            documentTimestamps = self.documentTimestamps(evidence.documentTimestamps, lengths: lengths,
+                                                         documentNames: documents.map(\.name), fileEntryName: nil,
+                                                         validationTime: evidence.validationTime)
         }
 
         let authorizations = try evidence.tree.signatures.map { signature -> Authorization in
@@ -262,8 +327,10 @@ public struct ElectronicOriginal: Sendable, Equatable {
         } else {
             plan = .convert(reason: "PDF nie je platné PDF/A")
         }
-        return ElectronicOriginal(sourceName: sourceName, kind: kind, pdfData: pdfData, documents: documents,
-                                  authorizations: authorizations, plan: plan, evidence: evidence)
+        var original = ElectronicOriginal(sourceName: sourceName, kind: kind, pdfData: pdfData, documents: documents,
+                                          authorizations: authorizations, plan: plan, evidence: evidence)
+        original.documentTimestamps = documentTimestamps
+        return original
     }
 
     /// A container with several files, or with one that is not an unsigned PDF (§ 7.2 of the
@@ -327,6 +394,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         var files: [File] = []
         var documents: [Document] = []
         var nestedAuthorizations: [Authorization] = []
+        var documentTimestamps: [DocumentTimestamp] = []
         for (index, object) in objects.enumerated() {
             let data = try bytes(of: object, in: entries)
             let name = names[index]
@@ -352,6 +420,12 @@ public struct ElectronicOriginal: Sendable, Equatable {
                                                           documentNames: [fileDocuments[position].name],
                                                           validationTime: nested.validationTime,
                                                           fileEntryName: object.name))
+            }
+            if let nested = object.nested {
+                documentTimestamps += self.documentTimestamps(nested.documentTimestamps, lengths: lengths,
+                                                              documentNames: fileDocuments.map(\.name),
+                                                              fileEntryName: object.name,
+                                                              validationTime: nested.validationTime)
             }
             files.append(File(entryName: object.name, displayName: name, kind: object.kind, data: data,
                               documentNames: fileDocuments.map(\.name), embeddedFileNames: object.embeddedFileNames,
@@ -379,6 +453,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
             authorizations: containerAuthorizations + nestedAuthorizations, plan: .convert(reason: reason),
             evidence: evidence)
         original.files = files
+        original.documentTimestamps = documentTimestamps
         return original
     }
 
@@ -397,8 +472,9 @@ public struct ElectronicOriginal: Sendable, Equatable {
     /// The engine's tree lists every PDF data object as `.signed` with its nested tree, empty when
     /// the PDF has no signatures. Called only for a container's only data object that the engine
     /// reports unsigned (`asicDataObjectSigned` false, which a failed signature probe never gives).
+    /// Nested evidence without signatures (a PDF with document timestamps only) keeps it there.
     private static func isUnsignedPDF(_ object: ConversionEvidence.DataObject, tree: SignatureTree) -> Bool {
-        guard object.kind == .pdf, object.problem == nil, object.nested == nil else { return false }
+        guard object.kind == .pdf, object.problem == nil, object.nested?.signatures.isEmpty ?? true else { return false }
         switch tree.documents.first(where: { $0.name == object.name })?.content {
         case nil, .plain?: return true
         case .signed(_, let nested)?: return nested.signatures.isEmpty && nested.documents.isEmpty
@@ -497,7 +573,77 @@ public struct ElectronicOriginal: Sendable, Equatable {
             signatureValue: facts.signatureValue,
             slimReport: facts.slimReport,
             trustedListUnavailable: facts.trustedListUnavailable,
-            fileEntryName: fileEntryName)
+            fileEntryName: fileEntryName,
+            qualification: signature.certificateQualification,
+            qcType: facts.qcType,
+            signatureFilename: facts.signatureFilename,
+            signedRevisionLength: facts.signedRevisionLength)
+    }
+
+    /// Each dated document timestamp with the longest of the file's documents whose revision
+    /// lies within its covered bytes (`lengths` ascending, one per document name). One covering
+    /// less than the first document (a timestamp revision before the first PAdES signature, as
+    /// Chevron7's own content timestamp) names the first, which holds those bytes. A timestamp
+    /// without a covered length or a time names no document.
+    static func documentTimestamps(_ stamps: [ConversionEvidence.DocumentTimestamp], lengths: [Int],
+                                   documentNames: [String], fileEntryName: String?,
+                                   validationTime: Date) -> [DocumentTimestamp] {
+        guard !documentNames.isEmpty else { return [] }
+        return stamps.compactMap { stamp in
+            guard let covered = stamp.coveredRevisionLength, covered > 0, let created = stamp.productionTime else {
+                return nil
+            }
+            let index = lengths.indices.last(where: { lengths[$0] <= covered && $0 < documentNames.count }) ?? 0
+            let timestamp = Timestamp(qualified: stamp.qualification == "QTSA", state: timestampState(stamp.indication),
+                                      created: created, publisherCommonName: stamp.producerCommonName ?? "Neuvedené",
+                                      validationTime: validationTime, id: stamp.id)
+            return DocumentTimestamp(id: stamp.id, timestamp: timestamp, coveredRevisionLength: covered,
+                                     fileEntryName: fileEntryName, documentName: documentNames[index])
+        }
+    }
+
+    /// The content timestamps in the signatures' signed data, each with the whole-file document
+    /// of every file it covers. A CAdES container signature's one (DSS `CONTENT_TIMESTAMP`)
+    /// covers the ASiC manifest its CMS signs, which names the files: DSS scopes it as that
+    /// manifest plus those files, so the manifest is set aside and the files are resolved as for
+    /// XAdES. Fails closed per timestamp: one that cannot be tied to the original's documents and
+    /// to a container signature covering those files (a PAdES one of a PDF original has no
+    /// container carrier) keeps no document names.
+    static func contentTimestamps(of original: ElectronicOriginal) -> [ContentTimestamp] {
+        let wholeFile: [String: String]
+        switch original.kind {
+        case .pdf: wholeFile = [:]
+        case .asicE(let entry): wholeFile = original.documents.first.map { [entry: $0.name] } ?? [:]
+        case .asicEMultiple:
+            wholeFile = Dictionary(original.files.compactMap { file in file.documentNames.last.map { (file.entryName, $0) } },
+                                   uniquingKeysWith: { first, _ in first })
+        }
+        let carriers = Set(original.authorizations.filter { $0.fileEntryName == nil && original.kind != .pdf }
+            .map(\.signatureID))
+        let coverage = Dictionary((original.evidence.pdf?.dataObjects ?? []).map { ($0.name, $0.coveredBy) },
+                                  uniquingKeysWith: { first, _ in first })
+        return original.evidence.contentTimestamps.map { stamp in
+            // Setting aside any top-level ASiC manifest is enough: each remaining file must still
+            // be a known data object that the carrier itself covers (`coveredBy`, checked below).
+            let files = stamp.type == "CONTENT_TIMESTAMP"
+                ? stamp.coveredDataObjects.filter { !isASiCManifest($0) } : stamp.coveredDataObjects
+            let names = files.compactMap { wholeFile[$0] }
+            let resolved = stamp.productionTime != nil && !files.isEmpty && names.count == files.count
+                && Set(files).count == files.count && carriers.contains(stamp.signatureID)
+                && files.allSatisfy { coverage[$0]?.contains(stamp.signatureID) ?? false }
+            let timestamp = Timestamp(qualified: stamp.qualification == "QTSA", state: timestampState(stamp.indication),
+                                      created: stamp.productionTime ?? original.evidence.validationTime,
+                                      publisherCommonName: stamp.producerCommonName ?? "Neuvedené",
+                                      validationTime: original.evidence.validationTime, id: stamp.id)
+            return ContentTimestamp(id: stamp.id, signatureID: stamp.signatureID, timestamp: timestamp,
+                                    fileEntryNames: files, documentNames: resolved ? names : [])
+        }
+    }
+
+    /// `META-INF/ASiCManifest*.xml`, the manifest a CAdES signature of an ASiC-E signs.
+    static func isASiCManifest(_ name: String) -> Bool {
+        guard name.hasPrefix("META-INF/ASiCManifest"), name.hasSuffix(".xml") else { return false }
+        return !name.dropFirst("META-INF/".count).contains("/")
     }
 
     /// Codelist 53: PDF/A-1 and A-2 have items, A-3 is `Iny` with its name, anything else `PDF`.
@@ -545,15 +691,17 @@ public struct ElectronicOriginal: Sendable, Equatable {
             .sorted { $0.productionTime! < $1.productionTime! }
         guard let chosen = dated.first(where: { $0.indication == "PASSED" }) ?? dated.first,
               let created = chosen.productionTime else { return nil }
-        let state: ValidityState
-        switch chosen.indication {
-        case "PASSED": state = .valid
-        case "FAILED": state = .invalid
-        default: state = .undetermined
+        return Timestamp(qualified: chosen.qualification == "QTSA", state: timestampState(chosen.indication),
+                         created: created, publisherCommonName: chosen.producerCommonName ?? "Neuvedené",
+                         validationTime: validationTime, id: chosen.id)
+    }
+
+    static func timestampState(_ indication: String?) -> ValidityState {
+        switch indication {
+        case "PASSED": return .valid
+        case "FAILED": return .invalid
+        default: return .undetermined
         }
-        return Timestamp(qualified: chosen.qualification == "QTSA", state: state, created: created,
-                         publisherCommonName: chosen.producerCommonName ?? "Neuvedené",
-                         validationTime: validationTime)
     }
 
     static func displayName(_ name: String) -> String {

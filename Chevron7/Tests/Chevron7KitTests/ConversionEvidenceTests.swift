@@ -102,6 +102,118 @@ final class ConversionEvidenceTests: XCTestCase {
         XCTAssertEqual(evidence.pdf?.dataObjects, [])
     }
 
+    func testDecodesSignatureFilenameAndDocumentTimestamps() throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.signatureFilename = "META-INF/signatures001.xml"
+        var stamp = E2EEvidenceFixtures.DocumentTimestamp()
+        stamp.coveredRevisionLength = 52_000
+        var nested = E2EEvidenceFixtures.Signature()
+        nested.id = "N-1"
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [nested]
+        var nestedStamp = E2EEvidenceFixtures.DocumentTimestamp()
+        nestedStamp.id = "T-DOC-N"
+        nestedStamp.coveredRevisionLength = 8_192
+        object.nestedDocumentTimestamps = [nestedStamp]
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [signature], dataObjects: [object], documentTimestamps: [stamp]))
+
+        XCTAssertEqual(evidence.signatures.first?.signatureFilename, "META-INF/signatures001.xml")
+        let decoded = try XCTUnwrap(evidence.documentTimestamps.first)
+        XCTAssertEqual(evidence.documentTimestamps.count, 1)
+        XCTAssertEqual(decoded.id, "T-DOC-1")
+        XCTAssertEqual(decoded.productionTime, ISO8601DateFormatter().date(from: "2026-10-11T07:00:00Z"))
+        XCTAssertEqual(decoded.producerCommonName, "BOSA TSA")
+        XCTAssertEqual(decoded.indication, "PASSED")
+        XCTAssertEqual(decoded.qualification, "QTSA")
+        XCTAssertEqual(decoded.coveredRevisionLength, 52_000)
+        let inner = try XCTUnwrap(evidence.pdf?.dataObjects.first?.nested)
+        XCTAssertNil(inner.signatures.first?.signatureFilename)
+        XCTAssertEqual(inner.documentTimestamps.map(\.id), ["T-DOC-N"])
+        XCTAssertEqual(inner.documentTimestamps.first?.coveredRevisionLength, 8_192)
+    }
+
+    func testDecodesContentTimestamps() throws {
+        var stamp = E2EEvidenceFixtures.ContentTimestamp()
+        stamp.coveredDataObjects = ["a.pdf", "dir/b c.pdf"]
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], contentTimestamps: [stamp])) as? [String: Any])
+        let evidence = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(evidence.contentTimestamps, [ConversionEvidence.ContentTimestamp(
+            id: "T-CONTENT-1", signatureID: "C-1", type: "ALL_DATA_OBJECTS_TIMESTAMP",
+            productionTime: ISO8601DateFormatter().date(from: "2026-10-10T08:14:00Z"),
+            producerCommonName: "Sectigo Qualified Time Stamping Signer #2", indication: "PASSED",
+            qualification: "QTSA", coveredDataObjects: ["a.pdf", "dir/b c.pdf"])])
+
+        // A timestamp without its carrier degrades to an empty one, never the whole evidence.
+        var body = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var stamps = try XCTUnwrap(body["contentTimestamps"] as? [[String: Any]])
+        stamps[0].removeValue(forKey: "signatureId")
+        body["contentTimestamps"] = stamps
+        json["evidence"] = body
+        let degraded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(degraded.contentTimestamps.map(\.signatureID), [""])
+
+        // An old payload has none.
+        body.removeValue(forKey: "contentTimestamps")
+        json["evidence"] = body
+        let old = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(old.contentTimestamps, [])
+    }
+
+    func testOldPayloadHasNoDocumentTimestamps() throws {
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [E2EEvidenceFixtures.Signature()]
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], dataObjects: [object])) as? [String: Any])
+        var evidence = try XCTUnwrap(json["evidence"] as? [String: Any])
+        evidence.removeValue(forKey: "documentTimestamps")
+        var pdf = try XCTUnwrap(evidence["pdf"] as? [String: Any])
+        var objects = try XCTUnwrap(pdf["dataObjects"] as? [[String: Any]])
+        var nested = try XCTUnwrap(objects[0]["evidence"] as? [String: Any])
+        nested.removeValue(forKey: "documentTimestamps")
+        objects[0]["evidence"] = nested
+        pdf["dataObjects"] = objects
+        evidence["pdf"] = pdf
+        json["evidence"] = evidence
+        let decoded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+
+        XCTAssertEqual(decoded.documentTimestamps, [])
+        XCTAssertNil(decoded.signatures.first?.signatureFilename)
+        let inner = try XCTUnwrap(decoded.pdf?.dataObjects.first?.nested)
+        XCTAssertEqual(inner.documentTimestamps, [])
+    }
+
+    func testMalformedNestedDocumentTimestampDegradesOnlyItsDataObject() throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.signatureFilename = "META-INF/signatures001.xml"
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [E2EEvidenceFixtures.Signature()]
+        object.nestedDocumentTimestamps = [E2EEvidenceFixtures.DocumentTimestamp()]
+        let other = E2EEvidenceFixtures.DataObject(name: "druha.pdf")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [signature], dataObjects: [object, other])) as? [String: Any])
+        var evidence = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var pdf = try XCTUnwrap(evidence["pdf"] as? [String: Any])
+        var objects = try XCTUnwrap(pdf["dataObjects"] as? [[String: Any]])
+        var nested = try XCTUnwrap(objects[0]["evidence"] as? [String: Any])
+        var stamps = try XCTUnwrap(nested["documentTimestamps"] as? [[String: Any]])
+        stamps[0].removeValue(forKey: "id")
+        nested["documentTimestamps"] = stamps
+        objects[0]["evidence"] = nested
+        pdf["dataObjects"] = objects
+        evidence["pdf"] = pdf
+        json["evidence"] = evidence
+
+        let decoded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.signatures.first?.signatureFilename, "META-INF/signatures001.xml")
+        let list = try XCTUnwrap(decoded.pdf?.dataObjects)
+        XCTAssertNil(list[0].nested)
+        XCTAssertEqual(list[0].problem, "NESTED_UNREADABLE")
+        XCTAssertEqual(list[0].kind, .pdf)
+        XCTAssertNil(list[1].problem)
+    }
+
     func testTolerantOfUnknownKeys() throws {
         var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
             signatures: [E2EEvidenceFixtures.Signature()])) as? [String: Any])

@@ -10,6 +10,7 @@ import eu.europa.esig.dss.diagnostic.DiagnosticData;
 import eu.europa.esig.dss.diagnostic.SignatureWrapper;
 import eu.europa.esig.dss.enumerations.Indication;
 import eu.europa.esig.dss.enumerations.QCTypeEnum;
+import eu.europa.esig.dss.enumerations.TimestampType;
 import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.model.InMemoryDocument;
@@ -138,6 +139,8 @@ public final class ConversionEvidenceService {
             signatures.add(signatureFacts(diagnostic, simple, id, etsi, unavailable));
         }
         evidence.add("signatures", signatures);
+        evidence.add("documentTimestamps", documentTimestamps(diagnostic, simple));
+        evidence.add("contentTimestamps", contentTimestamps(diagnostic, simple));
         var pdf = pdfFacts(content, diagnostic, knownPdfFacts);
         if (pdf != null) {
             evidence.add("pdf", pdf);
@@ -150,6 +153,11 @@ public final class ConversionEvidenceService {
         var facts = new JsonObject();
         facts.addProperty("id", id);
         var signature = diagnostic.getSignatureById(id);
+        // The container's signature file (`META-INF/signatures...xml`). For PAdES DSS names the
+        // PDF itself, which is no signature file, so it is left out there.
+        if (signature.getPDFRevision() == null && signature.getFilename() != null) {
+            facts.addProperty("signatureFilename", signature.getFilename());
+        }
         if (signature.getSignatureValue() != null) {
             facts.addProperty("signatureValueBase64", Base64.getEncoder().encodeToString(signature.getSignatureValue()));
         }
@@ -191,6 +199,80 @@ public final class ConversionEvidenceService {
             var qualification = simple.getTimestampQualification(timestamp.getId());
             if (qualification != null) entry.addProperty("qualification", qualification.name());
             timestamps.add(entry);
+        }
+        return timestamps;
+    }
+
+    /// The PDF's document timestamps (DSS `DOCUMENT_TIMESTAMP`), each with the end of its
+    /// `/ByteRange` as `coveredRevisionLength`: the revision it covers is that prefix.
+    private static JsonArray documentTimestamps(DiagnosticData diagnostic, SimpleReport simple) {
+        var timestamps = new JsonArray();
+        for (var timestamp : diagnostic.getTimestampList()) {
+            if (timestamp.getType() != TimestampType.DOCUMENT_TIMESTAMP) continue;
+            var entry = new JsonObject();
+            entry.addProperty("id", timestamp.getId());
+            if (timestamp.getProductionTime() != null) {
+                entry.addProperty("productionTime", timestamp.getProductionTime().toInstant().toString());
+            }
+            var certificate = timestamp.getSigningCertificate();
+            if (certificate != null) entry.addProperty("producerCommonName", certificate.getCommonName());
+            var indication = simple.getIndication(timestamp.getId());
+            if (indication != null) entry.addProperty("indication", indication.name());
+            var qualification = simple.getTimestampQualification(timestamp.getId());
+            if (qualification != null) entry.addProperty("qualification", qualification.name());
+            var revision = timestamp.getPDFRevision();
+            var range = revision == null ? null : revision.getSignatureByteRange();
+            if (range != null && range.size() == 4) {
+                entry.addProperty("coveredRevisionLength", range.get(2).add(range.get(3)));
+            }
+            timestamps.add(entry);
+        }
+        return timestamps;
+    }
+
+    /// Content timestamps in the signed data of each signature: XAdES (DSS
+    /// `ALL_DATA_OBJECTS_TIMESTAMP`, `INDIVIDUAL_DATA_OBJECTS_TIMESTAMP`) and the CAdES or PAdES
+    /// signed attribute `id-aa-ets-contentTimestamp` (DSS `CONTENT_TIMESTAMP`), which DSS never
+    /// counts among the timestamps produced after the signature. Each comes with the signature
+    /// that carries it (`signatureId`) and the data objects it covers (`coveredDataObjects`,
+    /// DSS's timestamp scope names, which name the data objects as the signature scopes do), so
+    /// the app can list it or refuse what it cannot tie to the documents, never leave it out.
+    private static JsonArray contentTimestamps(DiagnosticData diagnostic, SimpleReport simple) {
+        var timestamps = new JsonArray();
+        for (var signatureId : simple.getSignatureIdList()) {
+            var signature = diagnostic.getSignatureById(signatureId);
+            if (signature == null) continue;
+            for (var timestamp : signature.getTimestampList()) {
+                if (timestamp.getType() != TimestampType.ALL_DATA_OBJECTS_TIMESTAMP
+                        && timestamp.getType() != TimestampType.INDIVIDUAL_DATA_OBJECTS_TIMESTAMP
+                        && timestamp.getType() != TimestampType.CONTENT_TIMESTAMP) {
+                    continue;
+                }
+                var entry = new JsonObject();
+                entry.addProperty("id", timestamp.getId());
+                entry.addProperty("signatureId", signatureId);
+                entry.addProperty("type", timestamp.getType().name());
+                if (timestamp.getProductionTime() != null) {
+                    entry.addProperty("productionTime", timestamp.getProductionTime().toInstant().toString());
+                }
+                var certificate = timestamp.getSigningCertificate();
+                if (certificate != null) entry.addProperty("producerCommonName", certificate.getCommonName());
+                var indication = simple.getIndication(timestamp.getId());
+                if (indication != null) entry.addProperty("indication", indication.name());
+                var qualification = simple.getTimestampQualification(timestamp.getId());
+                if (qualification != null) entry.addProperty("qualification", qualification.name());
+                var covered = new JsonArray();
+                var scopes = timestamp.getTimestampScopes();
+                if (scopes != null) {
+                    for (var scope : scopes) {
+                        if (scope.getName() != null && !covered.contains(new com.google.gson.JsonPrimitive(scope.getName()))) {
+                            covered.add(scope.getName());
+                        }
+                    }
+                }
+                entry.add("coveredDataObjects", covered);
+                timestamps.add(entry);
+            }
         }
         return timestamps;
     }
@@ -429,16 +511,21 @@ public final class ConversionEvidenceService {
         return facts;
     }
 
-    /// A PDF data object that carries PAdES signatures gets `evidence`: the same keys as the
-    /// top-level evidence (no tree), from one more validation of its own bytes through the same
-    /// injected validation and trusted list state, so `signedRevisionLength` is relative to it.
-    /// Never recurses: the nested `pdf` facts of a PDF list no data objects. A failure leaves the
-    /// kind `pdf`, omits `evidence` and adds `problem` "NESTED_UNREADABLE".
+    /// A PDF data object that carries PAdES signatures or document timestamps gets `evidence`:
+    /// the same keys as the top-level evidence (no tree), from one more validation of its own
+    /// bytes through the same injected validation and trusted list state, so
+    /// `signedRevisionLength` and `coveredRevisionLength` are relative to it. A PDF with document
+    /// timestamps only gets it with no signatures, so its timestamps are not lost. Never
+    /// recurses: the nested `pdf` facts of a PDF list no data objects. A failure leaves the kind
+    /// `pdf`, omits `evidence` and adds `problem` "NESTED_UNREADABLE".
     private void addNestedEvidence(JsonObject facts, byte[] bytes, JsonObject pdfFacts) {
         try {
-            if (!signatureProbe.test(bytes)) return;
+            if (!signatureProbe.test(bytes) && !hasDocumentTimestamps(bytes)) return;
             var body = evidenceBody(new InMemoryDocument(bytes), bytes, pdfFacts);
-            if (body.evidence().getAsJsonArray("signatures").isEmpty()) return;
+            if (body.evidence().getAsJsonArray("signatures").isEmpty()
+                    && body.evidence().getAsJsonArray("documentTimestamps").isEmpty()) {
+                return;
+            }
             facts.add("evidence", body.evidence());
         } catch (RuntimeException exception) {
             facts.addProperty("problem", "NESTED_UNREADABLE");
@@ -464,6 +551,18 @@ public final class ConversionEvidenceService {
         }
         validator.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
         return !validator.getSignatures().isEmpty();
+    }
+
+    /// Whether DSS finds a document timestamp (a timestamp revision, PAdES-LTA or the content
+    /// timestamp before a PAdES signature) in these PDF bytes, without validating it. Throws
+    /// when DSS cannot read them.
+    static boolean hasDocumentTimestamps(byte[] bytes) {
+        var validator = DSSUtils.createDocumentValidator(new InMemoryDocument(bytes));
+        if (validator == null) {
+            throw new IllegalArgumentException("No validator for PDF bytes");
+        }
+        validator.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
+        return !validator.getDetachedTimestamps().isEmpty();
     }
 
     /// `PdfConversionFacts.read`, with a PDFBox runtime failure on malformed bytes reported as

@@ -9,7 +9,9 @@ electronic document to a new electronic document (E→E) it holds record 1.0
 (`ConversionRecordOfElectronicDocumentToElectronicDocument`, `record-e2e-1.0`, signer presentation
 `Content/form101.sb.xslt`) and clause 1.3 (`ConversionCertificateOfElectronicDocumentToElectronicDocument`,
 `clause-e2e-1.3`, signer presentation `Content/form.19.html2.xslt`, the only one of its two `sign`
-entries that carries the "Osvedčujem, že ..." sentence). Sources, hashes and the digest
+entries that carries the "Osvedčujem, že ..." sentence), and from 1. 1. 2027 record 1.2
+(`ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk`, `record-e2e-1.2`, signer
+presentation `Content/form101.sb.xslt`, official schema compiled by libxml2 as is). Sources, hashes and the digest
 rule are in `provenance.json`. The presentation file is the package manifest's
 `media-destination="sign"` entry (record: TXT; clause: the HTML one).
 

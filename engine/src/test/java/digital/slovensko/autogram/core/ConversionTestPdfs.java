@@ -37,6 +37,19 @@ public final class ConversionTestPdfs {
     }
 
     public static byte[] sign(byte[] pdf, boolean visible) throws Exception {
+        return sign(pdf, visible, null);
+    }
+
+    /// An invisible PAdES Baseline B signature whose CMS carries a content timestamp from
+    /// `authority` as the signed attribute `id-aa-ets-contentTimestamp` (DSS `CONTENT_TIMESTAMP`),
+    /// not as a document timestamp revision.
+    public static byte[] signWithContentTimestamp(byte[] pdf, eu.europa.esig.dss.spi.x509.tsp.TSPSource authority)
+            throws Exception {
+        return sign(pdf, false, authority);
+    }
+
+    private static byte[] sign(byte[] pdf, boolean visible, eu.europa.esig.dss.spi.x509.tsp.TSPSource contentAuthority)
+            throws Exception {
         var token = new Pkcs12SignatureToken(
                 Objects.requireNonNull(ConversionTestPdfs.class.getResource("/digital/slovensko/autogram/test.keystore")).getFile(),
                 new KeyStore.PasswordProtection("".toCharArray()));
@@ -63,10 +76,27 @@ public final class ConversionTestPdfs {
         verifier.setAlertOnExpiredCertificate(new eu.europa.esig.dss.alert.LogOnStatusAlert());
         var service = new PAdESService(verifier);
         DSSDocument document = new InMemoryDocument(pdf, "document.pdf");
+        if (contentAuthority != null) {
+            service.setTspSource(contentAuthority);
+            parameters.setContentTimestamps(java.util.List.of(service.getContentTimestamp(document, parameters)));
+        }
         var toSign = service.getDataToSign(document, parameters);
         var value = token.sign(toSign, parameters.getDigestAlgorithm(), key);
         try (var signed = service.signDocument(document, parameters, value).openStream()) {
             return signed.readAllBytes();
+        } catch (java.io.IOException exception) {
+            throw new java.io.UncheckedIOException(exception);
+        }
+    }
+
+    /// Adds a PDF document timestamp (PAdES-LTA style) from `authority` as a new revision.
+    public static byte[] documentTimestamp(byte[] pdf, eu.europa.esig.dss.spi.x509.tsp.TSPSource authority) {
+        var service = new PAdESService(new CommonCertificateVerifier());
+        service.setTspSource(authority);
+        var document = service.timestamp(new InMemoryDocument(pdf, "document.pdf"),
+                new eu.europa.esig.dss.pades.PAdESTimestampParameters());
+        try (var stream = document.openStream()) {
+            return stream.readAllBytes();
         } catch (java.io.IOException exception) {
             throw new java.io.UncheckedIOException(exception);
         }

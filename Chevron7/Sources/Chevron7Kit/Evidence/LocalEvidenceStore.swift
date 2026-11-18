@@ -324,6 +324,15 @@ public final class LocalEvidenceStore: @unchecked Sendable {
         return relativePath
     }
 
+    /// Removes evidence stored by `storeValidationEvidence` for a row that was never written;
+    /// does nothing for a path outside `<folder>/validation/`.
+    public func removeValidationEvidence(at path: String) {
+        let folder = folderURL.appendingPathComponent("validation", isDirectory: true).standardizedFileURL
+        let candidate = folderURL.appendingPathComponent(path).standardizedFileURL
+        guard candidate.path.hasPrefix(folder.path + "/") else { return }
+        try? FileManager.default.removeItem(at: candidate)
+    }
+
     /// Reads back the evidence stored by `storeValidationEvidence`; refuses any path outside
     /// `<folder>/validation/`, as `recordContainerData(for:)` does for records.
     public func validationEvidenceData(for record: EvidenceRecord) -> Data? {

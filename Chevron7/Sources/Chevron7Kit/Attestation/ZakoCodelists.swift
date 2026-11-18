@@ -99,6 +99,8 @@ public enum ZakoCodelists {
 
     /// CL009009, "Formát novovzniknutého elektronického dokumentu zaručenou konverziou".
     public static let record12NewDocumentFormatCode = "https://metais.vicepremier.gov.sk/set/codelist/CL009009"
+    /// CL009009 item 1, PDF/A-1: an E→E original kept byte for byte as PDF/A-1.
+    public static let record12PDFA1Item = ZakoCodelistItem(code: "1", skName: "PDF/A-1")
     /// CL009009 item 2 (1 PDF/A-1, 2 PDF/A-2, 3 PDF/A-3, 4 PNG).
     public static let record12PDFA2Item = ZakoCodelistItem(code: "2", skName: "PDF/A-2")
     /// The format text of the one-PDF output: the clause's `NewDocumentFormatOther`, record 1.0's
@@ -111,6 +113,25 @@ public enum ZakoCodelists {
     public static let record12SHA256Item = ZakoCodelistItem(code: "2.16.840.1.101.3.4.2.1", skName: "sha-256")
     /// CL004001, identifier type; item 7 is IČO.
     public static let record12IdentifierTypeCode = "https://data.gov.sk/set/codelist/CL004001"
+
+    // MARK: E→E record 1.2: CL009008
+    //
+    // CL009008, "Formát pôvodného elektronického dokumentu" (`OriginalDocumentFormat` of E→E
+    // record 1.2). Items read on 2026-11-18 from the MetaIS codelist repository,
+    // `https://metais.slovensko.sk/api/codelist-repo/codelists/codelistheaders/CL009008/codelistitems?language=sk&pageNumber=1&perPage=100`
+    // (the codelist page is `https://metais.slovensko.sk/codelists/CL009008`; published, items
+    // valid from 2021-01-14, PDF/A-3 from 2021-01-22): 1 PDF, 2 PDF/A-1, 3 PDF/A-2, 4 PNG,
+    // 5 XMLDataContainer, 6 TXT, 7 Iný, 8 PDF/A-3. The codes are not CL009009's (there 2 is
+    // PDF/A-2 and 3 is PDF/A-3). The code URI follows CL009009's form above.
+
+    public static let record12OriginalFormatCode = "https://metais.vicepremier.gov.sk/set/codelist/CL009008"
+    public static let record12OriginalFormatPDF = ZakoCodelistItem(code: "1", skName: "PDF")
+    public static let record12OriginalFormatPDFA1 = ZakoCodelistItem(code: "2", skName: "PDF/A-1")
+    public static let record12OriginalFormatPDFA2 = ZakoCodelistItem(code: "3", skName: "PDF/A-2")
+    public static let record12OriginalFormatPDFA3 = ZakoCodelistItem(code: "8", skName: "PDF/A-3")
+    public static let record12OriginalFormatPNG = ZakoCodelistItem(code: "4", skName: "PNG")
+    /// "Iný": the format text then goes to `OriginalDocumentFormatOther` (for example `JPEG`).
+    public static let record12OriginalFormatOther = ZakoCodelistItem(code: "7", skName: "Iný")
 
     /// The record 1.2 security element description: the clause codelist 15 code, which is a 1.2
     /// enum value word for word except the permanent binding, spelled differently in 1.2.

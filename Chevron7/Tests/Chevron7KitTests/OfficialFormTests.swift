@@ -52,6 +52,39 @@ final class OfficialFormTests: XCTestCase {
         XCTAssertEqual(record.presentationMediaDestination, "TXT")
     }
 
+    func testRecordE2E12IsEmbeddedWithItsHash() throws {
+        let record = OfficialForm.recordE2E_1_2
+        XCTAssertEqual(record.identifier,
+                       "http://data.gov.sk/doc/eform/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk/1.2")
+        XCTAssertEqual(record.namespace,
+                       "http://schemas.gov.sk/form/50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk/1.2")
+        XCTAssertEqual(record.version, "1.2")
+        XCTAssertEqual(record.presentationMediaDestination, "TXT")
+        XCTAssertEqual(record.validationSchema, record.schema, "libxml2 compiles the official schema as is")
+        let provenance = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: formsDirectory.appendingPathComponent("provenance.json"))) as? [String: Any]
+        let package = try XCTUnwrap((provenance?["packages"] as? [String: [String: String]])?["record-e2e-1.2"])
+        XCTAssertEqual(package["sha256"], "cfcf60e1f27dcec319e43cbbf6e2e48d882798f1058f22aea383a0af251453b8")
+        let files = try XCTUnwrap(provenance?["files"] as? [String: [String: String]])
+        let hex = SHA256.hash(data: record.schema).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(files["record-e2e-1.2/schema.xsd"]?["sha256"], hex)
+        let text = String(decoding: record.schema, as: UTF8.self)
+        XCTAssertTrue(text.contains("targetNamespace=\"\(record.namespace)\""))
+        XCTAssertTrue(text.contains("OriginalDocumentFormatOther"))
+    }
+
+    func testCL009008ItemsCarryTheirSource() {
+        XCTAssertEqual(ZakoCodelists.record12OriginalFormatCode, "https://metais.vicepremier.gov.sk/set/codelist/CL009008")
+        let items = [
+            ZakoCodelists.record12OriginalFormatPDF, ZakoCodelists.record12OriginalFormatPDFA1,
+            ZakoCodelists.record12OriginalFormatPDFA2, ZakoCodelists.record12OriginalFormatPDFA3,
+            ZakoCodelists.record12OriginalFormatPNG, ZakoCodelists.record12OriginalFormatOther,
+        ]
+        XCTAssertEqual(items.map(\.code), ["1", "2", "3", "8", "4", "7"])
+        XCTAssertEqual(items.map(\.skName), ["PDF", "PDF/A-1", "PDF/A-2", "PDF/A-3", "PNG", "Iný"])
+        XCTAssertTrue(items.allSatisfy { !$0.code.isEmpty })
+    }
+
     func testE2ERecordValidationSchemaDiffersOnlyInTheIdentifierPattern() {
         let official = String(decoding: OfficialForm.recordE2E_1_0.schema, as: UTF8.self).components(separatedBy: "\n")
         let validation = String(decoding: OfficialForm.recordE2E_1_0.validationSchema, as: UTF8.self).components(separatedBy: "\n")
@@ -83,6 +116,8 @@ final class OfficialFormTests: XCTestCase {
             ("record-1.2/form103.sb.xslt", OfficialForm.record_1_2.presentation),
             ("clause-1.3/schema.xsd", OfficialForm.clause_1_3.schema),
             ("clause-1.3/form.2.html2.xslt", OfficialForm.clause_1_3.presentation),
+            ("record-e2e-1.2/schema.xsd", OfficialForm.recordE2E_1_2.schema),
+            ("record-e2e-1.2/form101.sb.xslt", OfficialForm.recordE2E_1_2.presentation),
             ("record-e2e-1.0/schema.xsd", OfficialForm.recordE2E_1_0.schema),
             ("record-e2e-1.0/schema.validation.xsd", OfficialForm.recordE2E_1_0.validationSchema),
             ("record-e2e-1.0/form101.sb.xslt", OfficialForm.recordE2E_1_0.presentation),
@@ -98,7 +133,7 @@ final class OfficialFormTests: XCTestCase {
     }
 
     func testStoredDigestsRecomputeFromTheEmbeddedFiles() throws {
-        for form in [OfficialForm.record_1_0, .record_1_2, .clause_1_3, .recordE2E_1_0, .clauseE2E_1_3] {
+        for form in [OfficialForm.record_1_0, .record_1_2, .clause_1_3, .recordE2E_1_0, .recordE2E_1_2, .clauseE2E_1_3] {
             XCTAssertEqual(try Self.canonicalDigest(form.schema), form.schemaDigestBase64, form.identifier)
             XCTAssertEqual(try Self.canonicalDigest(form.presentation), form.presentationDigestBase64, form.identifier)
         }

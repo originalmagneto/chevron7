@@ -164,4 +164,38 @@ final class FormPackTests: XCTestCase {
         XCTAssertFalse(acceptedButUnverified.isProductionEligible)
         XCTAssertTrue(pack().isProductionEligible)
     }
+
+    func testE2EPackSplitsAtRecordFirstFrom() {
+        let before = ZakoRegime.recordFirstFrom.addingTimeInterval(-1)
+        let old = FormPackRepository.e2ePack(at: before)
+        XCTAssertEqual(old.id, FormPackRepository.e2eRecord10Unverified.id)
+        XCTAssertEqual(old.direction, .electronicToElectronic)
+        XCTAssertEqual(old.recordVersion, "1.0")
+        XCTAssertEqual(old.clauseVersion, "1.3")
+        let new = FormPackRepository.e2ePack(at: ZakoRegime.recordFirstFrom)
+        XCTAssertEqual(new.id, FormPackRepository.e2eRecord12Unverified.id)
+        XCTAssertEqual(new.direction, .electronicToElectronic)
+        XCTAssertEqual(new.recordVersion, "1.2")
+        XCTAssertEqual(new.clauseVersion, "1.3")
+        XCTAssertEqual(new.namespace, OfficialForm.recordE2E_1_2.namespace)
+        XCTAssertEqual(new.eFormIdentifier, OfficialForm.recordE2E_1_2.identifier)
+        XCTAssertEqual(old.namespace, OfficialForm.recordE2E_1_0.namespace)
+        XCTAssertNotEqual(old.id, FormPackRepository.currentLegacyUnverified.id)
+        XCTAssertNotEqual(new.id, FormPackRepository.record12Unverified.id)
+        XCTAssertFalse(old.isProductionEligible)
+        XCTAssertFalse(new.isProductionEligible)
+    }
+
+    func testRecordFormOfE2EPacks() {
+        XCTAssertEqual(FormPackRepository.recordForm(of: FormPackRepository.e2eRecord10Unverified), .recordE2E_1_0)
+        XCTAssertEqual(FormPackRepository.recordForm(of: FormPackRepository.e2eRecord12Unverified), .recordE2E_1_2)
+        XCTAssertEqual(FormPackRepository.recordForm(of: FormPackRepository.currentLegacyUnverified), .record_1_0)
+        XCTAssertEqual(FormPackRepository.recordForm(of: FormPackRepository.record12Unverified), .record_1_2)
+    }
+
+    func testE2EPacksStayOutOfTheDefaultRepository() {
+        let ids = FormPackRepository().packs.map(\.id)
+        XCTAssertFalse(ids.contains(FormPackRepository.e2eRecord10Unverified.id))
+        XCTAssertFalse(ids.contains(FormPackRepository.e2eRecord12Unverified.id))
+    }
 }

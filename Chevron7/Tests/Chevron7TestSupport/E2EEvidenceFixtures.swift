@@ -18,6 +18,34 @@ public enum E2EEvidenceFixtures {
         public init() {}
     }
 
+    /// A PDF document timestamp (DSS `DOCUMENT_TIMESTAMP`) as the engine lists it.
+    public struct DocumentTimestamp {
+        public var id = "T-DOC-1"
+        public var productionTime = "2026-10-11T07:00:00Z"
+        public var producerCommonName = "BOSA TSA"
+        public var indication = "PASSED"
+        public var qualification = "QTSA"
+        public var coveredRevisionLength: Int? = nil
+
+        public init() {}
+    }
+
+    /// A content timestamp in a signature's signed data (DSS `ALL_DATA_OBJECTS_TIMESTAMP` by
+    /// default, or `CONTENT_TIMESTAMP` for CAdES and PAdES), as the engine lists it under
+    /// `contentTimestamps`.
+    public struct ContentTimestamp {
+        public var id = "T-CONTENT-1"
+        public var signatureID = "C-1"
+        public var type = "ALL_DATA_OBJECTS_TIMESTAMP"
+        public var productionTime = "2026-10-10T08:14:00Z"
+        public var producerCommonName = "Sectigo Qualified Time Stamping Signer #2"
+        public var indication = "PASSED"
+        public var qualification = "QTSA"
+        public var coveredDataObjects: [String] = []
+
+        public init() {}
+    }
+
     public struct Signature {
         public var id = "S-1"
         public var indication = "TOTAL_PASSED"
@@ -39,6 +67,8 @@ public enum E2EEvidenceFixtures {
         public var signatureValue = Data("signature-value-1".utf8)
         public var documents: [String] = []
         public var timestamps: [Timestamp] = [Timestamp()]
+        /// The container's signature file, `META-INF/signatures...xml`; none for PAdES.
+        public var signatureFilename: String? = nil
 
         public init() {}
     }
@@ -68,9 +98,14 @@ public enum E2EEvidenceFixtures {
         public var embeddedFileNames: [String] = []
         public var widthPx: Int? = nil
         public var heightPx: Int? = nil
-        /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`.
+        /// Signatures of the PDF's own PAdES revisions; non-empty adds the nested `evidence`, as
+        /// do document timestamps alone.
         public var nestedSignatures: [Signature] = []
         public var nestedPDF: PDF? = nil
+        /// The PDF's own document timestamps, listed in the nested `evidence`.
+        public var nestedDocumentTimestamps: [DocumentTimestamp] = []
+        /// Content timestamps inside the PDF's own PAdES signatures, listed in the nested `evidence`.
+        public var nestedContentTimestamps: [ContentTimestamp] = []
         /// The nested evidence's own validation time.
         public var nestedValidationTime = E2EEvidenceFixtures.validationTime
         /// Whether the tree lists the nested signatures under this data object, as the engine does.
@@ -86,8 +121,12 @@ public enum E2EEvidenceFixtures {
 
     public static let validationTime = "2026-10-16T09:30:00Z"
 
-    public static func payload(signatures: [Signature], pdf: PDF? = PDF(), dataObjects: [DataObject] = []) -> Data {
-        let (tree, evidence) = evidenceBody(signatures: signatures, pdf: pdf, dataObjects: dataObjects)
+    public static func payload(signatures: [Signature], pdf: PDF? = PDF(), dataObjects: [DataObject] = [],
+                               documentTimestamps: [DocumentTimestamp] = [],
+                               contentTimestamps: [ContentTimestamp] = []) -> Data {
+        let (tree, evidence) = evidenceBody(signatures: signatures, pdf: pdf, dataObjects: dataObjects,
+                                            documentTimestamps: documentTimestamps,
+                                            contentTimestamps: contentTimestamps)
         let payload: [String: Any] = ["signatures": tree, "documents": dataObjects.map(treeDocumentJSON),
                                       "evidence": evidence]
         return try! JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -95,6 +134,8 @@ public enum E2EEvidenceFixtures {
 
     /// The tree entries and the `evidence` object, also the shape of a data object's nested `evidence`.
     private static func evidenceBody(signatures: [Signature], pdf: PDF?, dataObjects: [DataObject],
+                                     documentTimestamps: [DocumentTimestamp] = [],
+                                     contentTimestamps: [ContentTimestamp] = [],
                                      validationTime: String = E2EEvidenceFixtures.validationTime) -> ([[String: Any]], [String: Any]) {
         var tree: [[String: Any]] = []
         var facts: [[String: Any]] = []
@@ -133,12 +174,30 @@ public enum E2EEvidenceFixtures {
             if let value = signature.mandate { fact["mandate"] = value }
             if let value = signature.qcType { fact["qcType"] = value }
             if let value = signature.productionPlace { fact["productionPlace"] = value }
+            if let value = signature.signatureFilename { fact["signatureFilename"] = value }
             facts.append(fact)
         }
         var evidence: [String: Any] = [
             "validationTime": validationTime, "dssVersion": "6.4",
             "etsiReportBase64": Data("<ValidationReport/>".utf8).base64EncodedString(),
-            "signatures": facts
+            "signatures": facts,
+            "documentTimestamps": documentTimestamps.map { stamp -> [String: Any] in
+                var json: [String: Any] = [
+                    "id": stamp.id, "productionTime": stamp.productionTime,
+                    "producerCommonName": stamp.producerCommonName, "indication": stamp.indication,
+                    "qualification": stamp.qualification
+                ]
+                if let value = stamp.coveredRevisionLength { json["coveredRevisionLength"] = value }
+                return json
+            },
+            "contentTimestamps": contentTimestamps.map { stamp -> [String: Any] in
+                [
+                    "id": stamp.id, "signatureId": stamp.signatureID, "type": stamp.type,
+                    "productionTime": stamp.productionTime, "producerCommonName": stamp.producerCommonName,
+                    "indication": stamp.indication, "qualification": stamp.qualification,
+                    "coveredDataObjects": stamp.coveredDataObjects
+                ]
+            }
         ]
         if let pdf {
             var facts: [String: Any] = [
@@ -173,8 +232,10 @@ public enum E2EEvidenceFixtures {
         if object.kind == "pdf" {
             let own = object.nestedPDF ?? PDF()
             for (key, value) in pdfFacts(own) { json[key] = value }
-            if !object.nestedSignatures.isEmpty {
+            if !object.nestedSignatures.isEmpty || !object.nestedDocumentTimestamps.isEmpty {
                 json["evidence"] = evidenceBody(signatures: object.nestedSignatures, pdf: own, dataObjects: [],
+                                                documentTimestamps: object.nestedDocumentTimestamps,
+                                                contentTimestamps: object.nestedContentTimestamps,
                                                 validationTime: object.nestedValidationTime).1
             }
         }
