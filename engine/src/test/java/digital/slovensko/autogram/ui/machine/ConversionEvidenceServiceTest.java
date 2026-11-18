@@ -274,6 +274,127 @@ class ConversionEvidenceServiceTest {
     }
 
     @Test
+    void signedPdfDataObjectCarriesNestedEvidence() throws Exception {
+        var signed = ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false);
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", signed),
+                new Entry("b.pdf", ConversionTestPdfs.withText("B")))));
+
+        var objects = pdf.getAsJsonArray("dataObjects");
+        var nested = objects.get(0).getAsJsonObject().getAsJsonObject("evidence");
+        assertNotNull(nested, objects.get(0).toString());
+        var signatures = nested.getAsJsonArray("signatures");
+        assertEquals(1, signatures.size(), signatures.toString());
+        var signature = signatures.get(0).getAsJsonObject();
+        assertTrue(Base64.getDecoder().decode(signature.get("signatureValueBase64").getAsString()).length > 100);
+        assertTrue(decoded(signature.get("etsiSignatureReportBase64").getAsString()).contains("SignatureValidationReport"));
+        assertEquals(signed.length, signature.get("signedRevisionLength").getAsLong());
+        assertEquals("6.4", nested.get("dssVersion").getAsString());
+        assertNotNull(nested.get("validationTime"));
+        assertTrue(decoded(nested.get("etsiReportBase64").getAsString()).contains("ValidationReport"));
+        assertEquals(0, nested.getAsJsonObject("pdf").getAsJsonArray("changesAfterLastSignature").size());
+        assertTrue(nested.getAsJsonObject("pdf").has("pdfaCompliant"));
+        assertFalse(nested.has("tree"), nested.toString());
+        assertFalse(objects.get(0).getAsJsonObject().has("problem"), objects.get(0).toString());
+        assertFalse(objects.get(1).getAsJsonObject().has("evidence"), objects.get(1).toString());
+    }
+
+    @Test
+    void nestedChangesAfterSignatureAreReported() throws Exception {
+        var changed = ConversionTestPdfs.annotateIncrementally(ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false));
+        var pdf = pdfEvidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", changed),
+                new Entry("b.pdf", ConversionTestPdfs.withText("B")))));
+
+        var changes = dataObject(pdf, "zmluva.pdf").getAsJsonObject("evidence").getAsJsonObject("pdf")
+                .getAsJsonArray("changesAfterLastSignature");
+        assertTrue(changes.toString().contains("ANNOTATION"), changes.toString());
+    }
+
+    @Test
+    void nestedTrustedListStateUsesTheSameCountries() throws Exception {
+        var signed = ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false);
+        var probe = DSSUtils.createDocumentValidator(new eu.europa.esig.dss.model.InMemoryDocument(signed));
+        probe.setCertificateVerifier(new CommonCertificateVerifier());
+        var issuer = probe.getSignatures().getFirst().getSigningCertificateToken().getIssuer().getPrincipal().getName();
+        var subject = probe.getSignatures().getFirst().getSigningCertificateToken().getSubject().getPrincipal().getName();
+        var hasCountry = issuer.matches("(^|.*,)C=.*") || subject.matches("(^|.*,)C=.*");
+        var container = ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", signed),
+                new Entry("b.pdf", ConversionTestPdfs.withText("B"))));
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
+
+        var asked = new java.util.concurrent.atomic.AtomicInteger();
+        var missing = nestedSignature(new ConversionEvidenceService(plainValidation(), () -> {
+            asked.incrementAndGet();
+            return List.of(Locale.getISOCountries());
+        }).evidence(path).getAsJsonObject("evidence"));
+        var loaded = nestedSignature(new ConversionEvidenceService(plainValidation(), List::of)
+                .evidence(path).getAsJsonObject("evidence"));
+
+        // The container and the nested PDF both read the injected trusted list state.
+        assertEquals(2, asked.get());
+        assertFalse(loaded.get("trustedListUnavailable").getAsBoolean());
+        // The engine's test key names no country, so the anchor cannot be matched (as in
+        // trustedListUnavailableOnlyWhenTheAnchorCountryDidNotLoad).
+        assertEquals(hasCountry, missing.get("trustedListUnavailable").getAsBoolean(), issuer + " / " + subject);
+    }
+
+    private static JsonObject nestedSignature(JsonObject evidence) {
+        return dataObject(evidence.getAsJsonObject("pdf"), "zmluva.pdf").getAsJsonObject("evidence")
+                .getAsJsonArray("signatures").get(0).getAsJsonObject();
+    }
+
+    @Test
+    void nestedValidationFailureMarksOnlyThatDataObject() throws Exception {
+        var container = ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zmluva.pdf", ConversionTestPdfs.sign(ConversionTestPdfs.samplePdf(), false)),
+                new Entry("b.pdf", ConversionTestPdfs.withText("B"))));
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("container.asice"), container);
+        Function<SignedDocumentValidator, Reports> failingForPdf = validator -> {
+            if (validator instanceof eu.europa.esig.dss.pades.validation.PDFDocumentValidator) {
+                throw new IllegalStateException("nested validation failed");
+            }
+            validator.setCertificateVerifier(new CommonCertificateVerifier());
+            return validator.validateDocument();
+        };
+
+        var evidence = new ConversionEvidenceService(failingForPdf, List::of).evidence(path).getAsJsonObject("evidence");
+
+        var object = dataObject(evidence.getAsJsonObject("pdf"), "zmluva.pdf");
+        assertEquals("pdf", object.get("kind").getAsString());
+        assertEquals("NESTED_UNREADABLE", object.get("problem").getAsString());
+        assertFalse(object.has("evidence"), object.toString());
+        assertEquals(1, evidence.getAsJsonArray("signatures").size());
+        assertEquals("pdf", dataObject(evidence.getAsJsonObject("pdf"), "b.pdf").get("kind").getAsString());
+    }
+
+    @Test
+    void malformedPdfDataObjectIsUnreadable() throws Exception {
+        var garbage = "%PDF-1.7\n\u0000\u0001 not a pdf at all <<< /Root 9 0 R >>> trailer".getBytes(StandardCharsets.ISO_8859_1);
+        var evidence = evidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(
+                new Entry("zly.pdf", garbage),
+                new Entry("foto.jpg", ConversionTestContainers.jpeg(20, 10, false)))));
+
+        var object = dataObject(evidence.getAsJsonObject("pdf"), "zly.pdf");
+        assertEquals("other", object.get("kind").getAsString());
+        assertEquals("UNREADABLE", object.get("problem").getAsString());
+        assertEquals("jpeg", dataObject(evidence.getAsJsonObject("pdf"), "foto.jpg").get("kind").getAsString());
+        assertEquals(1, evidence.getAsJsonArray("signatures").size());
+    }
+
+    @Test
+    void malformedOnlyPdfDataObjectStillGivesEvidence() throws Exception {
+        var garbage = "%PDF-1.7\n\u0000\u0001 not a pdf at all <<< /Root 9 0 R >>> trailer".getBytes(StandardCharsets.ISO_8859_1);
+        var evidence = evidenceOfContainer(ConversionTestContainers.xadesAsice(List.of(new Entry("x.pdf", garbage))));
+
+        var object = dataObject(evidence.getAsJsonObject("pdf"), "x.pdf");
+        assertEquals("other", object.get("kind").getAsString());
+        assertEquals("UNREADABLE", object.get("problem").getAsString());
+        assertEquals(1, evidence.getAsJsonArray("signatures").size());
+    }
+
+    @Test
     void trustedListUnavailableOnlyWhenTheAnchorCountryDidNotLoad() {
         var probe = DSSUtils.createDocumentValidator(new FileDocument(resource("sample_signed.pdf").toFile()));
         probe.setCertificateVerifier(new CommonCertificateVerifier());

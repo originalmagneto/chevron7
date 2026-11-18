@@ -10,6 +10,7 @@ import eu.europa.esig.dss.diagnostic.DiagnosticData;
 import eu.europa.esig.dss.diagnostic.SignatureWrapper;
 import eu.europa.esig.dss.enumerations.Indication;
 import eu.europa.esig.dss.enumerations.QCTypeEnum;
+import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.model.InMemoryDocument;
 import eu.europa.esig.dss.simplereport.SimpleReport;
@@ -81,7 +82,26 @@ public final class ConversionEvidenceService {
     }
 
     public JsonObject evidence(Path path) {
-        var document = new FileDocument(path.toFile());
+        byte[] content;
+        try {
+            content = Files.readAllBytes(path);
+        } catch (IOException exception) {
+            throw new java.io.UncheckedIOException(exception);
+        }
+        var body = evidenceBody(new FileDocument(path.toFile()), content, null);
+        var tree = MachineInspectionService.forTrustedValidation(
+                new FirstReportReader(body.reports().getSimpleReport(), validation)).inspect(path);
+        tree.add("evidence", body.evidence());
+        return tree;
+    }
+
+    /// The `evidence` object of one document and the reports it came from.
+    private record EvidenceBody(JsonObject evidence, Reports reports) {
+    }
+
+    /// Validates `document` once and builds its `evidence` object (no tree). `knownPdfFacts`,
+    /// when given, are the PDF facts already read from `content`, so veraPDF does not run again.
+    private EvidenceBody evidenceBody(DSSDocument document, byte[] content, JsonObject knownPdfFacts) {
         var validator = DSSUtils.createDocumentValidator(document);
         if (validator == null) {
             throw new IllegalArgumentException("UNSUPPORTED_DOCUMENT");
@@ -89,7 +109,6 @@ public final class ConversionEvidenceService {
         validator.setEnableEtsiValidationReport(true);
         var reports = validation.apply(validator);
         var simple = reports.getSimpleReport();
-        var tree = MachineInspectionService.forTrustedValidation(new FirstReportReader(simple)).inspect(path);
 
         var evidence = new JsonObject();
         evidence.addProperty("validationTime", simple.getValidationTime().toInstant().toString());
@@ -104,12 +123,11 @@ public final class ConversionEvidenceService {
             signatures.add(signatureFacts(diagnostic, simple, id, etsi, unavailable));
         }
         evidence.add("signatures", signatures);
-        var pdf = pdfFacts(path, diagnostic);
+        var pdf = pdfFacts(content, diagnostic, knownPdfFacts);
         if (pdf != null) {
             evidence.add("pdf", pdf);
         }
-        tree.add("evidence", evidence);
-        return tree;
+        return new EvidenceBody(evidence, reports);
     }
 
     private static JsonObject signatureFacts(DiagnosticData diagnostic, SimpleReport simple, String id, String etsi,
@@ -279,15 +297,9 @@ public final class ConversionEvidenceService {
 
     /// PDF facts for a PDF source, or for an ASiC-E's only PDF data object; null otherwise.
     /// A container also lists every data object (`dataObjects`) in zip entry order.
-    static JsonObject pdfFacts(Path path, DiagnosticData diagnostic) {
-        byte[] content;
-        try {
-            content = Files.readAllBytes(path);
-        } catch (IOException exception) {
-            throw new java.io.UncheckedIOException(exception);
-        }
+    private JsonObject pdfFacts(byte[] content, DiagnosticData diagnostic, JsonObject knownPdfFacts) {
         if (startsWith(content, "%PDF")) {
-            var facts = PdfConversionFacts.read(content);
+            var facts = knownPdfFacts != null ? knownPdfFacts.deepCopy() : PdfConversionFacts.read(content);
             facts.add("changesAfterLastSignature", changesAfterLastSignature(diagnostic));
             return facts;
         }
@@ -312,16 +324,12 @@ public final class ConversionEvidenceService {
                 onlyPdf = entry.bytes();
             }
         }
-        var onlyPdfFacts = onlyPdf != null && entries.size() == 1 ? PdfConversionFacts.read(onlyPdf) : null;
+        var onlyPdfFacts = onlyPdf != null && entries.size() == 1 ? readPdfFacts(onlyPdf) : null;
         var facts = onlyPdfFacts != null ? onlyPdfFacts.deepCopy() : new JsonObject();
         facts.addProperty("asicDataObjectCount", entries.size());
         if (onlyPdf != null && entries.size() == 1) {
             facts.addProperty("asicDataObjectName", entries.getFirst().name());
-            var inner = DSSUtils.createDocumentValidator(new InMemoryDocument(onlyPdf));
-            if (inner != null) {
-                inner.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
-            }
-            facts.addProperty("asicDataObjectSigned", inner != null && !inner.getSignatures().isEmpty());
+            facts.addProperty("asicDataObjectSigned", hasSignatures(onlyPdf));
         }
         facts.add("changesAfterLastSignature", new JsonArray());
         var coverage = signatureCoverage(diagnostic);
@@ -357,7 +365,8 @@ public final class ConversionEvidenceService {
 
     /// One data object: name, size, hash and the signatures covering it, plus what its kind,
     /// read from its bytes, tells: PDF facts and page count, or image size and resolution.
-    static JsonObject dataObjectFacts(ContainerEntry entry, List<String> coveredBy, JsonObject knownPdfFacts) {
+    /// A PDF that carries PAdES signatures also gets its own `evidence` (see `addNestedEvidence`).
+    private JsonObject dataObjectFacts(ContainerEntry entry, List<String> coveredBy, JsonObject knownPdfFacts) {
         var bytes = entry.bytes();
         var facts = new JsonObject();
         facts.addProperty("name", entry.name());
@@ -374,7 +383,7 @@ public final class ConversionEvidenceService {
         }
         switch (kind) {
             case "pdf" -> {
-                var pdf = knownPdfFacts != null ? knownPdfFacts : PdfConversionFacts.read(bytes);
+                var pdf = knownPdfFacts != null ? knownPdfFacts : readPdfFacts(bytes);
                 if (pdf.has("readable") && !pdf.get("readable").getAsBoolean()) {
                     facts.addProperty("kind", "other");
                     facts.addProperty("problem", "UNREADABLE");
@@ -382,6 +391,7 @@ public final class ConversionEvidenceService {
                 }
                 facts.addProperty("kind", "pdf");
                 pdf.entrySet().forEach(item -> facts.add(item.getKey(), item.getValue()));
+                addNestedEvidence(facts, bytes, pdf);
             }
             case "png", "jpeg" -> {
                 if (!addImageFacts(facts, bytes)) {
@@ -394,6 +404,47 @@ public final class ConversionEvidenceService {
             default -> facts.addProperty("kind", "other");
         }
         return facts;
+    }
+
+    /// A PDF data object that carries PAdES signatures gets `evidence`: the same keys as the
+    /// top-level evidence (no tree), from one more validation of its own bytes through the same
+    /// injected validation and trusted list state, so `signedRevisionLength` is relative to it.
+    /// Never recurses: the nested `pdf` facts of a PDF list no data objects. A failure leaves the
+    /// kind `pdf`, omits `evidence` and adds `problem` "NESTED_UNREADABLE".
+    private void addNestedEvidence(JsonObject facts, byte[] bytes, JsonObject pdfFacts) {
+        try {
+            if (!hasSignatures(bytes)) return;
+            var body = evidenceBody(new InMemoryDocument(bytes), bytes, pdfFacts);
+            if (body.evidence().getAsJsonArray("signatures").isEmpty()) return;
+            facts.add("evidence", body.evidence());
+        } catch (RuntimeException exception) {
+            facts.addProperty("problem", "NESTED_UNREADABLE");
+        }
+    }
+
+    /// Whether DSS finds any signature in these bytes, without validating it; false when DSS
+    /// cannot read them at all.
+    private static boolean hasSignatures(byte[] bytes) {
+        try {
+            var validator = DSSUtils.createDocumentValidator(new InMemoryDocument(bytes));
+            if (validator == null) return false;
+            validator.setCertificateVerifier(new eu.europa.esig.dss.spi.validation.CommonCertificateVerifier());
+            return !validator.getSignatures().isEmpty();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /// `PdfConversionFacts.read`, with a PDFBox runtime failure on malformed bytes reported as
+    /// `readable` false like an I/O failure, so one bad data object never fails the evidence.
+    private static JsonObject readPdfFacts(byte[] bytes) {
+        try {
+            return PdfConversionFacts.read(bytes);
+        } catch (RuntimeException exception) {
+            var facts = new JsonObject();
+            facts.addProperty("readable", false);
+            return facts;
+        }
     }
 
     private static final byte[] PNG_SIGNATURE = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
@@ -579,12 +630,14 @@ public final class ConversionEvidenceService {
     }
 
     /// Hands the already computed report to the tree inspection for the top document, so the
-    /// document is validated once; nested data objects are validated as usual.
+    /// document is validated once; nested data objects go through the same injected validation.
     private static final class FirstReportReader implements MachineInspectionService.ValidatorReportReader {
         private SimpleReport first;
+        private final Function<SignedDocumentValidator, Reports> validation;
 
-        FirstReportReader(SimpleReport first) {
+        FirstReportReader(SimpleReport first, Function<SignedDocumentValidator, Reports> validation) {
             this.first = first;
+            this.validation = validation;
         }
 
         @Override
@@ -594,7 +647,7 @@ public final class ConversionEvidenceService {
                 first = null;
                 return report;
             }
-            return SignatureValidator.getInstance().validate(validator).getSimpleReport();
+            return validation.apply(validator).getSimpleReport();
         }
     }
 }
