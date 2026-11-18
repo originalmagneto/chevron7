@@ -263,16 +263,20 @@ extension ConversionEvidence {
                 throw ProtocolFailure.malformedPayload
             }
             var nested: NestedEvidence?
+            var problem = raw.problem
             if let item = raw.evidence {
-                guard let time = parseDate(item.validationTime), let report = Data(base64Encoded: item.etsiReportBase64),
-                      let pdf = item.pdf else {
-                    throw ProtocolFailure.malformedPayload
+                // One unreadable nested validation degrades this data object only, as in the engine.
+                if let time = parseDate(item.validationTime), let report = Data(base64Encoded: item.etsiReportBase64),
+                   let pdf = item.pdf, let signatures = try? item.signatures.map(signature),
+                   let pdfFacts = try? facts(pdf) {
+                    nested = NestedEvidence(validationTime: time, etsiReport: report, signatures: signatures,
+                                            pdf: pdfFacts)
+                } else {
+                    problem = problem ?? "NESTED_UNREADABLE"
                 }
-                nested = NestedEvidence(validationTime: time, etsiReport: report,
-                                        signatures: try item.signatures.map(signature), pdf: try facts(pdf))
             }
             return DataObject(name: raw.name, size: size, sha256: hash, kind: raw.kind.flatMap(DataObject.Kind.init) ?? .other,
-                              coveredBy: raw.coveredBy ?? [], problem: raw.problem, pdf: try raw.pdf.map(facts),
+                              coveredBy: raw.coveredBy ?? [], problem: problem, pdf: try raw.pdf.map(facts),
                               pages: raw.pages, embeddedFileNames: raw.embeddedFileNames ?? [],
                               widthPx: raw.widthPx, heightPx: raw.heightPx, nested: nested)
         }

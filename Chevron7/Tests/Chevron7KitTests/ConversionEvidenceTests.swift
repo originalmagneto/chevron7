@@ -115,6 +115,49 @@ final class ConversionEvidenceTests: XCTestCase {
         XCTAssertNoThrow(try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json)))
     }
 
+    func testNestedSignatureWithoutValueDegradesOnlyItsDataObject() throws {
+        var object = E2EEvidenceFixtures.DataObject(name: "podpisana.pdf")
+        object.nestedSignatures = [E2EEvidenceFixtures.Signature()]
+        let other = E2EEvidenceFixtures.DataObject(name: "druha.pdf")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], dataObjects: [object, other])) as? [String: Any])
+        var evidence = try XCTUnwrap(json["evidence"] as? [String: Any])
+        var pdf = try XCTUnwrap(evidence["pdf"] as? [String: Any])
+        var objects = try XCTUnwrap(pdf["dataObjects"] as? [[String: Any]])
+        var nested = try XCTUnwrap(objects[0]["evidence"] as? [String: Any])
+        var signatures = try XCTUnwrap(nested["signatures"] as? [[String: Any]])
+        signatures[0].removeValue(forKey: "signatureValueBase64")
+        nested["signatures"] = signatures
+        objects[0]["evidence"] = nested
+        pdf["dataObjects"] = objects
+        evidence["pdf"] = pdf
+        json["evidence"] = evidence
+        let decoded = try ConversionEvidence.decode(payloadJSON: JSONSerialization.data(withJSONObject: json))
+        let list = try XCTUnwrap(decoded.pdf?.dataObjects)
+        XCTAssertNil(list[0].nested)
+        XCTAssertEqual(list[0].problem, "NESTED_UNREADABLE")
+        XCTAssertEqual(list[0].kind, .pdf)
+        XCTAssertNil(list[1].problem)
+    }
+
+    func testDecodesTooLargeAndNestedUnreadableObjects() throws {
+        var large = E2EEvidenceFixtures.DataObject(name: "velky.bin", bytes: Data("big".utf8))
+        large.kind = "other"
+        large.problem = "TOO_LARGE"
+        var broken = E2EEvidenceFixtures.DataObject(name: "rozbity.pdf")
+        broken.problem = "NESTED_UNREADABLE"
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(
+            signatures: [E2EEvidenceFixtures.Signature()], dataObjects: [large, broken]))
+        let list = try XCTUnwrap(evidence.pdf?.dataObjects)
+        XCTAssertEqual(list.map(\.problem), ["TOO_LARGE", "NESTED_UNREADABLE"])
+        XCTAssertEqual(list.map(\.name), ["velky.bin", "rozbity.pdf"])
+        XCTAssertEqual(list[0].size, 3)
+        XCTAssertEqual(list[0].sha256, Data(SHA256.hash(data: large.bytes)))
+        XCTAssertEqual(list[1].kind, .pdf)
+        XCTAssertEqual(list[1].sha256, Data(SHA256.hash(data: broken.bytes)))
+        XCTAssertTrue(list.allSatisfy { $0.nested == nil })
+    }
+
     func testMissingEvidenceIsMalformed() {
         XCTAssertThrowsError(try ConversionEvidence.decode(payloadJSON: Data(#"{"signatures":[]}"#.utf8)))
     }
