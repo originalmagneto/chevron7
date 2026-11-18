@@ -298,6 +298,22 @@ final class ElectronicOriginalTests: XCTestCase {
         }
     }
 
+    func testLargeOnlyUnsignedPdfSkippedByTheTreeStaysOnTheOnePdfPath() throws {
+        var large = object("zmluva.pdf", pdfBytes(0x41))
+        large.treeSkipped = "TOO_LARGE"
+        let original = try container([large])
+        XCTAssertEqual(original.kind, .asicE(entryName: "zmluva.pdf"))
+        XCTAssertEqual(original.documents.map(\.name), ["zmluva.pdf"])
+    }
+
+    func testSkippedPdfAmongSeveralFilesIsStillRefused() {
+        var large = object("zmluva.pdf", pdfBytes(0x41))
+        large.treeSkipped = "TOO_LARGE"
+        XCTAssertThrowsError(try container([large, object("b.png", png, kind: "png")])) {
+            XCTAssertEqual($0 as? ElectronicOriginalError, .nestedSignaturesUnreadable(name: "zmluva.pdf"))
+        }
+    }
+
     // MARK: Names that would point at two originals
 
     private func signedPDF(_ name: String, fill: UInt8, id: String) -> Object {

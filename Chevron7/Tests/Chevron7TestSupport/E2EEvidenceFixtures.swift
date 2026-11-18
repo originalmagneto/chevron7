@@ -75,6 +75,8 @@ public enum E2EEvidenceFixtures {
         public var nestedValidationTime = E2EEvidenceFixtures.validationTime
         /// Whether the tree lists the nested signatures under this data object, as the engine does.
         public var treeNested = true
+        /// The tree's `nestedSkipped` reason, in place of `nested`, as for a data object over the size limit.
+        public var treeSkipped: String? = nil
 
         public init(name: String, bytes: Data = Data("%PDF-1.7".utf8)) {
             self.name = name
@@ -183,7 +185,9 @@ public enum E2EEvidenceFixtures {
     /// carries `nested` with its PAdES signatures, an empty list for an unsigned one.
     private static func treeDocumentJSON(_ object: DataObject) -> [String: Any] {
         var json: [String: Any] = ["name": object.name]
-        if object.treeNested && object.kind == "pdf" {
+        if let reason = object.treeSkipped {
+            json["nestedSkipped"] = reason
+        } else if object.treeNested && object.kind == "pdf" {
             let tree = evidenceBody(signatures: object.nestedSignatures, pdf: nil, dataObjects: []).0
             json["nested"] = ["kind": "PDF", "signatures": tree, "documents": [Any]()] as [String: Any]
         }

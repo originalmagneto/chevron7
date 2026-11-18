@@ -395,12 +395,16 @@ public struct ElectronicOriginal: Sendable, Equatable {
 
     /// The only data object stays on today's path when it is a PDF without signatures of its own.
     /// The engine's tree lists every PDF data object as `.signed` with its nested tree, empty when
-    /// the PDF has no signatures.
+    /// the PDF has no signatures. Called only for a container's only data object that the engine
+    /// reports unsigned (`asicDataObjectSigned` false, which a failed signature probe never gives).
     private static func isUnsignedPDF(_ object: ConversionEvidence.DataObject, tree: SignatureTree) -> Bool {
         guard object.kind == .pdf, object.problem == nil, object.nested == nil else { return false }
         switch tree.documents.first(where: { $0.name == object.name })?.content {
         case nil, .plain?: return true
         case .signed(_, let nested)?: return nested.signatures.isEmpty && nested.documents.isEmpty
+        // The tree skips a data object over its size limit, as the one-PDF path never read the
+        // tree; the evidence's own facts decide, as they did before several files were accepted.
+        case .skipped(.tooLarge)?: return true
         case .skipped?, .failed?: return false
         }
     }
