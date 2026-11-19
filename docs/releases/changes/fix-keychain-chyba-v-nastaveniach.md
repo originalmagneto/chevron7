@@ -1,0 +1,1 @@
+- **Nastavenia EZZK povedia, keď sa uložené prihlásenie nedá prečítať.** Ak Keychain odmietne vydať uložené prihlasovacie údaje EZZK (napríklad po zamietnutí prístupu), Chevron7 to v Nastaveniach, časť EZZK, ukáže ako chybu s kódom. Predtým sa zobrazilo len „Neprihlásené“ s prázdnymi poľami.

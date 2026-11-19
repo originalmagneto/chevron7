@@ -46,6 +46,22 @@ final class EZZKAccountControllerTests: XCTestCase {
         XCTAssertFalse(controller.hasStoredCredentials)
     }
 
+    /// A Keychain that refuses to hand over the saved login (an ad hoc build, a denied access) is
+    /// said in Settings, not shown as a plain "Neprihlásené" with empty fields.
+    func testUnreadableKeychainIsShownNotSwallowed() {
+        let store = MemoryCredentialStore()
+        store.loadFailure = EZZKTokenStoreError.keychainFailure(status: -25293)
+        let controller = EZZKAccountController(mode: .test, credentialStore: store,
+                                               transportFactory: { _ in ScriptedTransport([]) }, productionPolicy: .refused)
+
+        XCTAssertEqual(controller.state, .failed("Bezpečné úložisko (Keychain) nie je dostupné (kód -25293)."))
+        XCTAssertFalse(controller.hasStoredCredentials)
+
+        store.loadFailure = nil
+        controller.setMode(.demo)
+        XCTAssertEqual(controller.state, .signedOut, "Demo reads no Keychain item")
+    }
+
     func testEmptyFieldsFailWithoutNetwork() async {
         let transport = ScriptedTransport([])
         let controller = EZZKAccountController(mode: .test, credentialStore: MemoryCredentialStore(),
