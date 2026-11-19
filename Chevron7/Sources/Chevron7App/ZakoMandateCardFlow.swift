@@ -100,6 +100,8 @@ extension ZakoSessionStore {
     /// The authorize button is live before a card is in: the card is a step of the flow.
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
+        // A stored conversion signs its stored clause and document; there is no form to check.
+        if isLoadedPendingConversion, recordFirstPending != nil { return true }
         if recordFirstPending == nil, settings.zakoClientOutput == .singlePDF,
            singlePDFProductionRefusal != nil { return false }
         if direction == .electronicToElectronic { return e2eReadyToAuthorize }

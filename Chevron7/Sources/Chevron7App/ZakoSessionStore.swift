@@ -138,15 +138,23 @@ final class ZakoSessionStore {
     var lastError: String?
     let mobileSigning: MobileSigningCoordinator
     private(set) var isAuthorizingViaMobile = false
-    /// A conversion under the order of 1. 1. 2027 whose record is signed but whose client
-    /// container is not (`ZakoRecordFirstFlow.swift`). "Autorizovať konverziu" resumes it; a
-    /// new document drops it.
-    var recordFirstPending: RecordFirstPending?
-    /// While the record-first flow waits for EZZK to process the record.
-    var isWaitingForEZZK = false
-    @ObservationIgnored var stopWaitingRequested = false
-    @ObservationIgnored var recordFirstPollInterval: Duration = .seconds(30)
-    @ObservationIgnored var recordFirstWaitLimit: TimeInterval = 30 * 60
+    /// The record-first conversion this session works on (`ZakoRecordFirstFlow.swift`), kept in
+    /// `RecordFirstPendingStore` so it outlives a new document and an app restart. A new document
+    /// only detaches it: the background watcher goes on, and the advocate opens it again from the
+    /// notification, the sidebar or the Register (`openPendingConversion`).
+    var attachedPendingID: UUID?
+    /// The record-first conversion whose record is signed but whose client output is not.
+    /// "Dokončiť konverziu" resumes it.
+    var recordFirstPending: RecordFirstPending? {
+        attachedPendingID.flatMap { settingsStore.recordFirstPendingStore.pending(id: $0) }
+    }
+    /// The session holds a pending conversion opened from the store rather than one it ran
+    /// itself: its form and original are not on screen, so it signs the stored files as they are.
+    var isLoadedPendingConversion = false
+    /// Set when the pending conversion could not be written to disk; it is kept in memory.
+    var recordFirstPersistWarning: String?
+    /// Asked for permission when a conversion first waits in the background.
+    @ObservationIgnored weak var recordFirstNotifier: RecordFirstNotifying?
     /// Tests script the lookup; the app asks the status checker (`verify(id:)`).
     @ObservationIgnored var recordFirstLookup: ((UUID) async -> EZZKStatusChecker.RowResult)?
 
@@ -1424,6 +1432,13 @@ final class ZakoSessionStore {
 
         lastError = nil
         validationErrors = []
+        // A conversion under the order of 1. 1. 2027 whose record is already signed goes on
+        // from where it stopped: no new number, time or record, and none of the checks of a
+        // new authorization that read the form or the document.
+        if recordFirstPending != nil {
+            await authorizePendingRecordFirst(viaMobile: viaMobile)
+            return
+        }
         preparePreflight()
         if viaMobile, !settingsStore.ezzkAccountController.isDemoMode {
             lastError = Self.mobileOutsideDemoMessage
@@ -1460,12 +1475,6 @@ final class ZakoSessionStore {
         // after it signs).
         if !viaMobile, !signingProviderIsDemo, !mandateRequirementSatisfied {
             lastError = Self.noMandateMessage
-            return
-        }
-        // A conversion under the order of 1. 1. 2027 whose record is already signed goes on
-        // from where it stopped: no new number, time or record.
-        if recordFirstPending != nil {
-            await resumeRecordFirst(viaMobile: viaMobile)
             return
         }
         let ezzkMode = settingsStore.ezzkAccountController.mode
@@ -2033,11 +2042,44 @@ final class ZakoSessionStore {
     /// attempt is a new conversion record: a new register row (the refused one stays in the
     /// Register as it is) and a new evidence number, since EZZK may have consumed the old one.
     func startNewRecordAttempt() {
-        recordFirstPending = nil
+        discardRecordFirstPending()
         attestation.evidenceNumber = nil
         attestation.evidenceNumberAllocatedAt = nil
         attestation.evidenceNumberMode = nil
         currentRecordID = UUID()
+    }
+
+    /// Loads a stored record-first conversion at the authorize step, where "Dokončiť konverziu"
+    /// signs its clause and client document with the card. Unfinished work in this session is
+    /// replaced only when the caller confirmed it (`discardingCurrentWork`).
+    func openPendingConversion(id: UUID, discardingCurrentWork: Bool = false) -> PendingOpenResult {
+        guard let pending = settingsStore.recordFirstPendingStore.pending(id: id) else { return .missing }
+        if isAuthorizing || isResolvingCertificate || cardPrompt != nil { return .busy }
+        if attachedPendingID == id {
+            if step == .done { step = .authorize }
+            return .opened
+        }
+        if !discardingCurrentWork, hasUnfinishedWork { return .needsDiscardConfirmation }
+        resetSession(keepingProfile: true)
+        direction = pending.direction
+        attestation = pending.attestation
+        currentRecordID = pending.recordID
+        attachedPendingID = pending.recordID
+        isLoadedPendingConversion = true
+        submissionStatus = evidenceStore.record(id: pending.recordID)?.status
+        step = .authorize
+        return .opened
+    }
+
+    /// A document is open past intake and the conversion is not done: opening another one
+    /// would throw that work away. No evidence number is allocated before authorization.
+    var hasUnfinishedWork: Bool {
+        // A stored conversion at its authorize step loses nothing: it stays in the store.
+        if recordFirstPending != nil, step == .authorize { return false }
+        return switch step {
+        case .intake, .done: false
+        default: true
+        }
     }
 
     func saveProfileFromForm() {
@@ -2107,7 +2149,8 @@ func resetSession(keepingProfile: Bool) {
         inputSignatureInspection = .unavailable(
             detail: "Kontrola podpisov ešte neprebehla.")
         reviewUpdatedAt = nil
-        recordFirstPending = nil
+        // A new document leaves a waiting conversion to the background watcher.
+        detachRecordFirstPending()
         resetElectronicOriginal()
         currentRecordID = UUID()
     }

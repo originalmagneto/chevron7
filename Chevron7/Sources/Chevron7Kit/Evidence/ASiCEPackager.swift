@@ -4,7 +4,7 @@
 import Foundation
 
 public struct ASiCEPackager: Sendable {
-    public struct Entry: Sendable {
+    public struct Entry: Codable, Equatable, Sendable {
         public var path: String
         public var data: Data
         public var storeUncompressed: Bool

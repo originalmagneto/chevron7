@@ -37,6 +37,35 @@ final class SidebarConversionRowsTests: XCTestCase {
         XCTAssertFalse(section.hasMore, "two rows fit, so no \"Zobraziť všetky\"")
     }
 
+    func testPendingStageOverridesSidebarState() {
+        let waiting = record(name: "Čaká", status: .acceptedForProcessing)
+        let ready = record(name: "Hotové", status: .processed)
+        let failed = record(name: "Neodoslané", status: .submissionFailed)
+        let section = SidebarConversionRows.section(
+            from: [waiting, ready, failed], now: now,
+            pendingStages: [waiting.id: .awaitingEZZK, ready.id: .signingClientContainer, failed.id: .awaitingEZZK])
+        let rows = Dictionary(uniqueKeysWithValues: section.rows.map { ($0.name, $0) })
+
+        XCTAssertEqual(rows["Čaká"]?.stateLabel, "Čaká na EZZK")
+        XCTAssertEqual(rows["Čaká"]?.symbol, "hourglass")
+        XCTAssertEqual(rows["Hotové"]?.stateLabel, "Čaká na podpis doložky")
+        XCTAssertEqual(rows["Hotové"]?.pendingStage, .signingClientContainer)
+        XCTAssertTrue(rows["Hotové"]?.accessibilityLabel.contains("Čaká na podpis doložky") == true)
+        XCTAssertEqual(rows["Neodoslané"]?.stateLabel, UXLabels.evidenceStatusLabel(for: .submissionFailed),
+                       "a failed send keeps the Register's own state")
+    }
+
+    func testWaitingConversionStaysPastTheNewestFive() {
+        let old = record(name: "Starý", status: .processed, conversionTime: now.addingTimeInterval(-7 * 24 * 3600))
+        let recent = (0..<5).map { record(name: "Nový \($0)", conversionTime: now.addingTimeInterval(TimeInterval(-$0 * 60))) }
+        let section = SidebarConversionRows.section(from: recent + [old], now: now,
+                                                    pendingStages: [old.id: .signingClientContainer])
+
+        XCTAssertEqual(section.rows.count, 6)
+        XCTAssertEqual(section.rows.last?.name, "Starý")
+        XCTAssertEqual(section.total, 6)
+    }
+
     func testEmptyRegisterHidesTheSection() {
         let section = SidebarConversionRows.section(from: [], now: now)
         XCTAssertTrue(section.isEmpty)
