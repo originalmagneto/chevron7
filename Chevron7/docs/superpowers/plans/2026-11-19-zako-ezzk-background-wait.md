@@ -133,7 +133,7 @@
 - Modify: `../CLAUDE.md` and `../AGENTS.md` (repo root; the record-first bullet: the background wait, the store, the watcher schedule, notifications, finishing), identical afterwards (`cmp`).
 - Create: `docs/releases/changes/feat-zako-ezzk-background-wait.md` (one Slovak paragraph for the advocate).
 
-- [ ] **Step 1:** Update docs and the change note; `grep -rn "—"` over changed files prints nothing.
+- [ ] **Step 1:** Update docs and the change note; a search for the em dash character (U+2014) over changed files finds nothing.
 - [ ] **Step 2:** `DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" swift test` (background, full suite) PASS.
 - [ ] **Step 3:** `DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" ./build_app.sh` succeeds.
 - [ ] **Step 4: Commit** `docs: EZZK wait in the background`.

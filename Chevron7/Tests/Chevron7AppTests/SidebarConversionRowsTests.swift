@@ -55,6 +55,17 @@ final class SidebarConversionRowsTests: XCTestCase {
                        "a failed send keeps the Register's own state")
     }
 
+    func testWaitingConversionStaysPastTheNewestFive() {
+        let old = record(name: "Starý", status: .processed, conversionTime: now.addingTimeInterval(-7 * 24 * 3600))
+        let recent = (0..<5).map { record(name: "Nový \($0)", conversionTime: now.addingTimeInterval(TimeInterval(-$0 * 60))) }
+        let section = SidebarConversionRows.section(from: recent + [old], now: now,
+                                                    pendingStages: [old.id: .signingClientContainer])
+
+        XCTAssertEqual(section.rows.count, 6)
+        XCTAssertEqual(section.rows.last?.name, "Starý")
+        XCTAssertEqual(section.total, 6)
+    }
+
     func testEmptyRegisterHidesTheSection() {
         let section = SidebarConversionRows.section(from: [], now: now)
         XCTAssertTrue(section.isEmpty)

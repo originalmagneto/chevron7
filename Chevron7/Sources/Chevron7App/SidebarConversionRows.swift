@@ -43,7 +43,11 @@ enum SidebarConversionRows {
                 ? $0.conversionTime > $1.conversionTime
                 : $0.createdAt > $1.createdAt
         }
-        return Section(rows: newest.prefix(max(limit, 0)).map { row(for: $0, now: now, pendingStage: pendingStages[$0.id]) },
+        // A conversion waiting in the background stays in view even past the newest five.
+        let shown = Array(newest.prefix(max(limit, 0)))
+        let shownIDs = Set(shown.map(\.id))
+        let waiting = newest.filter { pendingStages[$0.id] != nil && !shownIDs.contains($0.id) }
+        return Section(rows: (shown + waiting).map { row(for: $0, now: now, pendingStage: pendingStages[$0.id]) },
                        total: records.count)
     }
 

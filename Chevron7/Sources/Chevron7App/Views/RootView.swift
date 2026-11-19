@@ -608,8 +608,10 @@ struct RootView: View {
             case .attestation:
                 return "krok 3 z 5: osvedčovacia doložka"
             case .authorize:
-                return "krok 4 z 5: autorizácia KEP"
+                return zakoStore.isLoadedPendingConversion ? "dokončenie konverzie: podpis doložky" : "krok 4 z 5: autorizácia KEP"
             case .done:
+                if zakoStore.awaitsEZZKInBackground { return "záznam čaká na EZZK" }
+                if zakoStore.recordFirstPending?.stage == .signingClientContainer { return "záznam spracovaný, doložka čaká na podpis" }
                 return "krok 5 z 5: hotovo"
             }
         case .evidence:

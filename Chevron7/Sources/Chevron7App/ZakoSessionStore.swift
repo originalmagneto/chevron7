@@ -2074,7 +2074,9 @@ final class ZakoSessionStore {
     /// A document is open past intake and the conversion is not done: opening another one
     /// would throw that work away. No evidence number is allocated before authorization.
     var hasUnfinishedWork: Bool {
-        switch step {
+        // A stored conversion at its authorize step loses nothing: it stays in the store.
+        if recordFirstPending != nil, step == .authorize { return false }
+        return switch step {
         case .intake, .done: false
         default: true
         }

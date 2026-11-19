@@ -23,6 +23,12 @@ struct ZakoFlowView: View {
             .onDrop(of: [UTType.pdf, .jpeg, .png, .tiff] + ContainerFileTypes.asice, isTargeted: $isTargeted) { providers in
                 store.direction == .electronicToElectronic ? handleElectronicDrop(providers) : handleDrop(providers)
             }
+            // The opened stored conversion was deleted in the Register or ended elsewhere:
+            // nothing is left to sign, so ZaKo starts afresh.
+            .onChange(of: store.recordFirstPending == nil) { _, isGone in
+                guard isGone, store.isLoadedPendingConversion, !store.isAuthorizing else { return }
+                store.resetSession(keepingProfile: true)
+            }
             .sheet(item: $store.cardPrompt) { prompt in
                 ZakoCardPromptSheet(store: store, prompt: prompt)
                     .interactiveDismissDisabled()

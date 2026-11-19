@@ -187,7 +187,47 @@ struct AuthorizeView: View {
         }
     }
 
+    @ViewBuilder
     private var checklistCard: some View {
+        if store.isLoadedPendingConversion, let pending = store.recordFirstPending {
+            loadedConversionCard(pending)
+        } else {
+            formChecklistCard
+        }
+    }
+
+    /// A conversion opened from the store: its document and form are not on screen, so the
+    /// card says what will be signed instead of checking the form again.
+    private func loadedConversionCard(_ pending: RecordFirstPending) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Čakajúca konverzia")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Label(RecordFirstPendingPresentation.documentName(pending), systemImage: "doc.text")
+                .font(.callout.weight(.semibold))
+            Label("Evidenčné číslo \(pending.evidenceNumber)", systemImage: "number")
+                .font(.callout)
+            Label(pending.stage == .signingClientContainer
+                  ? "EZZK záznam spracovalo" : "Záznam ešte čaká na EZZK",
+                  systemImage: pending.stage == .signingClientContainer ? "checkmark.seal" : "hourglass")
+                .font(.callout)
+            Text(pending.clientOutput == .singlePDF
+                 ? "Podpíše sa uložená doložka pripojená k dokumentu v jednom PDF (\(pending.containerDocumentName))."
+                 : "Podpíše sa uložená doložka s dokumentom \(pending.containerDocumentName) v kontajneri ASiC-E.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Výstup sa uloží do priečinka \(pending.directory.path).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard(padding: 14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var formChecklistCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Zákonné náležitosti doložky")
                 .font(.subheadline.weight(.semibold))
@@ -553,7 +593,8 @@ struct DoneView: View {
                                     now: now,
                                     currentMode: store.settingsStore.ezzkAccountController.mode,
                                     productionAllowed: store.settingsStore.ezzkAccountController
-                                        .productionPolicy.allowsConsequentialCalls)
+                                        .productionPolicy.allowsConsequentialCalls,
+                                    recordFirstStage: store.recordFirstPending?.stage)
     }
 
     private func toneColor(_ tone: EZZKRecordPresentation.Tone) -> Color {
@@ -690,9 +731,16 @@ struct DoneView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let pending = store.recordFirstPending {
                 if pending.stage == .awaitingEZZK {
-                    Label("Záznam č. \(pending.evidenceNumber) čaká na spracovanie v EZZK", systemImage: "hourglass")
+                    // Only a record EZZK has (or may have) is said to be sent; a failed send
+                    // is offered again above ("Odoslať do EZZK").
+                    let sent = [.acceptedForProcessing, .outcomeUnknown].contains(
+                        store.evidenceStore.record(id: pending.recordID)?.status)
+                    Label(sent ? "Záznam č. \(pending.evidenceNumber) čaká na spracovanie v EZZK"
+                               : "Záznam č. \(pending.evidenceNumber) ešte nie je v EZZK",
+                          systemImage: sent ? "hourglass" : "tray.and.arrow.up")
                         .font(.headline)
-                    Text(ZakoSessionStore.recordFirstSentInBackgroundMessage)
+                    Text(sent ? ZakoSessionStore.recordFirstSentInBackgroundMessage
+                              : ZakoSessionStore.recordFirstNotSentMessage)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

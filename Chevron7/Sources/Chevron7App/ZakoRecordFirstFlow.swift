@@ -80,6 +80,7 @@ extension ZakoSessionStore {
     static let recordFirstOriginalChangedMessage = "Pôvodný dokument alebo poradie jeho súborov sa od podpisu záznamu zmenili. Dokončite konverziu s pôvodným stavom alebo začnite novú."
     static let recordFirstFormChangedMessage = "Údaje konverzie sa zmenili po podpise záznamu o konverzii. Doložka musí zodpovedať podpísanému záznamu: vráťte zmeny alebo začnite konverziu znova."
     static let recordFirstSentInBackgroundMessage = "Záznam o konverzii je podpísaný a odoslaný do EZZK. Chevron7 overuje na pozadí, či ho EZZK spracovalo, a dá vám vedieť. Medzitým môžete pracovať ďalej; doložku s dokumentom pre klienta potom podpíšete tlačidlom Dokončiť konverziu."
+    static let recordFirstNotSentMessage = "Záznam o konverzii je podpísaný, ale do EZZK sa ešte nedostal. Odošlite ho tlačidlom Odoslať do EZZK; Chevron7 ho potom overuje na pozadí a dá vám vedieť, keď ho EZZK spracuje. Medzitým môžete pracovať ďalej."
     static let recordFirstPersistFailedMessage = "Čakajúcu konverziu sa nepodarilo uložiť na disk. Chevron7 ju drží, kým beží: dokončite ju pred ukončením aplikácie."
     static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Dokončiť konverziu a dokument sa podpíše znova."
     static let recordFirstSinglePDFIncompleteMessage = "Uložená konverzia nemá pripravenú doložku pre jeden PDF, preto ju nemožno dokončiť. Začnite konverziu znova."
