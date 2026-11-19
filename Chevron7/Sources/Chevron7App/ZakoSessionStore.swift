@@ -218,6 +218,13 @@ final class ZakoSessionStore {
         return nil
     }
 
+    /// The reason under the phone button while it is shown and off: macOS shows no help tag on
+    /// a disabled button, so the authorize step says it as text. Nil when the button is live or hidden.
+    var mobileButtonRefusalNote: String? {
+        guard isMobileSigningAvailable, direction != .electronicToElectronic else { return nil }
+        return mobileRefusalForClientOutput
+    }
+
     /// Why Ostrá evidencia does not offer the one-PDF output yet (`SinglePDFProductionPolicy`);
     /// nil in every other mode. The authorize step shows it under the output picker.
     var singlePDFProductionRefusal: String? {
