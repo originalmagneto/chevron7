@@ -64,3 +64,14 @@ final class CLIProcessRunnerTests: XCTestCase {
         return ProcessConfiguration(executableURL: helper, timeout: .seconds(20))
     }
 }
+
+/// The engine's failure lines go to the system log in public, everything else in private (F12:
+/// a v1 signature's AlertException reached no log at all).
+final class HelperErrorLogTests: XCTestCase {
+    func testOnlyTheEngineFailureLinesArePublic() {
+        XCTAssertTrue(HelperErrorLog.isPublicFailureLine(
+            "Signing a file failed (SIGNING_FAILED): eu.europa.esig.dss.alert.exception.AlertException"))
+        XCTAssertTrue(HelperErrorLog.isPublicFailureLine("Signing failed: CKR_PIN_INCORRECT"))
+        XCTAssertFalse(HelperErrorLog.isPublicFailureLine("INFO Loading /Users/someone/Desktop/zmluva.pdf"))
+    }
+}
