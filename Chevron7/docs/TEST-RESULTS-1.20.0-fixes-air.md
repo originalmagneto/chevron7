@@ -85,3 +85,29 @@ V Testovacej evidencii treba použiť „Prihlásiť a overiť“. Tlačidlo sa 
    - Ak macOS ukáže výzvu na prístup ku Keychainu pre Chevron7, zvoľ „Povoliť“. „Vždy povoliť“ platí len pre tento konkrétny build.
 4. Zapíš presnú hlášku pod poľami.
 5. Na porovnanie urob to isté v notarizovanej `/Applications/Chevron7.app` 1.20.0.
+
+## Preskúšanie na Mac Studiu s kartou SAK (19. 11. 2026, vývojová verzia z vetvy, Testovacia evidencia)
+
+Karta I.CA s mandátnym certifikátom „Marián Čuprík OPRÁVNENIE 1042“. PIN zadával advokát. Ostrá evidencia sa nepoužila, aplikáciu prepol do Testovacej evidencie advokát sám.
+
+**Prihlásenie (F8d):** vývojová (ad hoc) verzia na Mac Studiu prečítala uložené prihlásenie z Keychainu bez výzvy a prihlásenie do Testovacej evidencie prešlo. Problém z MacBooku Air sa tu neprejavil.
+
+**Test 1: P→E, `A-sken.pdf`, Jeden PDF s doložkou, dnešný postup** (číslo 261119-beA3601438). Prešiel:
+- `A-sken-konvertovane.pdf` vedľa zdroja, 8 strán, 3 revízie, PDF/A-3B v XMP;
+- jeden podpis PAdES (`ETSI.CAdES.detached`) certifikátom OPRÁVNENIE 1042, pokrýva celý súbor, kryptograficky platný (pdfsig);
+- príloha `261119-beA3601438.xml.xdcf` s `/AFRelationship /Supplement`, doložka 1.3, strany doložky čitateľné, osnova „Osvedčovacia doložka“;
+- SHA-256 prvej revízie (870 275 bajtov) sa rovná `ElectronicFingerprintValue` doložky;
+- Register: `clientOutput` singlePDF, `revisionOneLength` 870275, EZZK kód 0, „Prijatý na spracovanie v EZZK“.
+
+**Test 2: E→E, `E1-eid-podpisane.pdf`, postup od 1. 1. 2027 vopred, Kontajner ASiC-E** (číslo 261119-SgA3601435). Prešiel:
+- overenie: podpis klienta platný, KEP s kvalifikovanou časovou pečiatkou NASES; názov nového dokumentu `E1-eid-podpisane.pdf` (F6), položka „Overenie aplikáciou Chevron7 (Testovacia evidencia)“ (F9), „Prihlásenie do EZZK“ zelené;
+- záznam `50349287.ConversionRecordOfElectronicDocumentToElectronicDocument_2021.sk` 1.2 podpísaný a odoslaný ako prvý, **bez `DSId`**;
+- **Otázka DSId: Testovacia evidencia záznam E→E 1.2 bez `DSId` prijala (kód 0) a spracovala** (odoslaný 12:47:20Z, „Spracovaný v EZZK“ pri kontrole 13:00:21Z, asi 13 minút);
+- „Zastaviť čakanie“ a potom „Dokončiť konverziu“: aplikácia pokračovala v čakaní bez nového čísla a bez nového podpisu záznamu;
+- po spracovaní podpísaná doložka (13:00:34Z): `E1-eid-podpisane.asice` s `E1-eid-podpisane.pdf` a `261119-SgA3601435.xml.xdcf` (doložka E→E 1.3), jeden podpis XAdES s časovou pečiatkou; SHA-256 PDF sa rovná odtlačku v doložke aj v Registri.
+
+**Nové nálezy:**
+- **F10 (opravené v tejto vetve):** zastavené čakanie sa ukazovalo ako červená chyba „Konverziu sa nepodarilo autorizovať“ a text odkazoval na „Autorizovať konverziu“, hoci tlačidlo sa volá „Dokončiť konverziu“. Teraz je to modrá informácia „Čakanie na EZZK je zastavené“, rovnako pri uplynutí 30 minút („EZZK záznam ešte spracúva“) (test `testStoppedOrLongWaitReadsAsInformationNamingTheFinishButton`).
+- **F11 (neopravené, mimo PR #106):** prvá analýza AI pri `A-sken.pdf` trvala asi 6 minút, kým bolo okno v pozadí; proces pritom takmer nevyťažoval procesor. Treba zistiť, či čaká na studený model FoundationModels alebo na aktiváciu okna.
+
+**Ešte neoverené:** E→E s B1 až B4 (treba ich najprv podpísať kartou), postup od 1. 1. 2027 v kombinácii s Jedným PDF (P→E aj E→E), F7, F1, F2 a F8 vizuálne na Mac Studiu.
