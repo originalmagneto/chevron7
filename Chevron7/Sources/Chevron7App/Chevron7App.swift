@@ -185,10 +185,14 @@ struct Chevron7App: App {
         }
         .defaultSize(width: 900, height: 640)
         .windowResizability(.contentMinSize)
+        // Opened only on request: with "Close windows when quitting an app" off, macOS restored
+        // it at every launch when it was open at quit (F13, 2026-11-19).
+        .restorationBehavior(.disabled)
         Window("Trénovanie detektora", id: DetectorTrainingWindow.id) {
             DetectorTrainingView(settingsStore: model.settingsStore)
         }
         .defaultSize(width: 680, height: 600)
+        .restorationBehavior(.disabled)
     }
 }
 

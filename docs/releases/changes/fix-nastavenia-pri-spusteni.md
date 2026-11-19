@@ -1,0 +1,1 @@
+- **Nastavenia sa pri spustení už neotvárajú samé.** Ak bolo okno Nastavenia otvorené pri ukončení aplikácie, macOS ho pri ďalšom spustení otvoril znova. Teraz sa Nastavenia otvoria len vtedy, keď si ich otvoríte. To isté platí pre okno trénovania detektora.
