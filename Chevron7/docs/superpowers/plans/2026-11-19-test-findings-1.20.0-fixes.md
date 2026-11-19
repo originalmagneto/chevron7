@@ -155,3 +155,12 @@ These steps were never run because they need the SAK card with the mandate certi
 7. Turn "Postup od 1. 1. 2027 vopred" off afterwards. Never switch to Ostrá evidencia for any of this.
 
 The test files and the substitute signed files (E1 to E4, R1 to R3) are listed in the results file.
+
+## Implementation notes (2026-11-19)
+
+Where the code differed from the plan:
+
+- **F4:** the clause step's common "Druh dokumentu" is not only a hidden default. Record E→E 1.2 writes it as `NewDocumentType`. For a container with several files, the clause step therefore lists the per-file types read-only with "Upraviť v overení". Only in the 2027 order does it still ask the common value, labelled "Druh nového dokumentu".
+- **F5:** option 1 (one preview of all files in order).
+- **F8:** the check is the saved login (`EZZKAccountController.hasStoredCredentials`), not `state == .signedIn`. The state is `.signedOut` after every launch even with a saved login, because the SOAP client logs in on demand. Settings' "Prihlásené" pill reads the same flag.
+- **F3:** the fast path reads the reader slots (`SmartcardSlotReader.anyCardPresent`). It returns nil without the smartcard entitlement, and then the drivers are asked as before.
