@@ -8,7 +8,9 @@
 #   fix, perf      -> patch
 #   type! or BREAKING CHANGE -> major (minor while the version is 0.x)
 #
-# A commit whose message contains [skip release] does not count.
+# A commit whose subject contains [skip release] does not count. Only the subject is
+# read: a squash merge copies every commit message of the pull request into the body,
+# so one docs commit marked [skip release] would otherwise hide the whole change.
 # A "Release-As: X.Y.Z" footer sets the version outright (the highest one wins),
 # for a milestone such as 1.0.0 that the rules above would not reach from 0.x.
 
@@ -30,8 +32,9 @@ raise() { [[ $(rank "$1") -gt $(rank "$bump") ]] && bump="$1" || true; }
 
 while IFS= read -r -d $'\x1e' message; do
     message="${message#$'\n'}"
-    [[ -z "$message" || "$message" == *"[skip release]"* ]] && continue
+    [[ -z "$message" ]] && continue
     subject="${message%%$'\n'*}"
+    [[ "$subject" == *"[skip release]"* ]] && continue
     while IFS= read -r line; do
         if [[ "$line" =~ ^Release-As:\ *([0-9]+\.[0-9]+\.[0-9]+)\ *$ ]]; then
             candidate="${BASH_REMATCH[1]}"
