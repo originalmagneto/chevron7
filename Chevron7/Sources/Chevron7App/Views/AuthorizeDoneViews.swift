@@ -6,6 +6,38 @@ import Chevron7Kit
 import AppKit
 import UniformTypeIdentifiers
 
+/// How the authorize step shows `lastError`: a record-first wait that was stopped or ran out is
+/// not a failure (the record is sent and the conversion is finished later), so it reads as
+/// information with its own title instead of "Konverziu sa nepodarilo autorizovať".
+struct AuthorizeNoticePresentation: Equatable {
+    let title: String
+    let message: String
+    let tone: ZakoNotice.Tone
+
+    init(message: String) {
+        switch message {
+        case ZakoSessionStore.recordFirstWaitStoppedMessage:
+            title = "Čakanie na EZZK je zastavené"
+            self.message = Self.droppingLeadingSentence(message)
+            tone = .info
+        case ZakoSessionStore.recordFirstTimedOutMessage:
+            title = "EZZK záznam ešte spracúva"
+            self.message = message
+            tone = .info
+        default:
+            title = "Konverziu sa nepodarilo autorizovať"
+            self.message = message
+            tone = .failure
+        }
+    }
+
+    /// The message without its first sentence, which the title already says.
+    private static func droppingLeadingSentence(_ text: String) -> String {
+        guard let range = text.range(of: ". ") else { return text }
+        return String(text[range.upperBound...])
+    }
+}
+
 struct AuthorizeView: View {
     @Bindable var store: ZakoSessionStore
 
@@ -19,7 +51,8 @@ struct AuthorizeView: View {
                     tokenStatusRow
 
                     if let error = store.lastError {
-                        ZakoNotice(title: "Konverziu sa nepodarilo autorizovať", message: error, tone: .failure)
+                        let notice = AuthorizeNoticePresentation(message: error)
+                        ZakoNotice(title: notice.title, message: notice.message, tone: notice.tone)
                     }
 
                     if let signedOut = store.ezzkSignInRefusal {

@@ -154,6 +154,28 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(settingsStore.evidenceStore.record(id: store.currentRecordID)?.status, .acceptedForProcessing)
     }
 
+    /// A stopped or long wait is not a failure: the record is sent and the conversion is finished
+    /// with "Dokončiť konverziu", which is the button the text names.
+    func testStoppedOrLongWaitReadsAsInformationNamingTheFinishButton() {
+        let stopped = AuthorizeNoticePresentation(message: ZakoSessionStore.recordFirstWaitStoppedMessage)
+        XCTAssertEqual(stopped.title, "Čakanie na EZZK je zastavené")
+        XCTAssertEqual(stopped.tone, .info)
+        XCTAssertFalse(stopped.message.hasPrefix("Čakanie na EZZK je zastavené"), "the title already says it")
+        XCTAssertTrue(stopped.message.contains("Dokončiť konverziu"))
+
+        let timedOut = AuthorizeNoticePresentation(message: ZakoSessionStore.recordFirstTimedOutMessage)
+        XCTAssertEqual(timedOut.tone, .info)
+        XCTAssertTrue(timedOut.message.contains("Dokončiť konverziu"))
+
+        for message in [ZakoSessionStore.recordFirstWaitStoppedMessage, ZakoSessionStore.recordFirstTimedOutMessage] {
+            XCTAssertFalse(message.contains("Autorizovať konverziu"), "the button reads Dokončiť konverziu while a record is pending")
+        }
+
+        let failure = AuthorizeNoticePresentation(message: "Karta odmietla PIN.")
+        XCTAssertEqual(failure.title, "Konverziu sa nepodarilo autorizovať")
+        XCTAssertEqual(failure.tone, .failure)
+    }
+
     func testFailedRecordSignatureLeavesNoRowAndKeepsTheNumber() async throws {
         try requireXMLLint()
         let settingsStore = makeSettingsStore()

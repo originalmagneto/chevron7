@@ -560,7 +560,7 @@ struct ZakoVerificationView: View {
 
 /// A short titled message in the ZaKo screens: success, warning or failure, with its symbol.
 struct ZakoNotice: View {
-    enum Tone { case success, warning, failure }
+    enum Tone { case success, info, warning, failure }
     let title: String
     let message: String
     let tone: Tone
@@ -568,6 +568,7 @@ struct ZakoNotice: View {
     private var color: Color {
         switch tone {
         case .success: return .green
+        case .info: return .blue
         case .warning: return .orange
         case .failure: return .red
         }
@@ -576,6 +577,7 @@ struct ZakoNotice: View {
     private var symbol: String {
         switch tone {
         case .success: return "checkmark.seal.fill"
+        case .info: return "info.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .failure: return "xmark.octagon.fill"
         }
