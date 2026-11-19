@@ -106,6 +106,13 @@ Karta I.CA s mandátnym certifikátom „Marián Čuprík OPRÁVNENIE 1042“. P
 - „Zastaviť čakanie“ a potom „Dokončiť konverziu“: aplikácia pokračovala v čakaní bez nového čísla a bez nového podpisu záznamu;
 - po spracovaní podpísaná doložka (13:00:34Z): `E1-eid-podpisane.asice` s `E1-eid-podpisane.pdf` a `261119-SgA3601435.xml.xdcf` (doložka E→E 1.3), jeden podpis XAdES s časovou pečiatkou; SHA-256 PDF sa rovná odtlačku v doložke aj v Registri.
 
+**Test 3: E→E, `E1-eid-podpisane.pdf`, postup od 1. 1. 2027 vopred, Jeden PDF s doložkou** (číslo 261119-qZa3601436). Prešiel:
+- prevod na PDF/A a kontrola PDF/A-3B pred pridelením čísla prešli; záznam 1.2 podpísaný a odoslaný 13:03:34Z, prijatý (kód 0), „Spracovaný v EZZK“ pri kontrole 13:29:15Z (asi 26 minút);
+- po spracovaní podpísaný `E1-eid-podpisane-konvertovane.pdf` (13:29:30Z): jeden podpis PAdES certifikátom OPRÁVNENIE 1042 cez celý súbor, príloha `261119-qZa3601436.xml.xdcf` (doložka E→E 1.3, formát PDF/A-3), osnova „Osvedčovacia doložka“;
+- SHA-256 prvej revízie (364 502 bajtov) sa rovná odtlačku nového dokumentu v doložke; odtlačok originálu je SHA-256 `E1-eid-podpisane.pdf`.
+
+**Pozorovanie k čakaniu:** spracovanie v Testovacej evidencii trvalo 13 a 26 minút. Počas celej doby je obrazovka autorizácie zablokovaná čakaním (najviac 30 minút), kým kontrola na pozadí sa pýta až hodinu po prvej kontrole. Advokát navrhuje, aby čakanie bežalo na pozadí.
+
 **Nové nálezy:**
 - **F10 (opravené v tejto vetve):** zastavené čakanie sa ukazovalo ako červená chyba „Konverziu sa nepodarilo autorizovať“ a text odkazoval na „Autorizovať konverziu“, hoci tlačidlo sa volá „Dokončiť konverziu“. Teraz je to modrá informácia „Čakanie na EZZK je zastavené“, rovnako pri uplynutí 30 minút („EZZK záznam ešte spracúva“) (test `testStoppedOrLongWaitReadsAsInformationNamingTheFinishButton`).
 - **F11 (neopravené, mimo PR #106):** prvá analýza AI pri `A-sken.pdf` trvala asi 6 minút, kým bolo okno v pozadí; proces pritom takmer nevyťažoval procesor. Treba zistiť, či čaká na studený model FoundationModels alebo na aktiváciu okna.
