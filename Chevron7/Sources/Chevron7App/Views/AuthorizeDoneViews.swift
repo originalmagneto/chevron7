@@ -57,21 +57,19 @@ struct AuthorizeView: View {
             }
 
             StickyActionBar {
-                Button {
-                    store.step = .attestation
-                } label: {
-                    Label("Späť na doložku", systemImage: "chevron.left")
+                // A conversion opened from the store has no form on screen to go back to.
+                if !store.isLoadedPendingConversion {
+                    Button {
+                        store.step = .attestation
+                    } label: {
+                        Label("Späť na doložku", systemImage: "chevron.left")
+                    }
+                    .controlSize(.large)
+                    .disabled(store.isAuthorizing)
                 }
-                .controlSize(.large)
-                .disabled(store.isAuthorizing)
 
                 Spacer()
 
-                if store.isWaitingForEZZK {
-                    Button("Zastaviť čakanie") { store.stopWaitingForEZZK() }
-                        .controlSize(.large)
-                        .help("Záznam zostane odoslaný. Konverziu dokončíte neskôr tlačidlom Dokončiť konverziu.")
-                }
                 mobileAuthorizeButton
                 authorizeButton
             }

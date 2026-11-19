@@ -242,21 +242,28 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
                 }
                 return .row(row)
             }
-            store.recordFirstWaitLimit = 0.05
             await store.loadElectronicOriginal(at: source)
             prepareForAuthorization(store)
 
             await store.authorizeAndSign()
 
-            XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstTimedOutMessage)
+            XCTAssertNil(store.lastError)
+            XCTAssertTrue(store.awaitsEZZKInBackground)
             let pending = try XCTUnwrap(store.recordFirstPending)
             XCTAssertEqual(pending.stage, .awaitingEZZK)
             XCTAssertEqual(pending.direction, .electronicToElectronic)
             XCTAssertEqual(pending.originalFingerprints, store.electronicOriginal?.documents.map(\.sha256))
             let number = store.attestation.evidenceNumber
 
+            // A new document meanwhile; the conversion is opened from the store, without its original.
+            store.resetSession(keepingProfile: true)
+            XCTAssertEqual(store.openPendingConversion(id: pending.recordID), .opened)
+            XCTAssertNil(store.electronicOriginal)
+            XCTAssertEqual(store.direction, .electronicToElectronic)
+            store.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát", issuerSummary: "Test CA",
+                                                    isMandateCertificate: true, isQualified: true)]
+            store.selectedIdentityID = "demo"
             processed = true
-            store.recordFirstWaitLimit = 5
             await store.authorizeAndSign()
 
             XCTAssertEqual(store.step, .done, store.lastError ?? "")
@@ -496,7 +503,6 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
     /// The record is never processed and the wait ends at once, so a pending conversion stays.
     private func waitsForEver(_ store: ZakoSessionStore, settingsStore: AppSettingsStore) {
         store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
     }
 
     /// The store's common setup: the client's signed PDF, the provider and the stubs of the one PDF.
@@ -513,7 +519,6 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         store.direction = .electronicToElectronic
         store.clausePageRenderer = StubClausePageRenderer()
         store.pdfClauseCheckRunner = PdfClauseCheckRunner(launch: { _ in (0, "") })
-        store.recordFirstPollInterval = .milliseconds(1)
         return store
     }
 
