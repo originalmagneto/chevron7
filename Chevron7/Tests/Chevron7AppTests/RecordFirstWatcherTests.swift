@@ -202,6 +202,28 @@ final class RecordFirstWatcherTests: XCTestCase {
         XCTAssertEqual(notifier.processed, [id], "the hourly check's result is still announced")
     }
 
+    /// Several conversions wait at once and the app restarts: the watcher reads them all from
+    /// disk, checks each and notifies once per processed record.
+    func testSeveralConversionsAfterRestartEachNotifyOnce() async throws {
+        let first = try seed(status: .acceptedForProcessing)
+        let second = try seed(status: .acceptedForProcessing)
+        let third = try seed(status: .acceptedForProcessing)
+        // Restart: a new store reads the folder again.
+        pendingStore = RecordFirstPendingStore(directory: pendingStore.directory)
+        XCTAssertEqual(Set(pendingStore.all.map(\.recordID)), [first, second, third])
+        onCall = { [unowned self] id in if id != third { setStatus(id, .processed) } }
+        let watcher = makeWatcher()
+
+        await watcher.runOnce()
+        clock.addTimeInterval(60)
+        await watcher.runOnce()
+
+        XCTAssertEqual(Set(verifies), [first, second, third])
+        XCTAssertEqual(notifier.processed.sorted { $0.uuidString < $1.uuidString },
+                       [first, second].sorted { $0.uuidString < $1.uuidString })
+        XCTAssertEqual(pendingStore.pending(id: third)?.stage, .awaitingEZZK)
+    }
+
     func testBusyConversionIsLeftToZaKo() async throws {
         let id = try seed(status: .acceptedForProcessing)
         setStatus(id, .processed)
