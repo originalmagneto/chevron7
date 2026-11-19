@@ -89,6 +89,7 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertNotEqual(store.step, .done)
         XCTAssertNil(store.recordFirstPending)
         XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstRejectedMessage(code: 12, description: "Neznámy obsah"))
+        XCTAssertTrue(settingsStore.recordFirstPendingStore.all.isEmpty, "the stored conversion is removed too")
         let directory = store.outputDirectory
         XCTAssertNil(directory, "nothing is delivered")
         XCTAssertNil(store.attestation.evidenceNumber, "the next attempt takes a new number")
@@ -97,82 +98,120 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(settingsStore.evidenceStore.records.count, 1)
     }
 
-    func testTimedOutWaitResumesWithoutSigningTheRecordAgain() async throws {
+    func testUnprocessedRecordGoesToTheBackground() async throws {
+        try requireXMLLint()
+        let settingsStore = makeSettingsStore()
+        let provider = OrderRecordingProvider()
+        settingsStore.useRealSigningProvider(provider)
+        let store = try makeReadyStore(settingsStore: settingsStore)
+        let notifier = RecordingNotifier()
+        store.recordFirstNotifier = notifier
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
+
+        await store.authorizeAndSign()
+
+        XCTAssertNil(store.lastError)
+        XCTAssertEqual(provider.kinds, [.record], "nothing is signed for the client yet")
+        XCTAssertEqual(store.step, .done)
+        XCTAssertTrue(store.awaitsEZZKInBackground)
+        XCTAssertFalse(store.isAuthorizing, "the advocate can go on at once")
+        XCTAssertEqual(notifier.authorizationRequests, 1)
+        let onDisk = RecordFirstPendingStore(directory: settingsStore.recordFirstPendingStore.directory)
+        XCTAssertEqual(onDisk.pending(id: store.currentRecordID)?.stage, .awaitingEZZK)
+        XCTAssertEqual(settingsStore.evidenceStore.record(id: store.currentRecordID)?.status, .acceptedForProcessing)
+
+        // A new document leaves it to the background.
+        store.resetSession(keepingProfile: true)
+        XCTAssertNil(store.recordFirstPending)
+        XCTAssertNotNil(settingsStore.recordFirstPendingStore.pending(id: onDisk.all[0].recordID))
+    }
+
+    /// Processed in the background, the conversion is finished after a restart from the stored
+    /// files: no second record, number or send.
+    func testLoadedPendingFinishesAfterRestartWithoutSecondRecord() async throws {
         try requireXMLLint()
         let settingsStore = makeSettingsStore()
         let provider = OrderRecordingProvider()
         settingsStore.useRealSigningProvider(provider)
         let store = try makeReadyStore(settingsStore: settingsStore)
         let demoService = try XCTUnwrap(settingsStore.ezzkService as? MockEZZKService)
-        var processed = false
-        store.recordFirstLookup = { id in
-            guard var row = settingsStore.evidenceStore.record(id: id) else { return .refused("") }
-            if processed {
-                row.status = .processed
-                row.updatedAt = Date()
-                settingsStore.evidenceStore.upsert(row)
-            }
-            return .row(row)
-        }
-        store.recordFirstWaitLimit = 0.05
-
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
         await store.authorizeAndSign()
+        let id = store.currentRecordID
+        let number = try XCTUnwrap(store.attestation.evidenceNumber)
 
-        XCTAssertEqual(provider.kinds, [.record])
-        XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstTimedOutMessage)
-        let pending = try XCTUnwrap(store.recordFirstPending)
-        XCTAssertEqual(pending.stage, .awaitingEZZK)
-        let number = store.attestation.evidenceNumber
+        // The watcher sees EZZK's processing and readies the clause.
+        let notifier = RecordingNotifier()
+        let watcher = RecordFirstWatcher(settingsStore: settingsStore, isBusy: { _ in false }, notifier: notifier)
+        var row = try XCTUnwrap(settingsStore.evidenceStore.record(id: id))
+        row.status = .processed
+        settingsStore.evidenceStore.upsert(row)
+        await watcher.runOnce()
+        XCTAssertEqual(notifier.processed, [id])
 
-        processed = true
-        store.recordFirstWaitLimit = 5
-        await store.authorizeAndSign()
+        // Restart: a new app on the same storage.
+        let restarted = makeRestartedSettingsStore(from: settingsStore)
+        restarted.useRealSigningProvider(provider)
+        let zako = ZakoSessionStore(settingsStore: restarted,
+                                    exampleBank: ExampleBank(directory: makeTemporaryDirectory("record-first-restart-bank")))
+        XCTAssertEqual(zako.openPendingConversion(id: id), .opened)
+        XCTAssertEqual(zako.step, .authorize)
+        XCTAssertTrue(zako.isLoadedPendingConversion)
+        zako.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát",
+                                               issuerSummary: "Test CA", isMandateCertificate: true,
+                                               isQualified: true)]
+        zako.selectedIdentityID = "demo"
+        XCTAssertTrue(zako.canBeginAuthorization)
 
-        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        await zako.authorizeAndSign()
+
+        XCTAssertEqual(zako.step, .done, zako.lastError ?? "")
         XCTAssertEqual(provider.kinds, [.record, .client], "the record is never signed twice")
-        XCTAssertEqual(store.attestation.evidenceNumber, number, "no second number")
+        XCTAssertEqual(zako.attestation.evidenceNumber, number)
         XCTAssertEqual(demoService.submittedRecords.count, 1, "the record is sent once")
-        XCTAssertNil(store.recordFirstPending)
+        XCTAssertNil(restarted.recordFirstPendingStore.pending(id: id))
+        XCTAssertTrue(RecordFirstPendingStore(directory: restarted.recordFirstPendingStore.directory).all.isEmpty)
+        XCTAssertNotNil(restarted.evidenceStore.record(id: id)?.deliveredFileName)
     }
 
-    func testStoppedWaitKeepsTheSentRecordForLater() async throws {
+    func testOpenPendingAsksBeforeDiscardingWork() async throws {
         try requireXMLLint()
         let settingsStore = makeSettingsStore()
-        let provider = OrderRecordingProvider()
-        settingsStore.useRealSigningProvider(provider)
+        settingsStore.useRealSigningProvider(OrderRecordingProvider())
         let store = try makeReadyStore(settingsStore: settingsStore)
-        store.recordFirstLookup = { [weak store] id in
-            store?.stopWaitingForEZZK()
-            return .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id)))
-        }
-
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
         await store.authorizeAndSign()
+        let id = store.currentRecordID
+        store.resetSession(keepingProfile: true)
+        store.step = .attestation
 
-        XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstWaitStoppedMessage)
-        XCTAssertNotNil(store.recordFirstPending)
-        XCTAssertFalse(store.isWaitingForEZZK)
-        XCTAssertEqual(settingsStore.evidenceStore.record(id: store.currentRecordID)?.status, .acceptedForProcessing)
+        XCTAssertEqual(store.openPendingConversion(id: id), .needsDiscardConfirmation)
+        XCTAssertEqual(store.step, .attestation, "nothing is thrown away without confirmation")
+        XCTAssertEqual(store.openPendingConversion(id: id, discardingCurrentWork: true), .opened)
+        XCTAssertEqual(store.step, .authorize)
+        XCTAssertEqual(store.openPendingConversion(id: UUID()), .missing)
     }
 
-    /// A stopped or long wait is not a failure: the record is sent and the conversion is finished
-    /// with "Dokončiť konverziu", which is the button the text names.
-    func testStoppedOrLongWaitReadsAsInformationNamingTheFinishButton() {
-        let stopped = AuthorizeNoticePresentation(message: ZakoSessionStore.recordFirstWaitStoppedMessage)
-        XCTAssertEqual(stopped.title, "Čakanie na EZZK je zastavené")
-        XCTAssertEqual(stopped.tone, .info)
-        XCTAssertFalse(stopped.message.hasPrefix("Čakanie na EZZK je zastavené"), "the title already says it")
-        XCTAssertTrue(stopped.message.contains("Dokončiť konverziu"))
+    func testOpenPendingRefusedWhileAuthorizing() async throws {
+        try requireXMLLint()
+        let settingsStore = makeSettingsStore()
+        settingsStore.useRealSigningProvider(OrderRecordingProvider())
+        let store = try makeReadyStore(settingsStore: settingsStore)
+        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
+        await store.authorizeAndSign()
+        let id = store.currentRecordID
+        store.isAuthorizing = true
+        defer { store.isAuthorizing = false }
 
-        let timedOut = AuthorizeNoticePresentation(message: ZakoSessionStore.recordFirstTimedOutMessage)
-        XCTAssertEqual(timedOut.tone, .info)
-        XCTAssertTrue(timedOut.message.contains("Dokončiť konverziu"))
+        XCTAssertEqual(store.openPendingConversion(id: id), .busy)
+    }
 
-        for message in [ZakoSessionStore.recordFirstWaitStoppedMessage, ZakoSessionStore.recordFirstTimedOutMessage] {
-            XCTAssertFalse(message.contains("Autorizovať konverziu"), "the button reads Dokončiť konverziu while a record is pending")
-        }
-
+    /// A record-first conversion waiting for EZZK never reaches the authorize notice, so every
+    /// message there reads as a failure.
+    func testAuthorizeNoticeReadsAsFailure() {
         let failure = AuthorizeNoticePresentation(message: "Karta odmietla PIN.")
         XCTAssertEqual(failure.title, "Konverziu sa nepodarilo autorizovať")
+        XCTAssertEqual(failure.message, "Karta odmietla PIN.")
         XCTAssertEqual(failure.tone, .failure)
     }
 
@@ -247,7 +286,6 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         settingsStore.useRealSigningProvider(provider)
         let store = try makeReadyStore(settingsStore: settingsStore)
         store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
         await store.authorizeAndSign()
         XCTAssertNotNil(store.recordFirstPending)
 
@@ -256,21 +294,6 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
 
         XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstFormChangedMessage)
         XCTAssertEqual(provider.kinds, [.record])
-    }
-
-    func testNewDocumentDropsThePendingConversion() async throws {
-        try requireXMLLint()
-        let settingsStore = makeSettingsStore()
-        settingsStore.useRealSigningProvider(OrderRecordingProvider())
-        let store = try makeReadyStore(settingsStore: settingsStore)
-        store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
-        await store.authorizeAndSign()
-        XCTAssertNotNil(store.recordFirstPending)
-
-        store.resetSession(keepingProfile: true)
-
-        XCTAssertNil(store.recordFirstPending)
     }
 
     /// E→E: the record names the original's documents in order, so a resume after they changed
@@ -284,7 +307,7 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         let a = Data(SHA256.hash(data: Data("a".utf8)))
         let b = Data(SHA256.hash(data: Data("b".utf8)))
         store.electronicOriginal = try Self.electronicOriginal(fingerprints: [b, a])
-        store.recordFirstPending = Self.e2ePending(attestation: store.attestation, fingerprints: [a, b])
+        store.attachRecordFirstPending(Self.e2ePending(attestation: store.attestation, fingerprints: [a, b]))
 
         await store.resumeRecordFirst(viaMobile: false)
 
@@ -349,7 +372,6 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         let number = seedNumber(store: store, settingsStore: settingsStore)
         // Should the check be skipped, the wait ends at once instead of after 30 minutes.
         store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
 
         await store.authorizeAndSign()
 
@@ -437,11 +459,10 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         store.outputDirectoryOverride = directory
         seedNumber(store: store, settingsStore: settingsStore)
         store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
 
         await store.authorizeAndSign()
 
-        XCTAssertNotEqual(store.step, .done)
+        XCTAssertTrue(store.awaitsEZZKInBackground, store.lastError ?? "")
         let pending = try XCTUnwrap(store.recordFirstPending, store.lastError ?? "")
         XCTAssertEqual(pending.clientOutput, .singlePDF)
         let storedClause = try XCTUnwrap(pending.appendedClause)
@@ -612,7 +633,6 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
                                                 isQualified: true)]
         store.selectedIdentityID = "demo"
         store.includeQualifiedTimestamp = false
-        store.recordFirstPollInterval = .milliseconds(1)
         store.step = .authorize
         return store
     }

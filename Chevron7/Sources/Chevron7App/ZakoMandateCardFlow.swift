@@ -125,6 +125,9 @@ extension ZakoSessionStore {
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
         if ezzkSignInRefusal != nil { return false }
+        // A stored conversion signs its stored clause and document; there is no form to check.
+        // The sign-in check stays first: finishing it still sends and looks up the record in EZZK.
+        if isLoadedPendingConversion, recordFirstPending != nil { return true }
         if recordFirstPending == nil, settings.zakoClientOutput == .singlePDF,
            singlePDFProductionRefusal != nil { return false }
         if direction == .electronicToElectronic {

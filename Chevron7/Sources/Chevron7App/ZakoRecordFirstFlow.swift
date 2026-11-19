@@ -8,8 +8,8 @@ import Foundation
 /// signed and registered but whose client container is not signed yet. Everything the rest of
 /// the conversion needs is kept as it was when the record was signed, so a resume never reads
 /// a new server time, allocates a number or renders the record again.
-struct RecordFirstPending: Sendable {
-    enum Stage: Equatable, Sendable {
+struct RecordFirstPending: Codable, Equatable, Sendable {
+    enum Stage: String, Codable, Equatable, Sendable {
         /// The record is sent (or waiting to be sent) and EZZK has not reported it processed.
         case awaitingEZZK
         /// EZZK processed the record; the PDF/A and the clause are signed next.
@@ -18,6 +18,8 @@ struct RecordFirstPending: Sendable {
 
     let recordID: UUID
     var stage: Stage
+    /// When the record was signed: the background watcher's schedule counts from here.
+    var recordSignedAt = Date()
     /// The conversion's direction: the row and the client signature follow it.
     let direction: ConversionDirection
     /// E→E: the SHA-256 of the original's documents in order, as the record names them; a
@@ -48,6 +50,17 @@ struct RecordFirstPending: Sendable {
     let clientTSAURL: String?
 }
 
+/// What happened when ZaKo was asked to open a stored record-first conversion.
+enum PendingOpenResult: Equatable {
+    case opened
+    /// Another document is open past intake; opening would discard it.
+    case needsDiscardConfirmation
+    /// ZaKo is authorizing or reading the card.
+    case busy
+    /// The conversion was finished, rejected or deleted meanwhile.
+    case missing
+}
+
 /// The client signature of a record-first conversion failed after EZZK processed the record:
 /// the record stays there and the conversion is finished with "Dokončiť konverziu".
 struct RecordFirstClientSignatureError: LocalizedError, Equatable {
@@ -66,8 +79,9 @@ extension ZakoSessionStore {
     static let recordFirstModeChangedMessage = "Táto konverzia začala v inom režime EZZK. Prepnite späť alebo začnite konverziu znova."
     static let recordFirstOriginalChangedMessage = "Pôvodný dokument alebo poradie jeho súborov sa od podpisu záznamu zmenili. Dokončite konverziu s pôvodným stavom alebo začnite novú."
     static let recordFirstFormChangedMessage = "Údaje konverzie sa zmenili po podpise záznamu o konverzii. Doložka musí zodpovedať podpísanému záznamu: vráťte zmeny alebo začnite konverziu znova."
-    static let recordFirstWaitStoppedMessage = "Čakanie na EZZK je zastavené. Záznam je odoslaný a Chevron7 ho overuje aj na pozadí. Keď ho EZZK spracuje, podržte Dokončiť konverziu a doložka sa podpíše."
-    static let recordFirstTimedOutMessage = "EZZK záznam zatiaľ nespracovalo. Chevron7 ho overuje aj na pozadí; neskôr podržte Dokončiť konverziu a konverzia sa dokončí."
+    static let recordFirstSentInBackgroundMessage = "Záznam o konverzii je podpísaný a odoslaný do EZZK. Chevron7 overuje na pozadí, či ho EZZK spracovalo, a dá vám vedieť. Medzitým môžete pracovať ďalej; doložku s dokumentom pre klienta potom podpíšete tlačidlom Dokončiť konverziu."
+    static let recordFirstNotSentMessage = "Záznam o konverzii je podpísaný, ale do EZZK sa ešte nedostal. Odošlite ho tlačidlom Odoslať do EZZK; Chevron7 ho potom overuje na pozadí a dá vám vedieť, keď ho EZZK spracuje. Medzitým môžete pracovať ďalej."
+    static let recordFirstPersistFailedMessage = "Čakajúcu konverziu sa nepodarilo uložiť na disk. Chevron7 ju drží, kým beží: dokončite ju pred ukončením aplikácie."
     static let recordFirstSinglePDFPrefixChangedMessage = "Podpísaný PDF nezačína nezmenenou konvertovanou listinou, ktorej odtlačok obsahuje doložka, preto sa neuložil. Záznam o konverzii zostáva v EZZK; kliknite znova na Dokončiť konverziu a dokument sa podpíše znova."
     static let recordFirstSinglePDFIncompleteMessage = "Uložená konverzia nemá pripravenú doložku pre jeden PDF, preto ju nemožno dokončiť. Začnite konverziu znova."
     static let recordFirstRowMismatchMessage = "Riadok Registra konverzií nezodpovedá podpísanému záznamu, preto sa nezapísal. Začnite konverziu znova."
@@ -127,10 +141,67 @@ extension ZakoSessionStore {
         evidenceNumberPool.remove(pending.evidenceNumber)
         // The details signed into the record become the active profile.
         saveProfileFromForm()
-        recordFirstPending = pending
+        // Stored only once its row exists, so the background watcher never sees it without one.
+        var stored = pending
+        stored.recordSignedAt = Date()
+        attachRecordFirstPending(stored)
         submissionStatus = .signed
-        // The wait sends the `.signed` row first, then polls it.
+        // Sends the `.signed` row, then asks EZZK once; the rest of the wait is the watcher's.
         try await continueRecordFirst()
+    }
+
+    /// Keeps the conversion in `RecordFirstPendingStore` and works on it in this session.
+    func attachRecordFirstPending(_ pending: RecordFirstPending) {
+        do {
+            try settingsStore.recordFirstPendingStore.save(pending)
+            recordFirstPersistWarning = nil
+        } catch {
+            recordFirstPersistWarning = Self.recordFirstPersistFailedMessage
+        }
+        attachedPendingID = pending.recordID
+    }
+
+    /// Forgets the conversion in this session only; the store and the watcher keep it.
+    func detachRecordFirstPending() {
+        attachedPendingID = nil
+        isLoadedPendingConversion = false
+        recordFirstPersistWarning = nil
+    }
+
+    /// The conversion is finished or cannot be finished any more: removed from the store too.
+    func discardRecordFirstPending() {
+        if let id = attachedPendingID {
+            settingsStore.recordFirstPendingStore.remove(id: id)
+        }
+        detachRecordFirstPending()
+    }
+
+    /// Waiting for EZZK in the background: ZaKo shows the done step and the advocate can work on.
+    var awaitsEZZKInBackground: Bool {
+        step == .done && recordFirstPending?.stage == .awaitingEZZK
+    }
+
+    /// The register row's id while ZaKo is authorizing it, so the watcher leaves it alone.
+    var recordFirstBusyID: UUID? {
+        isAuthorizing || isResolvingCertificate ? attachedPendingID : nil
+    }
+
+    /// The gate of `authorizeAndSign` for a conversion whose record is signed: the checks that
+    /// still apply to the client signature, then `resumeRecordFirst`.
+    func authorizePendingRecordFirst(viaMobile: Bool) async {
+        if !settingsStore.ezzkAccountController.isDemoMode, signingProviderIsDemo {
+            lastError = EZZKError.demoSignatureOutsideDemo.errorDescription
+            return
+        }
+        if let loadError = evidenceStore.loadError {
+            lastError = loadError
+            return
+        }
+        if !viaMobile, !signingProviderIsDemo, !mandateRequirementSatisfied {
+            lastError = Self.noMandateMessage
+            return
+        }
+        await resumeRecordFirst(viaMobile: viaMobile)
     }
 
     /// Picks up a record-first conversion where it stopped: waiting for EZZK, or the client
@@ -146,14 +217,13 @@ extension ZakoSessionStore {
             lastError = Self.recordFirstModeChangedMessage
             return
         }
-        if pending.direction == .electronicToElectronic,
-           electronicOriginal?.documents.map(\.sha256) != pending.originalFingerprints {
-            lastError = Self.recordFirstOriginalChangedMessage
-            return
-        }
-        guard Self.formMatches(attestation, signed: pending.attestation) else {
-            lastError = Self.recordFirstFormChangedMessage
-            return
+        // A conversion opened from the store signs its stored files: its original and form are
+        // not on screen and cannot have been changed here.
+        if !isLoadedPendingConversion {
+            if let refusal = recordFirstSessionRefusal(pending) {
+                lastError = refusal
+                return
+            }
         }
         do {
             try await continueRecordFirst()
@@ -162,10 +232,16 @@ extension ZakoSessionStore {
         }
     }
 
-    /// "Zastaviť čakanie": the wait ends at its next check; the record stays sent and the
-    /// conversion can be finished later with "Autorizovať konverziu".
-    func stopWaitingForEZZK() {
-        stopWaitingRequested = true
+    /// Why a conversion this session ran itself cannot go on: its original or form changed.
+    private func recordFirstSessionRefusal(_ pending: RecordFirstPending) -> String? {
+        if pending.direction == .electronicToElectronic,
+           electronicOriginal?.documents.map(\.sha256) != pending.originalFingerprints {
+            return Self.recordFirstOriginalChangedMessage
+        }
+        guard Self.formMatches(attestation, signed: pending.attestation) else {
+            return Self.recordFirstFormChangedMessage
+        }
+        return nil
     }
 
     /// The fields the advocate can still edit on the authorize screen, compared with the form
@@ -182,9 +258,22 @@ extension ZakoSessionStore {
     private func continueRecordFirst() async throws {
         guard var pending = recordFirstPending else { return }
         if pending.stage == .awaitingEZZK {
-            guard try await waitUntilEZZKProcessed(pending) else { return }
-            pending.stage = .signingClientContainer
-            recordFirstPending = pending
+            switch await checkEZZKOnce(pending) {
+            case .processed:
+                pending.stage = .signingClientContainer
+                attachRecordFirstPending(pending)
+            case .waiting:
+                // The watcher asks EZZK from here on and notifies; the clause is signed only
+                // when the advocate finishes the conversion (owner's decision of 2026-11-19).
+                lastError = nil
+                result = nil
+                outputDirectory = nil
+                step = .done
+                recordFirstNotifier?.requestAuthorizationIfNeeded()
+                return
+            case .stopped:
+                return
+            }
         }
         do {
             try await signClientContainer(pending)
@@ -202,72 +291,49 @@ extension ZakoSessionStore {
          .signingFailed(recordFirstSinglePDFPrefixChangedMessage)]
     }
 
-    /// Polls the row until EZZK reports it processed. Returns false when the wait ended
-    /// without it (stopped, timed out, refused); `lastError` then says why.
-    private func waitUntilEZZKProcessed(_ pending: RecordFirstPending) async throws -> Bool {
-        stopWaitingRequested = false
-        isWaitingForEZZK = true
-        defer {
-            isWaitingForEZZK = false
-            stopWaitingRequested = false
+    private enum FirstEZZKCheck { case processed, waiting, stopped }
+
+    /// Sends the row when it is not sent yet, then asks EZZK once (Demo answers at once). A
+    /// refused send keeps the conversion and says why; a rejected record or a lost row ends it.
+    private func checkEZZKOnce(_ pending: RecordFirstPending) async -> FirstEZZKCheck {
+        guard let row = evidenceStore.record(id: pending.recordID) else { return endRecordFirst(nil) }
+        if [.signed, .queuedForSubmission, .submissionFailed, .late].contains(row.status) {
+            // Not sent yet, or EZZK did not know the number after a lost reply: send it (the
+            // coordinator never resends an unknown outcome blindly).
+            analysisProgressText = "Odosielam záznam do EZZK…"
+            let refusal = await submitRecordFirst(pending.recordID)
+            if let refusal, evidenceStore.record(id: pending.recordID)?.status.isSubmissionPendingState == true {
+                lastError = refusal
+                return .stopped
+            }
         }
-        let deadline = Date().addingTimeInterval(recordFirstWaitLimit)
-        while true {
-            guard let row = evidenceStore.record(id: pending.recordID) else {
-                startNewRecordAttempt()
-                lastError = Self.recordFirstMissingRowMessage
-                return false
-            }
-            submissionStatus = row.status
-            switch row.status {
-            case .processed:
-                return true
-            case .rejected:
-                startNewRecordAttempt()
-                lastError = Self.recordFirstRejectedMessage(code: row.ezzkResultCode,
-                                                            description: row.ezzkResultDescription)
-                return false
-            case .recordUnsigned:
-                startNewRecordAttempt()
-                lastError = row.ezzkResultDescription ?? Self.recordFirstMissingRowMessage
-                return false
-            case .signed, .queuedForSubmission, .submissionFailed, .late:
-                // Not sent yet, or EZZK did not know the number after a lost reply: send it
-                // (the coordinator never resends an unknown outcome blindly).
-                analysisProgressText = "Odosielam záznam do EZZK…"
-                let refusal = await submitRecordFirst(pending.recordID)
-                if let refusal, evidenceStore.record(id: pending.recordID)?.status.isSubmissionPendingState == true {
-                    lastError = refusal
-                    return false
-                }
-            default:
-                break
-            }
-            guard Date() < deadline else {
-                lastError = Self.recordFirstTimedOutMessage
-                return false
-            }
-            analysisProgressText = "Čakám, kým EZZK spracuje záznam… (môže to trvať niekoľko minút)"
-            // Sleeps in short steps, so "Zastaviť čakanie" and a cancelled task act at once.
-            let nextCheck = ContinuousClock.now.advanced(by: recordFirstPollInterval)
-            while ContinuousClock.now < nextCheck {
-                if stopWaitingRequested || Task.isCancelled {
-                    lastError = Self.recordFirstWaitStoppedMessage
-                    return false
-                }
-                let step = min(Duration.seconds(1), ContinuousClock.now.duration(to: nextCheck))
-                guard (try? await Task.sleep(for: step)) != nil else {
-                    lastError = Self.recordFirstWaitStoppedMessage
-                    return false
-                }
-            }
-            if stopWaitingRequested {
-                lastError = Self.recordFirstWaitStoppedMessage
-                return false
-            }
-            // A busy row (the periodic check has it) is simply checked again next time.
+        if let sent = evidenceStore.record(id: pending.recordID),
+           sent.status == .acceptedForProcessing || sent.status == .outcomeUnknown {
+            analysisProgressText = "Overujem v EZZK…"
+            // A busy row (the periodic check has it) is the watcher's to look at next.
             _ = await (recordFirstLookup ?? { [settingsStore] id in await settingsStore.statusChecker.verify(id: id) })(pending.recordID)
         }
+        guard let checked = evidenceStore.record(id: pending.recordID) else { return endRecordFirst(nil) }
+        submissionStatus = checked.status
+        switch checked.status {
+        case .processed: return .processed
+        case .rejected, .recordUnsigned: return endRecordFirst(checked)
+        default: return .waiting
+        }
+    }
+
+    /// The record cannot lead to a clause: rejected, unsigned, or its row is gone.
+    private func endRecordFirst(_ row: EvidenceRecord?) -> FirstEZZKCheck {
+        startNewRecordAttempt()
+        switch row?.status {
+        case .rejected?:
+            lastError = Self.recordFirstRejectedMessage(code: row?.ezzkResultCode, description: row?.ezzkResultDescription)
+        case .recordUnsigned?:
+            lastError = row?.ezzkResultDescription ?? Self.recordFirstMissingRowMessage
+        default:
+            lastError = Self.recordFirstMissingRowMessage
+        }
+        return .stopped
     }
 
     /// Sends the row; returns the refusal reason when the checker would not act on it.
@@ -410,7 +476,7 @@ extension ZakoSessionStore {
             evidenceStore.upsert(row)
             submissionStatus = row.status
         }
-        recordFirstPending = nil
+        discardRecordFirstPending()
         lastError = nil
         result = signed
         step = .done

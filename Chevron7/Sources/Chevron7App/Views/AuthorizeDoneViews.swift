@@ -6,35 +6,18 @@ import Chevron7Kit
 import AppKit
 import UniformTypeIdentifiers
 
-/// How the authorize step shows `lastError`: a record-first wait that was stopped or ran out is
-/// not a failure (the record is sent and the conversion is finished later), so it reads as
-/// information with its own title instead of "Konverziu sa nepodarilo autorizovať".
+/// How the authorize step shows `lastError`. Every message there is a failure: a record-first
+/// conversion still waiting for EZZK goes to the done step and is finished later from the
+/// notification, the sidebar or the Register, never through this notice.
 struct AuthorizeNoticePresentation: Equatable {
     let title: String
     let message: String
     let tone: ZakoNotice.Tone
 
     init(message: String) {
-        switch message {
-        case ZakoSessionStore.recordFirstWaitStoppedMessage:
-            title = "Čakanie na EZZK je zastavené"
-            self.message = Self.droppingLeadingSentence(message)
-            tone = .info
-        case ZakoSessionStore.recordFirstTimedOutMessage:
-            title = "EZZK záznam ešte spracúva"
-            self.message = message
-            tone = .info
-        default:
-            title = "Konverziu sa nepodarilo autorizovať"
-            self.message = message
-            tone = .failure
-        }
-    }
-
-    /// The message without its first sentence, which the title already says.
-    private static func droppingLeadingSentence(_ text: String) -> String {
-        guard let range = text.range(of: ". ") else { return text }
-        return String(text[range.upperBound...])
+        title = "Konverziu sa nepodarilo autorizovať"
+        self.message = message
+        tone = .failure
     }
 }
 
@@ -99,21 +82,19 @@ struct AuthorizeView: View {
             }
 
             StickyActionBar {
-                Button {
-                    store.step = .attestation
-                } label: {
-                    Label("Späť na doložku", systemImage: "chevron.left")
+                // A conversion opened from the store has no form on screen to go back to.
+                if !store.isLoadedPendingConversion {
+                    Button {
+                        store.step = .attestation
+                    } label: {
+                        Label("Späť na doložku", systemImage: "chevron.left")
+                    }
+                    .controlSize(.large)
+                    .disabled(store.isAuthorizing)
                 }
-                .controlSize(.large)
-                .disabled(store.isAuthorizing)
 
                 Spacer()
 
-                if store.isWaitingForEZZK {
-                    Button("Zastaviť čakanie") { store.stopWaitingForEZZK() }
-                        .controlSize(.large)
-                        .help("Záznam zostane odoslaný. Konverziu dokončíte neskôr tlačidlom Dokončiť konverziu.")
-                }
                 mobileAuthorizeButton
                 authorizeButton
             }
@@ -257,7 +238,47 @@ struct AuthorizeView: View {
         }
     }
 
+    @ViewBuilder
     private var checklistCard: some View {
+        if store.isLoadedPendingConversion, let pending = store.recordFirstPending {
+            loadedConversionCard(pending)
+        } else {
+            formChecklistCard
+        }
+    }
+
+    /// A conversion opened from the store: its document and form are not on screen, so the
+    /// card says what will be signed instead of checking the form again.
+    private func loadedConversionCard(_ pending: RecordFirstPending) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Čakajúca konverzia")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Label(RecordFirstPendingPresentation.documentName(pending), systemImage: "doc.text")
+                .font(.callout.weight(.semibold))
+            Label("Evidenčné číslo \(pending.evidenceNumber)", systemImage: "number")
+                .font(.callout)
+            Label(pending.stage == .signingClientContainer
+                  ? "EZZK záznam spracovalo" : "Záznam ešte čaká na EZZK",
+                  systemImage: pending.stage == .signingClientContainer ? "checkmark.seal" : "hourglass")
+                .font(.callout)
+            Text(pending.clientOutput == .singlePDF
+                 ? "Podpíše sa uložená doložka pripojená k dokumentu v jednom PDF (\(pending.containerDocumentName))."
+                 : "Podpíše sa uložená doložka s dokumentom \(pending.containerDocumentName) v kontajneri ASiC-E.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Výstup sa uloží do priečinka \(pending.directory.path).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard(padding: 14)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var formChecklistCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Zákonné náležitosti doložky")
                 .font(.subheadline.weight(.semibold))
@@ -634,6 +655,10 @@ struct DoneView: View {
                 }
                 .glassCard(cornerRadius: 12, padding: 12)
                 .frame(maxWidth: 520)
+            } else {
+                recordFirstCard
+                    .glassCard(cornerRadius: 12, padding: 12)
+                    .frame(maxWidth: 520)
             }
 
             DetectorTrainingOfferBanner(settingsStore: store.settingsStore)
@@ -657,7 +682,8 @@ struct DoneView: View {
                                     now: now,
                                     currentMode: store.settingsStore.ezzkAccountController.mode,
                                     productionAllowed: store.settingsStore.ezzkAccountController
-                                        .productionPolicy.allowsConsequentialCalls)
+                                        .productionPolicy.allowsConsequentialCalls,
+                                    recordFirstStage: store.recordFirstPending?.stage)
     }
 
     private func toneColor(_ tone: EZZKRecordPresentation.Tone) -> Color {
@@ -783,6 +809,62 @@ struct DoneView: View {
                 try FileManager.default.copyItem(at: delivered, to: url)
             } catch {
                 exportError = "Export sa nepodaril: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Nothing delivered yet: a record-first conversion waits for EZZK in the background, is
+    /// ready for its clause signature, or ended (rejected) and leaves only a new start.
+    @ViewBuilder
+    private var recordFirstCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let pending = store.recordFirstPending {
+                if pending.stage == .awaitingEZZK {
+                    // Only a record EZZK has (or may have) is said to be sent; a failed send
+                    // is offered again above ("Odoslať do EZZK").
+                    let sent = [.acceptedForProcessing, .outcomeUnknown].contains(
+                        store.evidenceStore.record(id: pending.recordID)?.status)
+                    Label(sent ? "Záznam č. \(pending.evidenceNumber) čaká na spracovanie v EZZK"
+                               : "Záznam č. \(pending.evidenceNumber) ešte nie je v EZZK",
+                          systemImage: sent ? "hourglass" : "tray.and.arrow.up")
+                        .font(.headline)
+                    Text(sent ? ZakoSessionStore.recordFirstSentInBackgroundMessage
+                              : ZakoSessionStore.recordFirstNotSentMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label("EZZK spracovalo záznam č. \(pending.evidenceNumber)", systemImage: "signature")
+                        .font(.headline)
+                    Text("Podpíšte doložku s dokumentom pre klienta kartou s mandátnym certifikátom.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let warning = store.recordFirstPersistWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 12) {
+                if store.recordFirstPending?.stage == .signingClientContainer {
+                    Button {
+                        store.lastError = nil
+                        store.step = .authorize
+                    } label: {
+                        Label("Dokončiť konverziu", systemImage: "signature")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                Button {
+                    startNewConversion()
+                } label: {
+                    Label("Nová konverzia", systemImage: "plus")
+                }
+                .controlSize(.large)
             }
         }
     }

@@ -39,6 +39,9 @@ struct RootView: View {
     @State private var showAllRecentDocuments = false
     @State private var showRegisterLoadError = false
     @State private var showSignedClearDialog = false
+    /// A stored record-first conversion waiting for "discard the open work?".
+    @State private var pendingOpenToConfirm: UUID?
+    @State private var pendingOpenAlert: String?
 
     /// Rows shown per history section before "Zobraziť všetky".
     private static let sidebarPreviewCount = 5
@@ -154,14 +157,21 @@ struct RootView: View {
     private var conversionSection: SidebarConversionRows.Section {
         _ = settingsStore.statusChecker.changeCount
         _ = zakoStore.step
-        return SidebarConversionRows.section(from: settingsStore.evidenceStore.records, now: Date())
+        let stages = Dictionary(settingsStore.recordFirstPendingStore.all.map { ($0.recordID, $0.stage) },
+                                uniquingKeysWith: { first, _ in first })
+        return SidebarConversionRows.section(from: settingsStore.evidenceStore.records, now: Date(),
+                                             pendingStages: stages)
     }
 
     /// One conversion: its name, then its evidence number and EZZK state. Opens the row's
     /// detail in the Register.
     private func conversionRow(_ row: SidebarConversionRows.Row) -> some View {
         Button {
-            openInRegister(row.id)
+            if row.pendingStage == .signingClientContainer {
+                model.pendingConversionOpen.request(row.id)
+            } else {
+                openInRegister(row.id)
+            }
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 // The EZZK state leads the row: it is what the advocate scans for.
@@ -185,8 +195,16 @@ struct RootView: View {
         .buttonStyle(.plain)
         .help("\(row.name): \(row.stateLabel)")
         .accessibilityLabel(row.accessibilityLabel)
-        .accessibilityHint("Otvorí detail v Registri konverzií")
+        .accessibilityHint(row.pendingStage == .signingClientContainer
+                           ? "Otvorí konverziu na podpis doložky" : "Otvorí detail v Registri konverzií")
         .contextMenu {
+            if row.pendingStage == .signingClientContainer {
+                Button {
+                    model.pendingConversionOpen.request(row.id)
+                } label: {
+                    Label("Dokončiť konverziu", systemImage: "signature")
+                }
+            }
             Button {
                 openInRegister(row.id)
             } label: {
@@ -428,6 +446,28 @@ struct RootView: View {
             // Documents Finder handed over, also those that arrived before this
             // window existed (a launch by "Open With").
             .task(id: model.externalOpen.requestCount) { await openExternalDocuments() }
+            // A record-first conversion to finish: a notification, the sidebar or the Register.
+            .task(id: model.pendingConversionOpen.requestCount) {
+                if let id = model.pendingConversionOpen.take() { openPendingConversion(id) }
+            }
+            .confirmationDialog("Zahodiť rozpracovanú konverziu?",
+                                isPresented: Binding(get: { pendingOpenToConfirm != nil },
+                                                     set: { if !$0 { pendingOpenToConfirm = nil } }),
+                                titleVisibility: .visible) {
+                Button("Zahodiť a dokončiť čakajúcu", role: .destructive) {
+                    if let id = pendingOpenToConfirm { openPendingConversion(id, discarding: true) }
+                    pendingOpenToConfirm = nil
+                }
+                Button("Zrušiť", role: .cancel) { pendingOpenToConfirm = nil }
+            } message: {
+                Text("V Zaručenej konverzii máte otvorený iný dokument. Evidenčné číslo mu ešte nebolo pridelené; ak ho zahodíte, začnete ho neskôr odznova.")
+            }
+            .alert("Konverziu nemožno otvoriť",
+                   isPresented: Binding(get: { pendingOpenAlert != nil }, set: { if !$0 { pendingOpenAlert = nil } })) {
+                Button("OK", role: .cancel) { pendingOpenAlert = nil }
+            } message: {
+                Text(pendingOpenAlert ?? "")
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 Task { await model.cardReader.refresh() }
             }
@@ -568,8 +608,10 @@ struct RootView: View {
             case .attestation:
                 return "krok 3 z 5: osvedčovacia doložka"
             case .authorize:
-                return "krok 4 z 5: autorizácia KEP"
+                return zakoStore.isLoadedPendingConversion ? "dokončenie konverzie: podpis doložky" : "krok 4 z 5: autorizácia KEP"
             case .done:
+                if zakoStore.awaitsEZZKInBackground { return "záznam čaká na EZZK" }
+                if zakoStore.recordFirstPending?.stage == .signingClientContainer { return "záznam spracovaný, doložka čaká na podpis" }
                 return "krok 5 z 5: hotovo"
             }
         case .evidence:
@@ -586,7 +628,8 @@ struct RootView: View {
             ZakoFlowView(store: zakoStore)
         case .evidence:
             EvidenceDashboardView(settingsStore: settingsStore,
-                                  requestedRecordID: $requestedEvidenceRecordID)
+                                  requestedRecordID: $requestedEvidenceRecordID,
+                                  onFinishPendingConversion: { model.pendingConversionOpen.request($0) })
         }
     }
 
@@ -623,6 +666,27 @@ struct RootView: View {
         Task {
             await recentDocumentStore.withResolvedURL(entry) { resolvedURL in
                 await signingStore.loadDocument(at: resolvedURL)
+            }
+        }
+    }
+
+    /// Opens a stored record-first conversion in ZaKo at its authorize step. One that is no
+    /// longer waiting (finished, rejected, deleted) shows its row in the Register instead.
+    private func openPendingConversion(_ id: UUID, discarding: Bool = false) {
+        switch zakoStore.openPendingConversion(id: id, discardingCurrentWork: discarding) {
+        case .opened:
+            selection = .zako
+        case .needsDiscardConfirmation:
+            selection = .zako
+            pendingOpenToConfirm = id
+        case .busy:
+            selection = .zako
+            pendingOpenAlert = "Zaručená konverzia práve podpisuje. Čakajúcu konverziu dokončíte, keď sa podpis skončí."
+        case .missing:
+            if settingsStore.evidenceStore.record(id: id) != nil {
+                openInRegister(id)
+            } else {
+                pendingOpenAlert = "Konverzia už nečaká na dokončenie a v Registri konverzií sa nenašla."
             }
         }
     }

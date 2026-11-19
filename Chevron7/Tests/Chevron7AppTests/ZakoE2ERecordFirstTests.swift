@@ -102,6 +102,37 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         XCTAssertEqual(recordFirst.timestampServers, today.timestampServers)
     }
 
+    /// A kept PDF/A finished from the store after a new document signs the client's own PDF.
+    func testE2EKeptPdfaFinishedFromTheStore() async throws {
+        try requireXMLLint()
+        var facts = E2EEvidenceFixtures.PDF()
+        facts.declaredPdfaPart = 2
+        facts.pdfaCompliant = true
+        let (store, provider, source, settingsStore) = try makeStore(output: .asicContainer, facts: facts, preview: true)
+        waitsForEver(store, settingsStore: settingsStore)
+        await store.loadElectronicOriginal(at: source)
+        prepareForAuthorization(store)
+        await store.authorizeAndSign()
+        XCTAssertTrue(store.awaitsEZZKInBackground, store.lastError ?? "")
+        let id = store.currentRecordID
+        var row = try XCTUnwrap(settingsStore.evidenceStore.record(id: id))
+        row.status = .processed
+        settingsStore.evidenceStore.upsert(row)
+
+        store.resetSession(keepingProfile: true)
+        XCTAssertEqual(store.openPendingConversion(id: id), .opened)
+        store.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát", issuerSummary: "Test CA",
+                                                isMandateCertificate: true, isQualified: true)]
+        store.selectedIdentityID = "demo"
+        await store.authorizeAndSign()
+
+        XCTAssertEqual(store.step, .done, store.lastError ?? "")
+        XCTAssertEqual(provider.requests.map(\.signsAsRecordContainer), [true, false])
+        XCTAssertEqual(provider.clientRequests.first?.pdfData, try Data(contentsOf: source),
+                       "the client's PDF goes in unchanged")
+        XCTAssertNil(settingsStore.recordFirstPendingStore.pending(id: id))
+    }
+
     /// The one PDF is checked as PDF/A-3b before the record is signed, as P→E does.
     func testE2ESinglePDFIsCheckedBeforeTheRecord() async throws {
         try requireXMLLint()
@@ -242,21 +273,28 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
                 }
                 return .row(row)
             }
-            store.recordFirstWaitLimit = 0.05
             await store.loadElectronicOriginal(at: source)
             prepareForAuthorization(store)
 
             await store.authorizeAndSign()
 
-            XCTAssertEqual(store.lastError, ZakoSessionStore.recordFirstTimedOutMessage)
+            XCTAssertNil(store.lastError)
+            XCTAssertTrue(store.awaitsEZZKInBackground)
             let pending = try XCTUnwrap(store.recordFirstPending)
             XCTAssertEqual(pending.stage, .awaitingEZZK)
             XCTAssertEqual(pending.direction, .electronicToElectronic)
             XCTAssertEqual(pending.originalFingerprints, store.electronicOriginal?.documents.map(\.sha256))
             let number = store.attestation.evidenceNumber
 
+            // A new document meanwhile; the conversion is opened from the store, without its original.
+            store.resetSession(keepingProfile: true)
+            XCTAssertEqual(store.openPendingConversion(id: pending.recordID), .opened)
+            XCTAssertNil(store.electronicOriginal)
+            XCTAssertEqual(store.direction, .electronicToElectronic)
+            store.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát", issuerSummary: "Test CA",
+                                                    isMandateCertificate: true, isQualified: true)]
+            store.selectedIdentityID = "demo"
             processed = true
-            store.recordFirstWaitLimit = 5
             await store.authorizeAndSign()
 
             XCTAssertEqual(store.step, .done, store.lastError ?? "")
@@ -281,6 +319,13 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: source.deletingLastPathComponent().path),
                            ["zmluva.pdf"])
 
+            // Finished later from the store, after a new document, without its original.
+            let id = try XCTUnwrap(store.recordFirstPending?.recordID)
+            store.resetSession(keepingProfile: true)
+            XCTAssertEqual(store.openPendingConversion(id: id), .opened)
+            store.identities = [SigningIdentityInfo(id: "demo", label: "Test mandátny certifikát", issuerSummary: "Test CA",
+                                                    isMandateCertificate: true, isQualified: true)]
+            store.selectedIdentityID = "demo"
             provider.refusesClient = false
             await store.authorizeAndSign()
 
@@ -545,7 +590,6 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
     /// The record is never processed and the wait ends at once, so a pending conversion stays.
     private func waitsForEver(_ store: ZakoSessionStore, settingsStore: AppSettingsStore) {
         store.recordFirstLookup = { id in .row(try! XCTUnwrap(settingsStore.evidenceStore.record(id: id))) }
-        store.recordFirstWaitLimit = 0.05
     }
 
     /// The store's common setup: the client's signed PDF, the provider and the stubs of the one PDF.
@@ -562,7 +606,6 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         store.direction = .electronicToElectronic
         store.clausePageRenderer = StubClausePageRenderer()
         store.pdfClauseCheckRunner = PdfClauseCheckRunner(launch: { _ in (0, "") })
-        store.recordFirstPollInterval = .milliseconds(1)
         return store
     }
 

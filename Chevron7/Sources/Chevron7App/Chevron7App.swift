@@ -18,6 +18,11 @@ final class Chevron7AppModel {
     let cardReader: CardReaderStatus
     let updater: AppUpdater
     let externalOpen = ExternalDocumentOpen()
+    /// A stored record-first conversion to open in ZaKo.
+    let pendingConversionOpen = PendingConversionOpen()
+    /// Polls EZZK for record-first conversions waiting in the background and notifies.
+    let recordFirstWatcher: RecordFirstWatcher
+    private let recordFirstNotifier: RecordFirstNotifier
 
     init() {
         let settings = AppSettingsStore()
@@ -62,6 +67,14 @@ final class Chevron7AppModel {
                 || signing?.batchPhase == .preflighting || signing?.batchPhase == .signing
         }
         let checker = settings.statusChecker
+        let notifier = RecordFirstNotifier(open: pendingConversionOpen)
+        recordFirstNotifier = notifier
+        zako.recordFirstNotifier = notifier
+        // ZaKo's own authorization of a conversion is never raced by the watcher.
+        let watcher = RecordFirstWatcher(settingsStore: settings,
+                                         isBusy: { [weak zako] id in zako?.recordFirstBusyID == id },
+                                         notifier: notifier)
+        recordFirstWatcher = watcher
         let cardWorkInProgress: @MainActor () -> Bool = {
             signing.isSigning || signing.isResolvingCertificate
                 || signing.batchPhase == .preflighting || signing.batchPhase == .signing
@@ -86,6 +99,10 @@ final class Chevron7AppModel {
         // becomes regular. Each start checks for a new version right away.
         let appUpdater = updater
         checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: false)
+        // Record-first conversions follow the same rule: polled only in a regular Chevron7.
+        if EZZKStatusChecker.shouldRun(launchMode: AppLaunchMode.current, isRegularApp: false) {
+            watcher.start()
+        }
         if AppLaunchMode.current != .webSigning {
             appUpdater.startIfNeeded()
         }
@@ -93,6 +110,7 @@ final class Chevron7AppModel {
         AppDelegate.onOpenURLs = { externalOpen.receive($0) }
         AppDelegate.onBecomeRegular = {
             checker.startIfAllowed(launchMode: AppLaunchMode.current, isRegularApp: true)
+            watcher.start()
             appUpdater.startIfNeeded()
         }
 

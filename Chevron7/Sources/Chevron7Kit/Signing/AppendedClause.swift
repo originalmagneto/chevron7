@@ -5,7 +5,7 @@ import Foundation
 
 /// The clause the engine appends to a PDF/A for the "one PDF" ZaKo output: its rendered pages
 /// plus the machine-readable XDC, which becomes a PDF/A-3 associated file.
-public struct AppendedClause: Sendable, Equatable {
+public struct AppendedClause: Codable, Sendable, Equatable {
     public static let xdcMimeType = "application/vnd.gov.sk.xmldatacontainer+xml"
 
     public var pages: Data

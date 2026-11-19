@@ -24,6 +24,9 @@ final class AppSettingsStore {
     /// Sends and checks register rows for ZaKo, the Register and the periodic check, one
     /// action per row at a time. The app model starts its five-minute check at launch.
     let statusChecker: EZZKStatusChecker
+    /// Record-first conversions waiting for EZZK or for the clause signature
+    /// (`Evidence/pending`), shared by ZaKo, the watcher, the sidebar and the Register.
+    let recordFirstPendingStore: RecordFirstPendingStore
     let exampleBank: ExampleBank
     /// Root for every file the app keeps: evidence register, vision bank, output,
     /// templates and signature images.
@@ -52,6 +55,8 @@ final class AppSettingsStore {
         self.evidenceNumberPool = numberPool
         self.statusChecker = EZZKStatusChecker(evidenceStore: evidenceStore, numberPool: numberPool,
                                                controller: controller)
+        self.recordFirstPendingStore = RecordFirstPendingStore(
+            directory: RecordFirstPendingStore.directory(inStorageRoot: storageRoot))
         self.exampleBank = ExampleBank(directory: Self.exampleBankDirectory(in: storageRoot))
         self.signingProvider = SigningProviderFactory.makeDefault()
         self.ezzkAccountController.configure(

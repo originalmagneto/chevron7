@@ -11,6 +11,8 @@ struct EvidenceDashboardView: View {
     /// A row another view (the sidebar's "Zaručené konverzie") asks to open; the Register
     /// selects it, opens its detail and clears the request.
     @Binding var requestedRecordID: UUID?
+    /// Opens a record-first conversion waiting for its clause signature in ZaKo.
+    var onFinishPendingConversion: (UUID) -> Void = { _ in }
     @State private var records: [EvidenceRecord] = []
     @State private var filterText = ""
     @State private var statusFilter: EvidenceRecord.Status?
@@ -57,10 +59,17 @@ struct EvidenceDashboardView: View {
                     .width(min: 130, ideal: 170)
 
                     TableColumn("Stav") { record in
-                        Label(UXLabels.evidenceStatusLabel(for: record.status, isOverdue: record.isOverdue),
-                              systemImage: record.status.sfSymbol)
-                            .foregroundStyle(statusTint(record.status))
-                            .contextMenu { recordContextMenu(for: record) }
+                        Group {
+                            if let waiting = pendingState(record) {
+                                Label(waiting.label, systemImage: waiting.symbol)
+                                    .foregroundStyle(Self.tint(for: waiting.tone))
+                            } else {
+                                Label(UXLabels.evidenceStatusLabel(for: record.status, isOverdue: record.isOverdue),
+                                      systemImage: record.status.sfSymbol)
+                                    .foregroundStyle(statusTint(record.status))
+                            }
+                        }
+                        .contextMenu { recordContextMenu(for: record) }
                     }
                     .width(min: 150, ideal: 190)
 
@@ -169,6 +178,11 @@ struct EvidenceDashboardView: View {
             if let record = detailRecord {
                 RecordDetailView(settingsStore: settingsStore,
                                  recordID: record.id,
+                                 onFinishPendingConversion: { id in
+                                     showDetail = false
+                                     selectedRecordID = nil
+                                     onFinishPendingConversion(id)
+                                 },
                                  onClose: {
                                      showDetail = false
                                      selectedRecordID = nil
@@ -184,6 +198,8 @@ struct EvidenceDashboardView: View {
             Button("Zmazať záznam", role: .destructive) {
                 if let record = recordToDelete {
                     if settingsStore.statusChecker.delete(id: record.id) {
+                        // A conversion waiting for its clause has nothing left to finish.
+                        settingsStore.recordFirstPendingStore.remove(id: record.id)
                         recordSaveError = nil
                         reload()
                     } else {
@@ -324,6 +340,13 @@ struct EvidenceDashboardView: View {
             $0.originalName.lowercased().contains(query) ||
             $0.newDocumentName.lowercased().contains(query) ||
             ($0.evidenceNumber ?? "").lowercased().contains(query)
+        }
+    }
+
+    /// A record-first conversion waiting in the background reads as such, not as its bare row state.
+    private func pendingState(_ record: EvidenceRecord) -> RecordFirstPendingPresentation.State? {
+        settingsStore.recordFirstPendingStore.pending(id: record.id).flatMap {
+            RecordFirstPendingPresentation.state(stage: $0.stage, rowStatus: record.status)
         }
     }
 
@@ -496,6 +519,7 @@ struct SummaryCard: View {
 struct RecordDetailView: View {
     @Bindable var settingsStore: AppSettingsStore
     let recordID: UUID
+    var onFinishPendingConversion: (UUID) -> Void = { _ in }
     let onClose: () -> Void
     @State private var copiedFingerprint = false
     @State private var showDeleteConfirm = false
@@ -568,6 +592,16 @@ struct RecordDetailView: View {
 
                 Spacer()
 
+                if settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage == .signingClientContainer {
+                    Button {
+                        onFinishPendingConversion(record.id)
+                    } label: {
+                        Label("Dokončiť konverziu", systemImage: "signature")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Otvorí konverziu v Zaručenej konverzii, kde podpíšete doložku s dokumentom pre klienta kartou")
+                }
+
                 if record.recordContainerPath != nil {
                     Button {
                         actionMessage = nil
@@ -605,6 +639,7 @@ struct RecordDetailView: View {
         .confirmationDialog("Naozaj chcete vymazať tento záznam?", isPresented: $showDeleteConfirm) {
             Button("Zmazať záznam", role: .destructive) {
                 if settingsStore.statusChecker.delete(id: record.id) {
+                    settingsStore.recordFirstPendingStore.remove(id: record.id)
                     onClose()
                 } else {
                     actionMessage = EZZKStatusChecker.busyDeleteMessage
@@ -616,13 +651,25 @@ struct RecordDetailView: View {
         }
     }
 
+    /// A record-first conversion waiting in the background reads as such, not as its bare row state.
+    private func pendingState(_ record: EvidenceRecord) -> RecordFirstPendingPresentation.State? {
+        settingsStore.recordFirstPendingStore.pending(id: record.id).flatMap {
+            RecordFirstPendingPresentation.state(stage: $0.stage, rowStatus: record.status)
+        }
+    }
+
     private func header(_ record: EvidenceRecord) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(record.originalName)
                 .font(.title3.weight(.bold))
             HStack(spacing: 8) {
-                Label(UXLabels.evidenceStatusLabel(for: record.status), systemImage: record.status.sfSymbol)
-                    .foregroundStyle(EvidenceDashboardView.tint(for: EZZKRecordPresentation.tone(for: record.status)))
+                if let waiting = pendingState(record) {
+                    Label(waiting.label, systemImage: waiting.symbol)
+                        .foregroundStyle(EvidenceDashboardView.tint(for: waiting.tone))
+                } else {
+                    Label(UXLabels.evidenceStatusLabel(for: record.status), systemImage: record.status.sfSymbol)
+                        .foregroundStyle(EvidenceDashboardView.tint(for: EZZKRecordPresentation.tone(for: record.status)))
+                }
                 Text("·")
                     .foregroundStyle(.tertiary)
                 Text(LocalEvidenceStore.csvDate(record.conversionTime))

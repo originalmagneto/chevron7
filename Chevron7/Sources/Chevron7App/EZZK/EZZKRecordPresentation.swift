@@ -135,7 +135,8 @@ struct ZakoDonePresentation: Equatable {
     init(record: EvidenceRecord?, lastError: String?, lastErrorStatus: EvidenceRecord.Status?,
          nextStatusCheck: Date?, now: Date,
          currentMode: AppSettings.EZZKMode? = nil,
-         productionAllowed: Bool = false) {
+         productionAllowed: Bool = false,
+         recordFirstStage: RecordFirstPending.Stage? = nil) {
         guard let record else {
             title = "Konverzia nie je zapísaná v Registri konverzií"
             symbol = "exclamationmark.triangle.fill"
@@ -147,7 +148,28 @@ struct ZakoDonePresentation: Equatable {
             return
         }
         let status = record.status
-        tone = EZZKRecordPresentation.tone(for: status)
+        var tone = EZZKRecordPresentation.tone(for: status)
+        let title: String
+        let symbol: String
+        // Under the order of 1. 1. 2027 the record goes first: until the clause is signed,
+        // nothing has been delivered to the client.
+        switch (recordFirstStage, status) {
+        case (.awaitingEZZK?, .acceptedForProcessing):
+            title = "Záznam o konverzii je v EZZK a čaká na spracovanie"
+            symbol = "hourglass"
+            tone = .pending
+        case (.awaitingEZZK?, .signed), (.awaitingEZZK?, .queuedForSubmission),
+             (.awaitingEZZK?, .submissionFailed):
+            title = "Záznam o konverzii je podpísaný, ešte nie je v EZZK"
+            symbol = "tray.and.arrow.up.fill"
+        case (.awaitingEZZK?, .late):
+            title = "Záznam o konverzii je podpísaný a oneskorený"
+            symbol = "clock.badge.exclamationmark.fill"
+        case (.signingClientContainer?, .processed):
+            title = "EZZK spracovalo záznam, doložka ešte nie je podpísaná"
+            symbol = "signature"
+            tone = .warning
+        default:
         switch status {
         case .processed, .submitted:
             title = "Zaručená konverzia je dokončená, záznam je spracovaný v EZZK"
@@ -171,6 +193,10 @@ struct ZakoDonePresentation: Equatable {
             title = "Dokumenty sú podpísané, záznam ešte nie je v EZZK"
             symbol = "tray.and.arrow.up.fill"
         }
+        }
+        self.title = title
+        self.symbol = symbol
+        self.tone = tone
 
         var lines = EZZKRecordPresentation.stateExplanation(for: record)
         if status == .acceptedForProcessing {
