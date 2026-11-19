@@ -117,4 +117,20 @@ Karta I.CA s mandátnym certifikátom „Marián Čuprík OPRÁVNENIE 1042“. P
 - **F10 (opravené v tejto vetve):** zastavené čakanie sa ukazovalo ako červená chyba „Konverziu sa nepodarilo autorizovať“ a text odkazoval na „Autorizovať konverziu“, hoci tlačidlo sa volá „Dokončiť konverziu“. Teraz je to modrá informácia „Čakanie na EZZK je zastavené“, rovnako pri uplynutí 30 minút („EZZK záznam ešte spracúva“) (test `testStoppedOrLongWaitReadsAsInformationNamingTheFinishButton`).
 - **F11 (neopravené, mimo PR #106):** prvá analýza AI pri `A-sken.pdf` trvala asi 6 minút, kým bolo okno v pozadí; proces pritom takmer nevyťažoval procesor. Treba zistiť, či čaká na studený model FoundationModels alebo na aktiváciu okna.
 
-**Ešte neoverené:** E→E s B1 až B4 (treba ich najprv podpísať kartou), postup od 1. 1. 2027 v kombinácii s Jedným PDF (P→E aj E→E), F7, F1, F2 a F8 vizuálne na Mac Studiu.
+### Krok 2: E→E s B1 až B4 (Mac Studio, karta SAK, Testovacia evidencia, postup od 1. 1. 2027 vypnutý)
+
+Zdroje v `~/Desktop/chevron7-test`: B1 = `B1-listina_podpisane.pdf` (PAdES T s QTS, teda revízia s časovou pečiatkou dokumentu a podpis), B2 = `B2-listina-dvakrat_podpisane.pdf` (B1 podpísané ešte raz, PAdES B bez QTS, pozri F12), B3 = `B3/B3-listina_podpisane.asice` (dávka, jeden spoločný kontajner XAdES s QTS Sectigo, dve PDF).
+
+**B1** (261119-Z0A360143b, Kontajner ASiC-E). Prešiel: podpis platný, doložka E→E 1.3, balík záznamu `chevron7-e2e-record-1.0`, nový dokument PDF/A-2B, odtlačok nového PDF aj originálu sedí, EZZK „Prijatý na spracovanie“.
+
+**B2** (261119-nja360143C, Kontajner ASiC-E). Prešiel: overenie ukázalo dva platné podpisy a originály `B2-listina-dvakrat_podpisane-1` a `-2`; v doložke aj zázname dva originály, odtlačok `-1` = SHA-256 prvých 360 404 bajtov (koniec prvého podpisu), `-2` = celý súbor; EZZK „Prijatý na spracovanie“.
+
+**B3** (261119-V7A3601439, Kontajner ASiC-E). Prešiel: „Súbory v kontajneri“ preusporiadané (zápisnica pred listinou), druh dokumentu Zmluva a Plná moc; doložka uvádza originály v tomto poradí, záznam E→E 1.0 nesie `OriginalDocumentType` Zmluva a Plná moc; nové PDF má 2 strany a osnovu `B3-zapisnica.pdf`, `B3-listina.pdf` v zvolenom poradí; EZZK „Prijatý na spracovanie“.
+
+**B4 sa nedal vytvoriť:** dávka berie iba PDF a kontajnery, PNG pri otvorení ticho vynechá. Obrázok na A4 treba overiť s `E4-png-xades.asice` (zatiaľ neurobené, čakalo sa na povolenie celej obrazovky pre okno výberu súboru).
+
+**Nové nálezy:**
+- **F12 (neopravené):** podpis už podpísaného PDF (PAdES s úrovňou T) so zapnutou QTS vždy zlyhá „Podpisovanie zlyhalo: Signing failed. [SIGNING_FAILED]“, bez QTS prejde. Príčina (overená bez karty na testovacej CA v engine): `SigningJob` pridáva časovú pečiatku údajov cez `PAdESService.timestamp()`, ktorá v DSS 6.4 najprv volá `incorporateValidationData` a pre existujúci podpis úrovne T chce dáta o odvolaní; holý `CommonCertificateVerifier` ich nemá, takže padne `AlertException` ešte pred kartou. Návrh: časovú pečiatku pridať priamo `PAdESTimestampService.timestampDocument` a doplniť test s podpisom od CA na úrovni T. Okrem toho `CLIProcessRunner` (protokol v1) nezapisuje riadky chyby z engine do logu `EngineBridge`, preto v logu nebola trieda výnimky.
+- **F13 (neopravené):** pri spustení aplikácie sa samo otvorí okno Nastavenia. Okno `Window("Nastavenia")` nemá `.restorationBehavior(.disabled)`, takže ho macOS obnoví, ak bolo otvorené pri ukončení (v systéme je vypnuté „Zatvárať okná pri ukončení aplikácie“).
+
+**Ešte neoverené:** obrázok na A4 (E4), postup od 1. 1. 2027 v kombinácii s Jedným PDF (P→E aj E→E), F7, F1, F2 a F8 vizuálne na Mac Studiu.
