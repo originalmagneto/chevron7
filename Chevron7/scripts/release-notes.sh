@@ -28,7 +28,7 @@ section() {
     local title="$1" pattern="$2" lines
     lines="$(git log --format='%h' "$range" \
         | while read -r hash; do
-            git log -1 --format=%B "$hash" | grep -q '\[skip release\]' && continue
+            git log -1 --format=%s "$hash" | grep -q '\[skip release\]' && continue
             git log -1 --format='%s%x09%h' "$hash"
         done \
         | grep -E "$pattern" \
