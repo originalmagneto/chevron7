@@ -1,0 +1,1 @@
+- **Kontrolný zoznam zaručenej konverzie elektronického dokumentu uvádza skutočný režim.** Riadok o overení aplikáciou Chevron7 už v skúšobnom režime nehovorí „testovacia evidencia“, ale uvádza režim, ktorý je práve zvolený.

@@ -84,6 +84,41 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         XCTAssertEqual(store.mobileRefusalForClientOutput, ZakoSinglePDFDelivery.mobileRefusal)
     }
 
+    /// The order of 1. 1. 2027 signs the record first, which the phone cannot: the button is off
+    /// with that reason before a click.
+    func testMobileDisabledUnderRecordFirstOrder() {
+        let settingsStore = makeSettingsStore()
+        let store = ZakoSessionStore(settingsStore: settingsStore)
+        XCTAssertNil(store.mobileRefusalForClientOutput)
+        settingsStore.settings.zakoRecordFirstPreview = true
+        XCTAssertEqual(store.mobileRefusalForClientOutput, ZakoSessionStore.recordFirstMobileMessage)
+    }
+
+    /// A disabled button shows no help tag on macOS: the reason is written under it while the
+    /// phone button is shown and off, and nothing is written while it is live or hidden.
+    func testMobileRefusalIsWrittenOutWhileTheButtonIsShown() {
+        let settingsStore = makeSettingsStore()
+        settingsStore.ezzkAccountController.setMode(.demo)
+        settingsStore.settings.mobileSigningEnabled = true
+        settingsStore.useRealSigningProvider(StubSigningProvider())
+        let store = ZakoSessionStore(settingsStore: settingsStore)
+        XCTAssertNil(store.mobileButtonRefusalNote, "live button, nothing to explain")
+
+        settingsStore.settings.zakoRecordFirstPreview = true
+        XCTAssertEqual(store.mobileButtonRefusalNote, ZakoSessionStore.recordFirstMobileMessage)
+
+        settingsStore.settings.mobileSigningEnabled = false
+        XCTAssertNil(store.mobileButtonRefusalNote, "no button, no note")
+    }
+
+    /// The EZZK login stops the authorization before the card: its unmet item is an orange
+    /// warning, every other unmet item keeps the dashed circle.
+    func testChecklistMarkerSetsTheBlockingItemApart() {
+        XCTAssertEqual(ChecklistMarker(met: false, blocksBeforeCard: true).symbol, "exclamationmark.triangle.fill")
+        XCTAssertEqual(ChecklistMarker(met: false, blocksBeforeCard: false).symbol, "circle.dashed")
+        XCTAssertEqual(ChecklistMarker(met: true, blocksBeforeCard: true).symbol, "checkmark.circle.fill")
+    }
+
     /// The verification screen says what happens to a PDF/A original per chosen output.
     func testKeptOriginalWordingFollowsClientOutput() {
         XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .asicContainer),

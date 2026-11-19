@@ -1,0 +1,1 @@
+- **Predvolený názov nového dokumentu končí na „.pdf“ aj pri jednom súbore.** Pri zaručenej konverzii elektronického dokumentu z jedného PDF Chevron7 navrhne názov s príponou „.pdf“, rovnako ako pri kontajneri s viacerými súbormi, takže sa zhoduje s tým, čo uvedie doložka a vznikne na disku.

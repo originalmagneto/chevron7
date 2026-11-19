@@ -39,6 +39,8 @@ struct ZakoSection<Content: View>: View {
 /// analysis step: the document on the left, an inspector of cards on the right.
 struct ZakoVerificationView: View {
     @Bindable var store: ZakoSessionStore
+    /// Signatures whose "Technický detail" is open.
+    @State private var expandedDetails: Set<String> = []
     @State private var confirmingUndetermined = false
     /// Measured heights of the file rows, so the reorderable list shows every row in the inspector.
     @State private var fileRowHeights: [String: CGFloat] = [:]
@@ -111,7 +113,7 @@ struct ZakoVerificationView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!store.canContinueFromVerification)
+                .disabled(!store.canLeaveVerification)
             }
         }
         .confirmationDialog("Platnosť podpisu sa nedá zistiť", isPresented: $confirmingUndetermined,
@@ -154,6 +156,15 @@ struct ZakoVerificationView: View {
     /// One line that says whether the conversion may go on, in the gate's own words.
     @ViewBuilder
     private func verdictCard(_ original: ElectronicOriginal) -> some View {
+        if let refusal = store.e2eRecordFirstRefusal, store.e2eDecision != nil {
+            ZakoNotice(title: "Konverziu nemožno vykonať postupom od 1. 1. 2027", message: refusal, tone: .failure)
+        } else {
+            decisionCard(original)
+        }
+    }
+
+    @ViewBuilder
+    private func decisionCard(_ original: ElectronicOriginal) -> some View {
         switch store.e2eDecision {
         case .blocked(let reason):
             ZakoNotice(title: "Konverziu nemožno vykonať", message: reason, tone: .failure)
@@ -187,7 +198,7 @@ struct ZakoVerificationView: View {
     private var undeterminedMessage: String {
         guard case .needsConfirmation(let list) = store.e2eDecision else { return "" }
         return list.map { authorization in
-            let reason = authorization.reason ?? "dôvod overenie neuviedlo"
+            let reason = DSSSubIndicationText.trimmedSentence(authorization.reason ?? "dôvod overenie neuviedlo")
             return "Podpis \(authorization.signerName) sa nepodarilo overiť: \(reason)."
         }.joined(separator: " ") + " Do doložky aj záznamu sa zapíše „nie je možné zistiť“."
     }
@@ -206,46 +217,78 @@ struct ZakoVerificationView: View {
         }
     }
 
+    static func detailKey(_ authorization: ElectronicOriginal.Authorization) -> String {
+        "\(authorization.fileEntryName ?? "")|\(authorization.signatureID)"
+    }
+
+    private func detailExpansion(_ key: String) -> Binding<Bool> {
+        Binding(get: { expandedDetails.contains(key) },
+                set: { open in
+                    if open { expandedDetails.insert(key) } else { expandedDetails.remove(key) }
+                })
+    }
+
     private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool,
                                   fileName: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: icon(authorization.state))
-                    .foregroundStyle(tint(authorization.state))
-                    .accessibilityHidden(true)
-                Text(authorization.signerName)
-                    .font(.callout.weight(.semibold))
-                Spacer(minLength: 8)
-                Text(authorization.state.rawValue)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(tint(authorization.state))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: icon(authorization.state))
+                        .foregroundStyle(tint(authorization.state))
+                        .accessibilityHidden(true)
+                    Text(authorization.signerName)
+                        .font(.callout.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(authorization.state.rawValue)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(tint(authorization.state))
+                }
+                Group {
+                    Text(authorization.typeOther ?? authorization.type.skName)
+                    if let time = authorization.signingTime {
+                        Text("Podpísané \(E2EDateText.string(time))")
+                    }
+                    if let mandate = authorization.mandate {
+                        Text("Mandát: \(mandate)")
+                    }
+                    if let timestamp = authorization.timestamp {
+                        Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
+                    } else {
+                        Text("Bez časovej pečiatky")
+                    }
+                    if let fileName {
+                        Text("Podpis v súbore \(fileName)")
+                    }
+                    if showsDocument {
+                        Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 24)
             }
-            Group {
-                Text(authorization.typeOther ?? authorization.type.skName)
-                if let time = authorization.signingTime {
-                    Text("Podpísané \(E2EDateText.string(time))")
+            // One element for VoiceOver; the disclosure below stays its own control.
+            .accessibilityElement(children: .combine)
+            if let detail = authorization.technicalDetail {
+                let key = Self.detailKey(authorization)
+                // The label is a button too, so a click on the words opens it as the arrow does,
+                // and either is reached with the keyboard.
+                DisclosureGroup(isExpanded: detailExpansion(key)) {
+                    Text(detail)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                } label: {
+                    Button("Technický detail") { detailExpansion(key).wrappedValue.toggle() }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Zobrazí pôvodný text overenia")
                 }
-                if let mandate = authorization.mandate {
-                    Text("Mandát: \(mandate)")
-                }
-                if let timestamp = authorization.timestamp {
-                    Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
-                } else {
-                    Text("Bez časovej pečiatky")
-                }
-                if let fileName {
-                    Text("Podpis v súbore \(fileName)")
-                }
-                if showsDocument {
-                    Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
-                }
+                .font(.caption)
+                .padding(.leading, 24)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, 24)
         }
-        .accessibilityElement(children: .combine)
     }
 
     /// The files of a container with several files, in the order the new document joins them.
@@ -379,10 +422,11 @@ struct ZakoVerificationView: View {
         .padding(.vertical, 2)
     }
 
-    /// The record's `OriginalDocumentType` of one file: its own value, else the common one.
+    /// The record's `OriginalDocumentType` of one file. Every file gets an explicit value when the
+    /// file list is built, so there is no hidden fallback to another field.
     private func documentTypeBinding(_ entryName: String) -> Binding<String> {
         Binding(
-            get: { store.attestation.originalDocumentTypeLabels[entryName] ?? store.attestation.originalDocumentTypeLabel },
+            get: { store.attestation.originalDocumentTypeLabels[entryName] ?? "" },
             set: { value in
                 if value.trimmingCharacters(in: .whitespaces).isEmpty {
                     store.attestation.originalDocumentTypeLabels.removeValue(forKey: entryName)
@@ -516,7 +560,7 @@ struct ZakoVerificationView: View {
 
 /// A short titled message in the ZaKo screens: success, warning or failure, with its symbol.
 struct ZakoNotice: View {
-    enum Tone { case success, warning, failure }
+    enum Tone { case success, info, warning, failure }
     let title: String
     let message: String
     let tone: Tone
@@ -524,6 +568,7 @@ struct ZakoNotice: View {
     private var color: Color {
         switch tone {
         case .success: return .green
+        case .info: return .blue
         case .warning: return .orange
         case .failure: return .red
         }
@@ -532,6 +577,7 @@ struct ZakoNotice: View {
     private var symbol: String {
         switch tone {
         case .success: return "checkmark.seal.fill"
+        case .info: return "info.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .failure: return "xmark.octagon.fill"
         }
@@ -630,10 +676,25 @@ struct E2EAttestationFormView: View {
         }
     }
 
+    private var commonDocumentTypePicker: some View {
+        Picker("Druh dokumentu", selection: $store.attestation.originalDocumentTypeLabel) {
+            ForEach(Self.documentKinds, id: \.self) { Text($0) }
+            if !Self.documentKinds.contains(store.attestation.originalDocumentTypeLabel),
+               !store.attestation.originalDocumentTypeLabel.isEmpty {
+                Text(store.attestation.originalDocumentTypeLabel).tag(store.attestation.originalDocumentTypeLabel)
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 260, alignment: .leading)
+    }
+
     /// What still keeps "Pokračovať" off, said beside it.
     private var missingSummary: String? {
         var missing: [String] = []
-        if store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty { missing.append("druh dokumentu") }
+        if !store.e2eDocumentTypesFilled
+            || store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty {
+            missing.append("druh dokumentu")
+        }
         if store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty { missing.append("názov nového dokumentu") }
         if store.attestation.performingPerson.fullName.trimmingCharacters(in: .whitespaces).isEmpty { missing.append("meno a priezvisko") }
         return missing.isEmpty ? nil : "Doplňte: " + missing.joined(separator: ", ")
@@ -662,17 +723,39 @@ struct E2EAttestationFormView: View {
                         .truncationMode(.middle)
                         .help(store.attestation.originalDocumentName)
                 }
-                LabeledRow(label: "Druh dokumentu") {
-                    Picker("Druh dokumentu", selection: $store.attestation.originalDocumentTypeLabel) {
-                        ForEach(Self.documentKinds, id: \.self) { Text($0) }
-                        if !Self.documentKinds.contains(store.attestation.originalDocumentTypeLabel),
-                           !store.attestation.originalDocumentTypeLabel.isEmpty {
-                            Text(store.attestation.originalDocumentTypeLabel).tag(store.attestation.originalDocumentTypeLabel)
+                let fileTypes = store.e2eFileDocumentTypes
+                if fileTypes.isEmpty {
+                    LabeledRow(label: "Druh dokumentu") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            commonDocumentTypePicker
+                            Text("Druh pôvodného dokumentu sa zapíše do záznamu, nie do doložky.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: 260, alignment: .leading)
-                    .help("Druh pôvodného dokumentu do záznamu o konverzii.")
+                } else {
+                    LabeledRow(label: "Druh dokumentu") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("podľa súborov (\(fileTypes.map { $0.type.isEmpty ? "nevyplnené" : $0.type }.joined(separator: ", ")))")
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Upraviť v overení") { store.step = .verification }
+                                .controlSize(.small)
+                                .help("Druh dokumentu sa určuje pri každom súbore v časti „Súbory v kontajneri“.")
+                        }
+                    }
+                    if store.expectedRegimeNow == .recordFirst {
+                        LabeledRow(label: "Druh nového dokumentu") {
+                            VStack(alignment: .leading, spacing: 4) {
+                                commonDocumentTypePicker
+                                Text("Zapíše sa do záznamu o konverzii ako druh nového dokumentu.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
                 }
                 LabeledRow(label: "Podpisy") {
                     Text(signaturesLine)

@@ -577,4 +577,39 @@ final class ElectronicOriginalTests: XCTestCase {
             return XCTFail("an invalid timestamp must block")
         }
     }
+
+    func testUndeterminedReasonIsSlovakAndKeepsDSSTextAsDetail() throws {
+        var undetermined = signature()
+        undetermined.indication = "INDETERMINATE"
+        undetermined.subIndication = "NO_CERTIFICATE_CHAIN_FOUND"
+        undetermined.validationReason = "The certificate chain for signature is not trusted, it does not contain a trust anchor."
+        let authorization = try original([undetermined]).authorizations[0]
+        XCTAssertEqual(authorization.reason, "reťazec certifikátov nevedie k dôveryhodnej autorite")
+        XCTAssertEqual(authorization.technicalDetail,
+                       "The certificate chain for signature is not trusted, it does not contain a trust anchor.")
+        XCTAssertEqual(authorization.subIndication, "NO_CERTIFICATE_CHAIN_FOUND")
+    }
+
+    func testUnknownSubIndicationNamesTheCode() throws {
+        var undetermined = signature()
+        undetermined.indication = "INDETERMINATE"
+        undetermined.subIndication = "SOMETHING_NEW"
+        XCTAssertEqual(try original([undetermined]).authorizations[0].reason, "dôvod: SOMETHING_NEW")
+    }
+
+    func testInvalidReasonEndingWithPeriodGetsNoDoublePeriod() throws {
+        var invalid = signature()
+        invalid.indication = "TOTAL_FAILED"
+        invalid.validationReason = "Signature is broken."
+        guard case .blocked(let message) = E2EVerificationGate.decide(try original([invalid])) else {
+            return XCTFail("an invalid signature must block")
+        }
+        XCTAssertFalse(message.contains(".)"), message)
+        XCTAssertFalse(message.contains(".."), message)
+    }
+
+    func testTrimmedSentenceDropsTrailingPeriods() {
+        XCTAssertEqual(DSSSubIndicationText.trimmedSentence("anchor.. "), "anchor")
+        XCTAssertEqual(DSSSubIndicationText.trimmedSentence("bez bodky"), "bez bodky")
+    }
 }

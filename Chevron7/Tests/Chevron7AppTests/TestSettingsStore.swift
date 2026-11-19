@@ -71,8 +71,18 @@ final class MemoryCredentialStore: EZZKSOAPCredentialStoring, @unchecked Sendabl
         set { lock.withLock { failureOnDelete = newValue } }
     }
 
+    /// Thrown by `load`, as the Keychain does when it refuses to hand an item over.
+    var loadFailure: Error? {
+        get { lock.withLock { failureOnLoad } }
+        set { lock.withLock { failureOnLoad = newValue } }
+    }
+    private var failureOnLoad: Error?
+
     func load(environment: EZZKEnvironment) throws -> EZZKSOAPCredentials? {
-        lock.withLock { items[environment] }
+        try lock.withLock {
+            if let failureOnLoad { throw failureOnLoad }
+            return items[environment]
+        }
     }
 
     func save(_ credentials: EZZKSOAPCredentials, environment: EZZKEnvironment) throws {

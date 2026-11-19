@@ -6,6 +6,21 @@ import Chevron7Kit
 import AppKit
 import UniformTypeIdentifiers
 
+/// How the authorize step shows `lastError`. Every message there is a failure: a record-first
+/// conversion still waiting for EZZK goes to the done step and is finished later from the
+/// notification, the sidebar or the Register, never through this notice.
+struct AuthorizeNoticePresentation: Equatable {
+    let title: String
+    let message: String
+    let tone: ZakoNotice.Tone
+
+    init(message: String) {
+        title = "Konverziu sa nepodarilo autorizovať"
+        self.message = message
+        tone = .failure
+    }
+}
+
 struct AuthorizeView: View {
     @Bindable var store: ZakoSessionStore
 
@@ -19,7 +34,17 @@ struct AuthorizeView: View {
                     tokenStatusRow
 
                     if let error = store.lastError {
-                        ZakoNotice(title: "Konverziu sa nepodarilo autorizovať", message: error, tone: .failure)
+                        let notice = AuthorizeNoticePresentation(message: error)
+                        ZakoNotice(title: notice.title, message: notice.message, tone: notice.tone)
+                    }
+
+                    if let signedOut = store.ezzkSignInRefusal {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ZakoNotice(title: "Nie ste prihlásený do EZZK", message: signedOut, tone: .warning)
+                            OpenSettingsButton(pane: .ezzk) {
+                                Label("Otvoriť nastavenia EZZK", systemImage: "gearshape")
+                            }
+                        }
                     }
 
                     ViewThatFits(in: .horizontal) {
@@ -118,12 +143,16 @@ struct AuthorizeView: View {
     private var e2eChecklistItems: [(Bool, String, String)] {
         let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
         return [
-            (store.canContinueFromVerification, "Podpisy a časové pečiatky klienta overené", "signature.badge.checkmark"),
+            (store.canLeaveVerification,
+             store.e2eRecordFirstRefusal == nil ? "Podpisy a časové pečiatky klienta overené"
+                : "Kvalifikácia podpisu neurčená: postup od 1. 1. 2027 ju nepripúšťa", "signature.badge.checkmark"),
             (!store.e2eNeedsQualifiedReport || store.qualifiedReport != nil,
              store.e2eNeedsQualifiedReport ? "Výsledok kvalifikovanej služby validácie pripojený"
-                : "Overenie aplikáciou Chevron7 (testovacia evidencia)", "checkmark.seal"),
-            (!store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Druh dokumentu vyplnený", "text.badge.checkmark"),
+                : "Overenie aplikáciou Chevron7 (\(store.settingsStore.ezzkAccountController.mode.label))", "checkmark.seal"),
+            (store.e2eDocumentTypesFilled
+                && !store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
+             store.e2eFileDocumentTypes.isEmpty ? "Druh dokumentu vyplnený" : "Druh dokumentu vyplnený pri každom súbore",
+             "text.badge.checkmark"),
             (!store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
              "Názov nového dokumentu vyplnený", "doc.badge.gearshape"),
             (true, store.attestation.evidenceNumber.map { "Evidenčné číslo z EZZK: \($0)" }
@@ -172,6 +201,28 @@ struct AuthorizeView: View {
             (store.mandateRequirementSatisfied, "Mandátny certifikát SAK pripravený", "checkmark.seal"),
             (qtsReady, qtsLabel, "clock.badge.checkmark")
         ]
+    }
+
+    private func checklistRow(_ item: (Bool, String, String), blocksBeforeCard: Bool = false) -> some View {
+        let marker = ChecklistMarker(met: item.0, blocksBeforeCard: blocksBeforeCard)
+        return HStack(spacing: 8) {
+            Image(systemName: marker.symbol)
+                .foregroundStyle(marker.color)
+            Image(systemName: item.2)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(item.1)
+                .font(.callout)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(marker.accessibilityValue)
+    }
+
+    /// Outside Demo the number comes from EZZK, so the saved login is a condition too.
+    private var ezzkChecklistItems: [(Bool, String, String)] {
+        guard store.settingsStore.ezzkAccountController.mode != .demo else { return [] }
+        return [(store.ezzkSignInRefusal == nil, "Prihlásenie do EZZK", "person.badge.shield.checkmark")]
     }
 
     private var inputSignatureChecklistItem: (Bool, String, String) {
@@ -233,16 +284,12 @@ struct AuthorizeView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             ForEach(Array(checklistItems.enumerated()), id: \.offset) { _, item in
-                HStack(spacing: 8) {
-                    Image(systemName: item.0 ? "checkmark.circle.fill" : "circle.dashed")
-                        .foregroundStyle(item.0 ? Color.green : Color.secondary)
-                    Image(systemName: item.2)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18)
-                    Text(item.1)
-                        .font(.callout)
-                }
+                checklistRow(item)
+            }
+            // The EZZK login stops the authorization before the card, so an unmet one looks like
+            // the warning above the list, not like the card items still to come.
+            ForEach(Array(ezzkChecklistItems.enumerated()), id: \.offset) { _, item in
+                checklistRow(item, blocksBeforeCard: true)
             }
             if store.direction == .electronicToElectronic {
                 EmptyView()
@@ -302,6 +349,12 @@ struct AuthorizeView: View {
             // word by word and grew the window past the screen, hiding "Autorizovať".
             if store.showsMobileOutsideDemoNotice {
                 Label(ZakoSessionStore.mobileOutsideDemoMessage, systemImage: "iphone.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let mobileRefusal = store.mobileButtonRefusalNote {
+                Label(mobileRefusal, systemImage: "iphone.slash")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -404,7 +457,7 @@ struct AuthorizeView: View {
             systemImage: "signature.badge.checkmark",
             workingText: store.analysisProgressText,
             disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
-                || !store.canBeginAuthorization,
+                || store.pendingCardAction != nil || !store.canBeginAuthorization,
             isWorking: store.isAuthorizing
         ) {
             Task { await store.beginAuthorization() }
@@ -435,6 +488,42 @@ struct AuthorizeView: View {
             .help(store.mobileRefusalForClientOutput
                   ?? "Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
             .accessibilityHint(store.mobileRefusalForClientOutput ?? "")
+        }
+    }
+}
+
+/// The mark in front of a checklist item: green when met, an orange warning for an unmet item
+/// that stops the authorization before the card (the EZZK login), a dashed circle otherwise.
+enum ChecklistMarker: Equatable {
+    case met
+    case blocking
+    case pending
+
+    init(met: Bool, blocksBeforeCard: Bool) {
+        self = met ? .met : (blocksBeforeCard ? .blocking : .pending)
+    }
+
+    var symbol: String {
+        switch self {
+        case .met: "checkmark.circle.fill"
+        case .blocking: "exclamationmark.triangle.fill"
+        case .pending: "circle.dashed"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .met: .green
+        case .blocking: .orange
+        case .pending: .secondary
+        }
+    }
+
+    var accessibilityValue: String {
+        switch self {
+        case .met: "splnené"
+        case .blocking: "chýba, bráni autorizácii"
+        case .pending: "nesplnené"
         }
     }
 }

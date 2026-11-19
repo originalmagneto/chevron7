@@ -1,0 +1,1 @@
+- **Tlačidlo „Autorizovať mobilom“ je pri postupe od 1. 1. 2027 neaktívne vopred.** Pri tomto postupe sa najprv podpisuje záznam o konverzii, a ten mobil podpísať nevie. Tlačidlo je preto sivé a dôvod je napísaný v karte „Podpisový certifikát pre autorizáciu“, namiesto chybovej hlášky až po kliknutí.

@@ -206,6 +206,15 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(store.openPendingConversion(id: id), .busy)
     }
 
+    /// A record-first conversion waiting for EZZK never reaches the authorize notice, so every
+    /// message there reads as a failure.
+    func testAuthorizeNoticeReadsAsFailure() {
+        let failure = AuthorizeNoticePresentation(message: "Karta odmietla PIN.")
+        XCTAssertEqual(failure.title, "Konverziu sa nepodarilo autorizovať")
+        XCTAssertEqual(failure.message, "Karta odmietla PIN.")
+        XCTAssertEqual(failure.tone, .failure)
+    }
+
     func testFailedRecordSignatureLeavesNoRowAndKeepsTheNumber() async throws {
         try requireXMLLint()
         let settingsStore = makeSettingsStore()

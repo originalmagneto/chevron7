@@ -117,6 +117,75 @@ final class ZakoMandateCardFlowTests: XCTestCase {
         XCTAssertFalse(store.requiresMandateOverride, "a real card gets no override")
     }
 
+    /// Outside Demo a number needs the saved EZZK login: without it the button is off and the
+    /// reason is given before the card or its PIN.
+    func testSignedOutEZZKKeepsAuthorizationOff() throws {
+        let credentials = MemoryCredentialStore()
+        let controller = EZZKAccountController(mode: .test, credentialStore: credentials,
+                                               transportFactory: { _ in ScriptedTransport([]) },
+                                               productionPolicy: .refused)
+        let store = ZakoSessionStore(settingsStore: makeSettingsStore(ezzkAccountController: controller))
+        XCTAssertEqual(store.ezzkSignInRefusal, ZakoSessionStore.ezzkSignedOutMessage)
+        XCTAssertFalse(store.canBeginAuthorization)
+
+        try credentials.save(EZZKSOAPCredentials(login: "advokat", password: "heslo"), environment: .sandbox)
+        let signedIn = EZZKAccountController(mode: .test, credentialStore: credentials,
+                                             transportFactory: { _ in ScriptedTransport([]) },
+                                             productionPolicy: .refused)
+        let ready = ZakoSessionStore(settingsStore: makeSettingsStore(ezzkAccountController: signedIn))
+        XCTAssertNil(ready.ezzkSignInRefusal)
+
+        let demo = ZakoSessionStore(settingsStore: makeSettingsStore())
+        XCTAssertNil(demo.ezzkSignInRefusal, "Demo needs no EZZK login")
+    }
+
+    /// Asking the drivers takes seconds: "Kontrolujem kartu…" shows before they answer.
+    func testCheckingCardShowsBeforeTheDriversAnswer() async {
+        let provider = CardFlowProvider(cardInserted: false)
+        let gate = AsyncGate()
+        provider.onDiscover = { await gate.wait() }
+        let store = makeStore(provider: provider, card: .noCard)
+
+        let flow = Task { await store.beginAuthorization() }
+        while provider.discoveryCount == 0 { await Task.yield() }
+        XCTAssertEqual(store.cardPrompt, .checkingCard)
+        XCTAssertEqual(store.pendingCardAction, .authorization)
+
+        await gate.open()
+        await flow.value
+        XCTAssertEqual(store.cardPrompt, .insertCard)
+    }
+
+    /// Empty reader slots go straight to "Vložte kartu" without asking the drivers.
+    func testEmptyReaderAsksForTheCardAtOnce() async {
+        let provider = CardFlowProvider(cardInserted: false)
+        let store = makeStore(provider: provider, card: .noCard)
+        store.readerSlotsHaveCard = { false }
+
+        await store.beginAuthorization()
+
+        XCTAssertEqual(store.cardPrompt, .insertCard)
+        XCTAssertEqual(store.pendingCardAction, .authorization)
+        XCTAssertEqual(provider.discoveryCount, 0)
+    }
+
+    /// Cancelled while the drivers answer: their late result raises no prompt.
+    func testCancelWhileCheckingDropsTheLateResult() async {
+        let provider = CardFlowProvider(cardInserted: false)
+        let gate = AsyncGate()
+        provider.onDiscover = { await gate.wait() }
+        let store = makeStore(provider: provider, card: .noCard)
+
+        let flow = Task { await store.beginAuthorization() }
+        while provider.discoveryCount == 0 { await Task.yield() }
+        store.cancelCardFlow()
+        await gate.open()
+        await flow.value
+
+        XCTAssertNil(store.cardPrompt)
+        XCTAssertNil(store.pendingCardAction)
+    }
+
     func testPINOutlivesANewDocumentButNotTheCard() {
         let store = makeStore(provider: CardFlowProvider(), card: .noCard)
         store.signingPIN = "1234"
@@ -146,6 +215,9 @@ private final class CardFlowProvider: QualifiedSigningProviding, @unchecked Send
     private let resolved: [SigningIdentityInfo]
     private var unlocked = false
     private var pins: [String] = []
+    private var discoveries = 0
+    /// Runs inside `availableIdentities` before it answers, as slow drivers would.
+    var onDiscover: (@Sendable () async -> Void)?
 
     init(cardInserted: Bool = true, resolved: [SigningIdentityInfo] = [mandate, plain]) {
         self.cardInserted = cardInserted
@@ -153,8 +225,11 @@ private final class CardFlowProvider: QualifiedSigningProviding, @unchecked Send
     }
 
     var resolvedPINs: [String] { lock.withLock { pins } }
+    var discoveryCount: Int { lock.withLock { discoveries } }
 
     func availableIdentities() async -> [SigningIdentityInfo] {
+        lock.withLock { discoveries += 1 }
+        await onDiscover?()
         guard cardInserted else { return [] }
         return lock.withLock { unlocked } ? resolved : [Self.synthetic]
     }
@@ -168,5 +243,22 @@ private final class CardFlowProvider: QualifiedSigningProviding, @unchecked Send
 
     func sign(_ request: SigningRequest) async throws -> SignedConversionResult {
         throw SigningError.signingFailed("not used")
+    }
+}
+
+/// Holds `wait()` callers until `open()`.
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters = []
     }
 }

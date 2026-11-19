@@ -15,6 +15,7 @@ struct ZakoCardPromptSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             switch prompt {
+            case .checkingCard: checkingCard
             case .insertCard: insertCard
             case .enterPIN: enterPIN
             }
@@ -27,6 +28,27 @@ struct ZakoCardPromptSheet: View {
         store.pendingCardAction == .evidenceNumber
             ? "Evidenčné číslo sa pridelí až po overení mandátneho certifikátu."
             : "Konverzia sa autorizuje mandátnym certifikátom z karty."
+    }
+
+    private var checkingCard: some View {
+        Group {
+            Label("Kontrolujem kartu…", systemImage: "creditcard.and.123")
+                .font(.headline)
+            Text("Zisťujem, aká karta je v čítačke. \(purpose)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Môže to trvať niekoľko sekúnd.")
+                    .font(.callout)
+            }
+            HStack {
+                Spacer()
+                Button("Zrušiť", role: .cancel) { store.cancelCardFlow() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
     }
 
     private var insertCard: some View {

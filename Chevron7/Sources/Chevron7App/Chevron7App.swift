@@ -34,7 +34,9 @@ final class Chevron7AppModel {
             signingProvider: settings.signingProvider,
             settingsStore: settings,
             recentDocumentStore: recentDocuments)
-        zakoStore = ZakoSessionStore(settingsStore: settings, exampleBank: settings.exampleBank)
+        let zakoSession = ZakoSessionStore(settingsStore: settings, exampleBank: settings.exampleBank)
+        zakoSession.readerSlotsHaveCard = { await SmartcardSlotReader.anyCardPresent() }
+        zakoStore = zakoSession
         let signedDocuments = SignedDocumentStore()
         signedDocumentStore = signedDocuments
         signingStore.signedDocumentStore = signedDocuments
@@ -403,10 +405,14 @@ enum SettingsWindow {
 /// settings live in a regular `Window` scene.
 struct OpenSettingsButton<Label: View>: View {
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("settings.selectedPane") private var storedPane = ""
+    /// The pane to show, or nil for the one Settings remember.
+    var pane: SettingsPane? = nil
     @ViewBuilder var label: () -> Label
 
     var body: some View {
         Button {
+            if let pane { storedPane = pane.rawValue }
             AppDelegate.becomeRegularApp()
             openWindow(id: SettingsWindow.id)
         } label: {

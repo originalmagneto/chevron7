@@ -109,6 +109,16 @@ struct SmartcardBadge: Equatable {
 /// The slot manager exists only with the `com.apple.security.smartcard` entitlement
 /// (`Config/Chevron7App.entitlements`); without it the reader reports no cards.
 enum SmartcardSlotReader {
+    /// Whether any reader slot holds a card, or nil without the slot manager (no entitlement).
+    static func anyCardPresent() async -> Bool? {
+        guard let manager = TKSmartCardSlotManager.default else { return nil }
+        for name in manager.slotNames {
+            guard let slot = await manager.getSlot(withName: name) else { continue }
+            if slot.state != .empty && slot.state != .missing { return true }
+        }
+        return false
+    }
+
     static func cardATRs() async -> [[UInt8]] {
         guard let manager = TKSmartCardSlotManager.default else { return [] }
         var atrs: [[UInt8]] = []

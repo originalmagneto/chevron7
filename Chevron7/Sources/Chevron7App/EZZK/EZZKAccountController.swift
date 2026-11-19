@@ -178,6 +178,13 @@ final class EZZKAccountController {
             storedLogin = ""
             return
         }
-        storedLogin = (try? credentialStore.load(environment: environment))?.login ?? ""
+        do {
+            storedLogin = try credentialStore.load(environment: environment)?.login ?? ""
+        } catch {
+            // An unreadable Keychain item (an access the person denied, a build Keychain no
+            // longer recognises) is said, never shown as a plain "Neprihlásené".
+            storedLogin = ""
+            state = .failed(Self.message(for: error))
+        }
     }
 }

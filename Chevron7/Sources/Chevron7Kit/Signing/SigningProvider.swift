@@ -383,6 +383,8 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
     public var hasTimestamp: Bool
     public var state: State
     public var detail: String?
+    /// The ETSI sub-indication DSS gave a signature that is not valid, e.g. `NO_CERTIFICATE_CHAIN_FOUND`.
+    public var subIndication: String?
     /// Names of the container's data objects this signature covers.
     public var coveredDocuments: [String]
     /// DSS SignatureQualification name from full validation, e.g. "QESIG".
@@ -424,8 +426,9 @@ public struct DocumentSignatureInfo: Sendable, Identifiable, Equatable {
                 hasTimestamp: Bool = false, state: State = .unknown, detail: String? = nil,
                 coveredDocuments: [String] = [], certificateQualification: String? = nil,
                 timestampAuthority: String? = nil, timestampTime: Date? = nil,
-                dataTimestamp: DataTimestamp? = nil) {
+                dataTimestamp: DataTimestamp? = nil, subIndication: String? = nil) {
         self.id = id
+        self.subIndication = subIndication
         self.signerDisplayName = signerDisplayName
         self.format = format
         self.signingTime = signingTime

@@ -50,6 +50,8 @@ public enum E2EEvidenceFixtures {
         public var id = "S-1"
         public var indication = "TOTAL_PASSED"
         public var subIndication: String? = nil
+        /// DSS's English sentence, as the engine sends it in `validationReason`.
+        public var validationReason: String? = nil
         public var qualification = "QESIG"
         public var format = "PAdES-BASELINE-T"
         public var signer = "Ján Klient"
@@ -152,6 +154,7 @@ public enum E2EEvidenceFixtures {
                 ] as [String: Any] }
             ]
             if let sub = signature.subIndication { entry["subIndication"] = sub }
+            if let reason = signature.validationReason { entry["validationReason"] = reason }
             tree.append(entry)
             var fact: [String: Any] = [
                 "id": signature.id,
