@@ -222,6 +222,34 @@ class ContentTimestampTest {
                 .get(0).getAsJsonObject().get("format").getAsString());
     }
 
+    /// A PDF the card already signed at Baseline T, signed again with the QTS switch on: DSS's
+    /// PAdESService.timestamp would first add validation data for the existing signature and
+    /// refuse for want of revocation data before the card is asked (F12, 2026-11-19). The signer
+    /// is issued by a CA here, because a self-signed certificate needs no revocation data.
+    @Test
+    void aPdfSignedAtBaselineTIsTimestampedAndSignedAgain() throws Exception {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
+        settings.answerTimestampsWith(authority());
+        settings.setTsaServer(TSA, new eu.europa.esig.dss.service.http.commons.TimestampDataLoader());
+        settings.setContentTimestamp(true);
+        var once = signWith(settings, "dokument.pdf", pdf(), List.of(), ContentTimestampTest::caIssuedToken);
+
+        var twice = signWith(settings, "dokument.pdf", once, List.of(), ContentTimestampTest::caIssuedToken);
+
+        var signatures = new MachineInspectionService().inspect(twice).getAsJsonArray("signatures").asList().stream()
+                .map(value -> value.getAsJsonObject()).toList();
+        assertEquals(List.of("PAdES_BASELINE_T", "PAdES_BASELINE_T"),
+                signatures.stream().map(signature -> signature.get("format").getAsString()).toList());
+        for (var signature : signatures) {
+            // Each signature covers a document timestamp of its own revision.
+            assertTrue(signature.getAsJsonArray("timestamps").asList().stream().map(value -> value.getAsJsonObject())
+                    .anyMatch(timestamp -> timestamp.get("type").getAsString().equals("DOCUMENT_TIMESTAMP")
+                            && timestamp.get("inSignedData").getAsBoolean()), signature.toString());
+        }
+        assertEquals(java.nio.ByteBuffer.wrap(once), java.nio.ByteBuffer.wrap(java.util.Arrays.copyOf(twice, once.length)));
+    }
+
     // Protocol
 
     @Test
@@ -289,11 +317,20 @@ class ContentTimestampTest {
 
     private static byte[] signWith(MachineSettings settings, String name, byte[] source,
             List<MachineSigningService.AttachmentContent> attachments) throws Exception {
+        return signWith(settings, name, source, attachments, ContentTimestampTest::token);
+    }
+
+    private interface TokenSource {
+        Pkcs12SignatureToken open() throws Exception;
+    }
+
+    private static byte[] signWith(MachineSettings settings, String name, byte[] source,
+            List<MachineSigningService.AttachmentContent> attachments, TokenSource tokens) throws Exception {
         var retained = new MemoryFile();
         var responder = new MachineFileResponder(retained, () -> { });
         var job = MachineSigningService.DefaultSigningSession.signingJob(source, "/tmp/" + name, responder, settings,
                 null, attachments);
-        try (var token = token()) {
+        try (var token = tokens.open()) {
             job.signWithKeyAndRespond(new SigningKey(token, token.getKeys().get(0)));
         }
         return retained.readAll();
@@ -302,6 +339,35 @@ class ContentTimestampTest {
     private static Pkcs12SignatureToken token() throws Exception {
         return new Pkcs12SignatureToken(TestContainers.resourcePath("test.keystore").toString(),
                 new KeyStore.PasswordProtection("".toCharArray()));
+    }
+
+    /// A signing key whose certificate a test CA issued, valid now.
+    private static Pkcs12SignatureToken caIssuedToken() throws Exception {
+        var generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        var caKeys = generator.generateKeyPair();
+        var signerKeys = generator.generateKeyPair();
+        var now = System.currentTimeMillis();
+        var caName = new X500Name("CN=Test CA,C=SK");
+        var caBuilder = new JcaX509v3CertificateBuilder(caName, BigInteger.ONE, new Date(now - 86_400_000L),
+                new Date(now + 86_400_000L * 365), caName, caKeys.getPublic());
+        caBuilder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+        var caCertificate = new JcaX509CertificateConverter().getCertificate(
+                caBuilder.build(new JcaContentSignerBuilder("SHA256withRSA").build(caKeys.getPrivate())));
+        var signerBuilder = new JcaX509v3CertificateBuilder(caName, BigInteger.TWO, new Date(now - 86_400_000L),
+                new Date(now + 86_400_000L * 365), new X500Name("CN=Test Signer,C=SK"), signerKeys.getPublic());
+        signerBuilder.addExtension(Extension.keyUsage, true,
+                new org.bouncycastle.asn1.x509.KeyUsage(org.bouncycastle.asn1.x509.KeyUsage.nonRepudiation));
+        var signerCertificate = new JcaX509CertificateConverter().getCertificate(
+                signerBuilder.build(new JcaContentSignerBuilder("SHA256withRSA").build(caKeys.getPrivate())));
+        var store = KeyStore.getInstance("PKCS12");
+        store.load(null, null);
+        store.setKeyEntry("signer", signerKeys.getPrivate(), "x".toCharArray(),
+                new java.security.cert.Certificate[] {signerCertificate, caCertificate});
+        var bytes = new java.io.ByteArrayOutputStream();
+        store.store(bytes, "x".toCharArray());
+        return new Pkcs12SignatureToken(new java.io.ByteArrayInputStream(bytes.toByteArray()),
+                new KeyStore.PasswordProtection("x".toCharArray()));
     }
 
     private static byte[] pdf() throws Exception {

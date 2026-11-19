@@ -184,10 +184,13 @@ actor CLIProcessRunner {
         }
 
         let stderrChunks = Self.chunks(from: stderr)
+        let errorLog = HelperErrorLog()
         Task { [weak self] in
             for await chunk in stderrChunks {
+                errorLog.append(chunk)
                 await self?.consumeStderr(chunk, runID: runID)
             }
+            errorLog.flush()
             await self?.stderrDidFinish(runID: runID)
         }
     }

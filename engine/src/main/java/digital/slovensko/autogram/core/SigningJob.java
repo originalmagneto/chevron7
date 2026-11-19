@@ -21,6 +21,8 @@ import eu.europa.esig.dss.model.DSSDocument;
 import eu.europa.esig.dss.model.FileDocument;
 import eu.europa.esig.dss.pades.PAdESTimestampParameters;
 import eu.europa.esig.dss.pades.signature.PAdESService;
+import eu.europa.esig.dss.pades.timestamp.PAdESTimestampService;
+import eu.europa.esig.dss.pdf.ServiceLoaderPdfObjFactory;
 import eu.europa.esig.dss.spi.x509.tsp.TSPSource;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
 import eu.europa.esig.dss.xades.signature.XAdESService;
@@ -173,10 +175,14 @@ public class SigningJob {
         if (contentTimestampSource != null) {
             // A document timestamp revision the signature then covers: the PAdES way of
             // including a qualified timestamp in the signed data (MIRRI, § 23 ods. 1 písm. b)).
-            service.setTspSource(contentTimestampSource);
+            // PAdESTimestampService directly, not PAdESService.timestamp: that one first adds
+            // validation data for a signature already at Baseline T, which needs revocation data
+            // this verifier cannot fetch, and refused the second signature of a signed PDF (F12).
             var timestampParameters = new PAdESTimestampParameters();
             timestampParameters.setDigestAlgorithm(jobParameters.getDigestAlgorithm());
-            document = service.timestamp(document, timestampParameters);
+            document = new PAdESTimestampService(contentTimestampSource,
+                    new ServiceLoaderPdfObjFactory().newSignatureTimestampService())
+                    .timestampDocument(document, timestampParameters);
             if (signatureParameters.getImageParameters().isEmpty())
                 signatureParameters.bLevel().setSigningDate(new Date());
         }

@@ -1,0 +1,1 @@
+- **Ďalší podpis už podpísaného PDF s kvalifikovanou časovou pečiatkou.** Ak PDF už nieslo podpis s časovou pečiatkou a podpisovali ste ho znova so zapnutou „Kvalifikovanou časovou pečiatkou (QTS)“, podpis vždy zlyhal s hlásením „Signing failed“. Teraz sa pridá časová pečiatka údajov aj nový podpis a predchádzajúce podpisy zostanú nezmenené.
