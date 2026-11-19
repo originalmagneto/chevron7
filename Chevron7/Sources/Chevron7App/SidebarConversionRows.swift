@@ -18,6 +18,8 @@ enum SidebarConversionRows {
         let stateLabel: String
         let symbol: String
         let tone: EZZKRecordPresentation.Tone
+        /// A record-first conversion waiting in the background: the row opens it in ZaKo.
+        var pendingStage: RecordFirstPending.Stage? = nil
 
         var accessibilityLabel: String {
             "Zaručená konverzia \(name), evidenčné číslo \(evidenceNumber), stav \(stateLabel)"
@@ -34,17 +36,18 @@ enum SidebarConversionRows {
     }
 
     /// The newest conversions first (by conversion time, then by when the row was written).
-    static func section(from records: [EvidenceRecord], limit: Int = previewCount, now: Date) -> Section {
+    static func section(from records: [EvidenceRecord], limit: Int = previewCount, now: Date,
+                        pendingStages: [UUID: RecordFirstPending.Stage] = [:]) -> Section {
         let newest = records.sorted {
             $0.conversionTime != $1.conversionTime
                 ? $0.conversionTime > $1.conversionTime
                 : $0.createdAt > $1.createdAt
         }
-        return Section(rows: newest.prefix(max(limit, 0)).map { row(for: $0, now: now) },
+        return Section(rows: newest.prefix(max(limit, 0)).map { row(for: $0, now: now, pendingStage: pendingStages[$0.id]) },
                        total: records.count)
     }
 
-    static func row(for record: EvidenceRecord, now: Date) -> Row {
+    static func row(for record: EvidenceRecord, now: Date, pendingStage: RecordFirstPending.Stage? = nil) -> Row {
         // The Register marks a row past its 24-hour deadline in red ("Po lehote"); the
         // sidebar says the same, unless the state itself says what to do next.
         let isOverdue = record.status.isSubmissionPendingState && now > record.submissionDeadline
@@ -52,6 +55,16 @@ enum SidebarConversionRows {
         let showsOverdue = stateLabel != UXLabels.evidenceStatusLabel(for: record.status)
         // A Demo row never reached EZZK: its number says so, its state is the simulation's.
         let isDemo = record.ezzkMode == .demo
+        if let pendingStage,
+           let waiting = RecordFirstPendingPresentation.state(stage: pendingStage, rowStatus: record.status) {
+            return Row(id: record.id,
+                       name: displayName(for: record),
+                       evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · skúšobný režim" : ""),
+                       stateLabel: waiting.label,
+                       symbol: waiting.symbol,
+                       tone: waiting.tone,
+                       pendingStage: pendingStage)
+        }
         return Row(id: record.id,
                    name: displayName(for: record),
                    evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · skúšobný režim" : ""),

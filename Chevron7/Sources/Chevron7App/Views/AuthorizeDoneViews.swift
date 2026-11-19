@@ -526,6 +526,10 @@ struct DoneView: View {
                 }
                 .glassCard(cornerRadius: 12, padding: 12)
                 .frame(maxWidth: 520)
+            } else {
+                recordFirstCard
+                    .glassCard(cornerRadius: 12, padding: 12)
+                    .frame(maxWidth: 520)
             }
 
             DetectorTrainingOfferBanner(settingsStore: store.settingsStore)
@@ -675,6 +679,55 @@ struct DoneView: View {
                 try FileManager.default.copyItem(at: delivered, to: url)
             } catch {
                 exportError = "Export sa nepodaril: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Nothing delivered yet: a record-first conversion waits for EZZK in the background, is
+    /// ready for its clause signature, or ended (rejected) and leaves only a new start.
+    @ViewBuilder
+    private var recordFirstCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let pending = store.recordFirstPending {
+                if pending.stage == .awaitingEZZK {
+                    Label("Záznam č. \(pending.evidenceNumber) čaká na spracovanie v EZZK", systemImage: "hourglass")
+                        .font(.headline)
+                    Text(ZakoSessionStore.recordFirstSentInBackgroundMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label("EZZK spracovalo záznam č. \(pending.evidenceNumber)", systemImage: "signature")
+                        .font(.headline)
+                    Text("Podpíšte doložku s dokumentom pre klienta kartou s mandátnym certifikátom.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let warning = store.recordFirstPersistWarning {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 12) {
+                if store.recordFirstPending?.stage == .signingClientContainer {
+                    Button {
+                        store.lastError = nil
+                        store.step = .authorize
+                    } label: {
+                        Label("Dokončiť konverziu", systemImage: "signature")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                Button {
+                    startNewConversion()
+                } label: {
+                    Label("Nová konverzia", systemImage: "plus")
+                }
+                .controlSize(.large)
             }
         }
     }
