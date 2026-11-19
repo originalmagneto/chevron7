@@ -54,3 +54,34 @@ Testovacie súbory: `~/Desktop/chevron7-test/` (popis v `TEST-RESULTS-1.20.0-air
 - EZZK režim: **Skúšobný režim (lokálne)** (nastavenia zdieľa s nainštalovanou verziou). Pred prvým testom bola Ostrá evidencia; späť neprepínané.
 - "Postup od 1. 1. 2027 vopred": vypnutý.
 - Register: žiadny nový riadok (nič sa neautorizovalo).
+
+## Vyšetrenie F8d: prihlásenie do Testovacej evidencie (19. 11. 2026, kód, bez Keychainu a bez hesla)
+
+**a) Kedy sa vracia predchádzajúci režim.** Iba v `EZZKConnection.connect`. Ten patrí tlačidlu „Pripojiť k EZZK“, ktoré sa ukazuje v Skúšobnom režime a v neprihlásenej Ostrej evidencii, a výberu „Ostrá evidencia“ v rozšírenom nastavení. Postup:
+- prepne do Ostrej evidencie (po potvrdení „Pripojiť k ostrej evidencii EZZK?“);
+- prihlási sa;
+- pri neúspechu vráti režim, ktorý bol predtým.
+
+„Prihlásiť a overiť“ v Testovacej evidencii (`signInInCurrentMode`, `EZZKAccountController.signIn`) režim nemení nikdy. Návrat do Skúšobného režimu po druhom pokuse teda zodpovedá tomuto postupu:
+1. pokus bol spustený v Skúšobnom režime cez „Pripojiť k EZZK“ (prihlásenie do **Ostrej** evidencie);
+2. testovacie údaje Ostrá evidencia odmietla;
+3. aplikácia vrátila Skúšobný režim, ako má.
+
+V Testovacej evidencii treba použiť „Prihlásiť a overiť“. Tlačidlo sa ukáže až po výbere „Testovacia evidencia“ v časti „Prostredie EZZK“.
+
+**b) Či sa chyba vždy ukáže.**
+- Zlyhané prihlásenie áno: `state = .failed` alebo `connectError`, pod poľami ako `InlineError` a v hlavičke ako „Prihlásenie zlyhalo“.
+- Chyba pri **čítaní** Keychainu nie. `reloadStoredLogin` (pri spustení a pri zmene režimu) ju zahadzovala cez `try?` a panel ukázal len „Neprihlásené“ s prázdnymi poľami. **Opravené:** teraz sa ukáže „Bezpečné úložisko (Keychain) nie je dostupné (kód N).“ (test `testUnreadableKeychainIsShownNotSwallowed`).
+
+**c) Ad hoc podpis a Keychain.**
+- Údaje EZZK sú v bežnom (súborovom) Keychaine, bez skupiny prístupu a bez data protection keychainu. Ad hoc build teda novú položku zapísať môže.
+- Existujúca položka `app.slovensko.chevron7.ezzk.soap` (z 24. 9. 2026, vytvorená notarizovanou aplikáciou) má v ACL notarizovaný Chevron7. Ad hoc build má iný určený požiadavok (cdhash, ktorý sa mení s každým buildom), takže pri čítaní alebo prepise tej položky macOS buď zobrazí výzvu na prístup, alebo vráti chybu. Ak táto položka patrí účtu `test`, vývojová verzia ju nevie prečítať ani prepísať, kým prístup nepovolíš.
+- Pred opravou z bodu b) to vyzeralo presne ako „Neprihlásené“ s prázdnymi poľami.
+
+**Návrh na preskúšanie (MacBook Air):**
+1. Spusti vývojovú verziu z tejto vetvy. Nastavenia > EZZK > Rozšírené > Prostredie: „Testovacia evidencia“.
+2. Ak sa hneď ukáže „Bezpečné úložisko (Keychain) nie je dostupné (kód N)“, zapíš kód. Bod c) je potom potvrdený.
+3. Zadaj meno a heslo a stlač **„Prihlásiť a overiť“** (nie „Pripojiť k EZZK“).
+   - Ak macOS ukáže výzvu na prístup ku Keychainu pre Chevron7, zvoľ „Povoliť“. „Vždy povoliť“ platí len pre tento konkrétny build.
+4. Zapíš presnú hlášku pod poľami.
+5. Na porovnanie urob to isté v notarizovanej `/Applications/Chevron7.app` 1.20.0.
