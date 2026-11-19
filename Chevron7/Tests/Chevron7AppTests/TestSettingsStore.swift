@@ -33,6 +33,14 @@ extension XCTestCase {
                                  defaults: MemoryUserDefaults())
     }
 
+    /// A second `AppSettingsStore` on the same temporary root and EZZK controller as `store`,
+    /// as after an app restart: whatever `store` wrote to disk is read again.
+    @MainActor
+    func makeRestartedSettingsStore(from store: AppSettingsStore) -> AppSettingsStore {
+        AppSettingsStore(ezzkAccountController: store.ezzkAccountController,
+                         storageRoot: store.storageRoot, defaults: MemoryUserDefaults())
+    }
+
     /// An `AppSettingsStore` whose register.json is unreadable from the start (a temporary
     /// folder, never the real register), so `evidenceStore.loadError` is already set when
     /// the store returns. Used to prove code that must refuse to touch the register or the

@@ -150,8 +150,7 @@ final class ZakoRecordFirstFlowTests: XCTestCase {
         XCTAssertEqual(notifier.processed, [id])
 
         // Restart: a new app on the same storage.
-        let restarted = AppSettingsStore(ezzkAccountController: settingsStore.ezzkAccountController,
-                                         storageRoot: settingsStore.storageRoot, defaults: MemoryUserDefaults())
+        let restarted = makeRestartedSettingsStore(from: settingsStore)
         restarted.useRealSigningProvider(provider)
         let zako = ZakoSessionStore(settingsStore: restarted,
                                     exampleBank: ExampleBank(directory: makeTemporaryDirectory("record-first-restart-bank")))
