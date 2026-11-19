@@ -52,7 +52,8 @@ enum SignatureTreeDecoder {
                     authority: string(fields["producer"]),
                     time: string(fields["productionTime"]).flatMap { ISO8601DateFormatter().date(from: $0) },
                     isQualified: string(fields["qualification"]) == "QTSA" && bool(fields["valid"]) == true)
-            })
+            },
+            subIndication: string(object["subIndication"]))
     }
 
     private static func dataObject(from value: JSONValue) -> SignedDataObject? {

@@ -122,7 +122,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var typeOther: String?
         public var documentNames: [String]
         public var state: ValidityState
-        /// DSS's reason when the state is not `platná`.
+        /// The Slovak reason when the state is not `platná`, from DSS's sub-indication.
         public var reason: String?
         public var signingTime: Date?
         public var validationTime: Date
@@ -145,6 +145,10 @@ public struct ElectronicOriginal: Sendable, Equatable {
         public var signatureFilename: String? = nil
         /// End of a PAdES signature's `/ByteRange`; nil for a container signature.
         public var signedRevisionLength: Int? = nil
+        /// DSS's own (English) reason, shown only as a technical detail.
+        public var technicalDetail: String? = nil
+        /// The ETSI sub-indication DSS gave, e.g. `NO_CERTIFICATE_CHAIN_FOUND`.
+        public var subIndication: String? = nil
 
         public var otherInfo: String {
             "Kvalifikovaný certifikát: \(qualifiedCertificate ? "áno" : "nie")"
@@ -561,7 +565,7 @@ public struct ElectronicOriginal: Sendable, Equatable {
             type: type.item, typeOther: type.other,
             documentNames: documentNames,
             state: state(signature.state),
-            reason: signature.state == .valid ? nil : signature.detail,
+            reason: signature.state == .valid ? nil : reason(signature),
             signingTime: signature.signingTime,
             validationTime: validationTime,
             location: facts.productionPlace.flatMap { $0.isEmpty ? nil : String($0.prefix(255)) } ?? "Neuvedené",
@@ -577,7 +581,23 @@ public struct ElectronicOriginal: Sendable, Equatable {
             qualification: signature.certificateQualification,
             qcType: facts.qcType,
             signatureFilename: facts.signatureFilename,
-            signedRevisionLength: facts.signedRevisionLength)
+            signedRevisionLength: facts.signedRevisionLength,
+            technicalDetail: signature.state == .valid ? nil : technicalDetail(signature),
+            subIndication: signature.state == .valid ? nil : signature.subIndication)
+    }
+
+    /// The Slovak reason: the sub-indication's text, else DSS's detail when it carries no code.
+    static func reason(_ signature: DocumentSignatureInfo) -> String? {
+        if let code = signature.subIndication, !code.isEmpty {
+            return DSSSubIndicationText.text(code)
+        }
+        return signature.detail
+    }
+
+    /// DSS's English sentence, kept apart from the Slovak reason; nil when it is only the code.
+    static func technicalDetail(_ signature: DocumentSignatureInfo) -> String? {
+        guard let detail = signature.detail, !detail.isEmpty, detail != signature.subIndication else { return nil }
+        return detail
     }
 
     /// Each dated document timestamp with the longest of the file's documents whose revision
@@ -733,7 +753,7 @@ public enum E2EVerificationGate {
             return .blocked("Overenie sa nepodarilo dokončiť, lebo sa nenačítal dôveryhodný zoznam. Skúste overenie znova.")
         }
         if let invalid = original.authorizations.first(where: { $0.state == .invalid }) {
-            let reason = invalid.reason.map { " (\($0))" } ?? ""
+            let reason = invalid.reason.map { " (\(DSSSubIndicationText.trimmedSentence($0)))" } ?? ""
             return .blocked("Podpis \(invalid.signerName) je neplatný\(reason). Zaručenú konverziu nemožno vykonať.")
         }
         if let invalid = original.authorizations.first(where: { $0.timestamp?.state == .invalid }) {

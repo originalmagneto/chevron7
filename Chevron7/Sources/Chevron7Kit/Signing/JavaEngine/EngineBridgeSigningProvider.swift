@@ -326,7 +326,8 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
                 signingTime: signature.signingTime,
                 hasQualifiedTimestamp: signature.hasQualifiedTimestamp,
                 state: state,
-                detail: signature.validationReason ?? signature.subIndication)
+                detail: signature.validationReason ?? signature.subIndication,
+                subIndication: signature.subIndication)
         })
     }
 
