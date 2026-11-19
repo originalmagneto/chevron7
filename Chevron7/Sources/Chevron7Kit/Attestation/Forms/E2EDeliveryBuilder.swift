@@ -104,7 +104,7 @@ public struct E2EDeliveryBuilder: Sendable {
         public var errorDescription: String? {
             switch self {
             case .unmappableAuthorization(let signer):
-                return "Kvalifikáciu podpisu \(signer) sa nepodarilo určiť. Podľa postupu od 1. 1. 2027 ho nemožno zapísať do záznamu. Skúste overenie znova."
+                return "Kvalifikáciu podpisu \(signer) sa nepodarilo určiť. Záznam podľa postupu od 1. 1. 2027 musí uviesť druh autorizácie, preto tento podpis doň nemožno zapísať a dokument nemožno týmto postupom konvertovať."
             case .unmappableOriginalDocumentFormat(let name):
                 return "Formát dokumentu \(name) nemožno zapísať do záznamu podľa postupu od 1. 1. 2027."
             case .unmappableNewDocumentFormat:

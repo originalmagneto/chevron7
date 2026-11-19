@@ -611,6 +611,20 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertFalse(store.e2eReadyToAuthorize)
     }
 
+    /// Each signature's "Technický detail" opens on its own, also the same signature in two files.
+    func testTechnicalDetailKeyTellsSignaturesApart() throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.signedRevisionLength = 200
+        let pdf = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 191)
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(signatures: [signature]))
+        var first = try XCTUnwrap(ElectronicOriginal.make(sourceName: "zmluva.pdf", sourceData: pdf,
+                                                          evidence: evidence).authorizations.first)
+        first.fileEntryName = "a.pdf"
+        var second = first
+        second.fileEntryName = "b.pdf"
+        XCTAssertNotEqual(ZakoVerificationView.detailKey(first), ZakoVerificationView.detailKey(second))
+    }
+
     /// A container with only images still shows them in the verification preview.
     func testImageOnlyContainerGetsAPreview() throws {
         let image = NSImage(size: NSSize(width: 40, height: 30))

@@ -370,12 +370,37 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
 
         await store.authorizeAndSign()
 
-        XCTAssertEqual(store.lastError, ZakoSessionStore.e2eUndeterminedQualificationMessage(signer: "Ján Klient"))
+        XCTAssertEqual(store.lastError, ZakoSessionStore.e2eUndeterminedQualificationMessage(try XCTUnwrap(store.electronicOriginal?.authorizations.first)))
         XCTAssertEqual(store.lastError,
-                       "Kvalifikáciu podpisu Ján Klient sa nepodarilo určiť. Podľa postupu od 1. 1. 2027 ho nemožno zapísať do záznamu. Skúste overenie znova.")
+                       "Kvalifikáciu podpisu Ján Klient sa nepodarilo určiť. Záznam podľa postupu od 1. 1. 2027 musí uviesť druh autorizácie, preto tento podpis doň nemožno zapísať a dokument nemožno týmto postupom konvertovať. Do 31. 12. 2026 ho môžete konvertovať doterajším postupom: vypnite „Postup od 1. 1. 2027 vopred“ v Nastaveniach (EZZK).")
         XCTAssertNil(store.attestation.evidenceNumber, "no number is spent on a refusal")
         XCTAssertEqual(calls.value, 0, "nothing is converted")
         XCTAssertTrue(provider.requests.isEmpty)
+    }
+
+    /// Verifying again helps only when a trusted list did not load; otherwise the message says what
+    /// does help (today's order before the date) or nothing more after it, never "skúste znova".
+    func testUndeterminedQualificationMessageNamesWhatHelps() throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.qualification = "INDETERMINATE_QESIG"
+        signature.signedRevisionLength = 200
+        let pdf = Data("%PDF-1.7\n".utf8) + Data(repeating: 0x41, count: 191)
+        let evidence = try ConversionEvidence.decode(payloadJSON: E2EEvidenceFixtures.payload(signatures: [signature]))
+        var authorization = try XCTUnwrap(ElectronicOriginal.make(sourceName: "zmluva.pdf", sourceData: pdf,
+                                                                  evidence: evidence).authorizations.first)
+        let before = ZakoRegime.recordFirstFrom.addingTimeInterval(-60)
+        let after = ZakoRegime.recordFirstFrom.addingTimeInterval(60)
+
+        let previewed = ZakoSessionStore.e2eUndeterminedQualificationMessage(authorization, now: before)
+        XCTAssertTrue(previewed.contains("doterajším postupom"), previewed)
+        XCTAssertFalse(previewed.contains("Skúste overenie znova"), previewed)
+        let inForce = ZakoSessionStore.e2eUndeterminedQualificationMessage(authorization, now: after)
+        XCTAssertFalse(inForce.contains("doterajším postupom"), inForce)
+        XCTAssertFalse(inForce.contains("znova"), inForce)
+
+        authorization.trustedListUnavailable = true
+        XCTAssertTrue(ZakoSessionStore.e2eUndeterminedQualificationMessage(authorization, now: after)
+            .hasSuffix("Nenačítal sa dôveryhodný zoznam, preto skúste overenie znova."))
     }
 
     /// The new order cannot record an undetermined qualification: the verification says so and the
@@ -389,7 +414,7 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         prepareForAuthorization(store)
 
         XCTAssertEqual(store.e2eRecordFirstRefusal,
-                       ZakoSessionStore.e2eUndeterminedQualificationMessage(signer: "Ján Klient"))
+                       ZakoSessionStore.e2eUndeterminedQualificationMessage(try XCTUnwrap(store.electronicOriginal?.authorizations.first)))
         XCTAssertFalse(store.canLeaveVerification)
         XCTAssertFalse(store.canBeginAuthorization)
 
@@ -457,7 +482,10 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         // The preview stands in for EZZK's time after the switch.
         await store.authorizeElectronicOriginal(viaMobile: false, ezzkMode: .test, expectedRegime: macClock)
 
-        XCTAssertEqual(store.lastError, ZakoSessionStore.e2eUndeterminedQualificationMessage(signer: "Ján Klient"))
+        // EZZK's time decided the new order, so the builder's own words, without the hint
+        // about today's order that the Mac's clock gives at verification.
+        XCTAssertEqual(store.lastError,
+                       E2EDeliveryBuilder.Failure.unmappableAuthorization(signer: "Ján Klient").errorDescription)
         XCTAssertTrue(provider.requests.isEmpty, "nothing is signed")
         XCTAssertTrue(settingsStore.evidenceStore.records.isEmpty)
         XCTAssertNil(store.recordFirstPending)

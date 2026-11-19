@@ -62,7 +62,7 @@ extension ZakoSessionStore {
               let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(original).first else {
             return nil
         }
-        return Self.e2eUndeterminedQualificationMessage(signer: unmappable.signerName)
+        return Self.e2eUndeterminedQualificationMessage(unmappable)
     }
 
     /// Whether the verification view lets the advocate go on to the clause: the gate, and the
@@ -304,7 +304,7 @@ extension ZakoSessionStore {
         // verification step says so already by the Mac's clock; this check stays as the guard.
         if expected.regime == .recordFirst,
            let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(original).first {
-            lastError = Self.e2eUndeterminedQualificationMessage(signer: unmappable.signerName)
+            lastError = Self.e2eUndeterminedQualificationMessage(unmappable)
             return
         }
         // § 36 ods. 4 písm. c): the new document, made before an evidence number is allocated so
@@ -598,9 +598,21 @@ extension ZakoSessionStore {
         }
     }
 
-    /// The refusal of an authorization record 1.2 cannot name, in the builder's own words.
-    static func e2eUndeterminedQualificationMessage(signer: String) -> String {
-        E2EDeliveryBuilder.Failure.unmappableAuthorization(signer: signer).errorDescription ?? ""
+    /// The refusal of an authorization record 1.2 cannot name, in the builder's own words, with
+    /// what the advocate can do: verify again when a trusted list did not load (the qualification
+    /// may then be decided), else, while the 1. 1. 2027 order is only previewed, convert in
+    /// today's order. A qualification DSS cannot decide is not changed by verifying again.
+    static func e2eUndeterminedQualificationMessage(_ authorization: ElectronicOriginal.Authorization,
+                                                    now: Date = Date()) -> String {
+        let base = E2EDeliveryBuilder.Failure.unmappableAuthorization(signer: authorization.signerName)
+            .errorDescription ?? ""
+        if authorization.trustedListUnavailable {
+            return base + " Nenačítal sa dôveryhodný zoznam, preto skúste overenie znova."
+        }
+        if now < ZakoRegime.recordFirstFrom {
+            return base + " Do 31. 12. 2026 ho môžete konvertovať doterajším postupom: vypnite „Postup od 1. 1. 2027 vopred“ v Nastaveniach (EZZK)."
+        }
+        return base
     }
 
     private static func hex(_ data: Data) -> String {

@@ -39,6 +39,8 @@ struct ZakoSection<Content: View>: View {
 /// analysis step: the document on the left, an inspector of cards on the right.
 struct ZakoVerificationView: View {
     @Bindable var store: ZakoSessionStore
+    /// Signatures whose "Technický detail" is open.
+    @State private var expandedDetails: Set<String> = []
     @State private var confirmingUndetermined = false
     /// Measured heights of the file rows, so the reorderable list shows every row in the inspector.
     @State private var fileRowHeights: [String: CGFloat] = [:]
@@ -215,57 +217,78 @@ struct ZakoVerificationView: View {
         }
     }
 
+    static func detailKey(_ authorization: ElectronicOriginal.Authorization) -> String {
+        "\(authorization.fileEntryName ?? "")|\(authorization.signatureID)"
+    }
+
+    private func detailExpansion(_ key: String) -> Binding<Bool> {
+        Binding(get: { expandedDetails.contains(key) },
+                set: { open in
+                    if open { expandedDetails.insert(key) } else { expandedDetails.remove(key) }
+                })
+    }
+
     private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool,
                                   fileName: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: icon(authorization.state))
-                    .foregroundStyle(tint(authorization.state))
-                    .accessibilityHidden(true)
-                Text(authorization.signerName)
-                    .font(.callout.weight(.semibold))
-                Spacer(minLength: 8)
-                Text(authorization.state.rawValue)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(tint(authorization.state))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: icon(authorization.state))
+                        .foregroundStyle(tint(authorization.state))
+                        .accessibilityHidden(true)
+                    Text(authorization.signerName)
+                        .font(.callout.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(authorization.state.rawValue)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(tint(authorization.state))
+                }
+                Group {
+                    Text(authorization.typeOther ?? authorization.type.skName)
+                    if let time = authorization.signingTime {
+                        Text("Podpísané \(E2EDateText.string(time))")
+                    }
+                    if let mandate = authorization.mandate {
+                        Text("Mandát: \(mandate)")
+                    }
+                    if let timestamp = authorization.timestamp {
+                        Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
+                    } else {
+                        Text("Bez časovej pečiatky")
+                    }
+                    if let fileName {
+                        Text("Podpis v súbore \(fileName)")
+                    }
+                    if showsDocument {
+                        Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 24)
             }
-            Group {
-                Text(authorization.typeOther ?? authorization.type.skName)
-                if let time = authorization.signingTime {
-                    Text("Podpísané \(E2EDateText.string(time))")
-                }
-                if let mandate = authorization.mandate {
-                    Text("Mandát: \(mandate)")
-                }
-                if let timestamp = authorization.timestamp {
-                    Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
-                } else {
-                    Text("Bez časovej pečiatky")
-                }
-                if let fileName {
-                    Text("Podpis v súbore \(fileName)")
-                }
-                if showsDocument {
-                    Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, 24)
+            // One element for VoiceOver; the disclosure below stays its own control.
+            .accessibilityElement(children: .combine)
             if let detail = authorization.technicalDetail {
-                DisclosureGroup("Technický detail") {
+                let key = Self.detailKey(authorization)
+                // The label is a button too, so a click on the words opens it as the arrow does,
+                // and either is reached with the keyboard.
+                DisclosureGroup(isExpanded: detailExpansion(key)) {
                     Text(detail)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                } label: {
+                    Button("Technický detail") { detailExpansion(key).wrappedValue.toggle() }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Zobrazí pôvodný text overenia")
                 }
                 .font(.caption)
                 .padding(.leading, 24)
             }
         }
-        .accessibilityElement(children: .combine)
     }
 
     /// The files of a container with several files, in the order the new document joins them.
