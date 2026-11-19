@@ -84,6 +84,16 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         XCTAssertEqual(store.mobileRefusalForClientOutput, ZakoSinglePDFDelivery.mobileRefusal)
     }
 
+    /// The order of 1. 1. 2027 signs the record first, which the phone cannot: the button is off
+    /// with that reason before a click.
+    func testMobileDisabledUnderRecordFirstOrder() {
+        let settingsStore = makeSettingsStore()
+        let store = ZakoSessionStore(settingsStore: settingsStore)
+        XCTAssertNil(store.mobileRefusalForClientOutput)
+        settingsStore.settings.zakoRecordFirstPreview = true
+        XCTAssertEqual(store.mobileRefusalForClientOutput, ZakoSessionStore.recordFirstMobileMessage)
+    }
+
     /// The verification screen says what happens to a PDF/A original per chosen output.
     func testKeptOriginalWordingFollowsClientOutput() {
         XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .asicContainer),

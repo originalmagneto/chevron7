@@ -3,6 +3,7 @@
 
 import Foundation
 import OSLog
+import AppKit
 import PDFKit
 import Chevron7Kit
 
@@ -44,6 +45,32 @@ extension ZakoSessionStore {
         settingsStore.ezzkAccountController.mode == .production
     }
 
+    /// The order by the Mac's clock for the current EZZK mode and the preview setting. EZZK's
+    /// own time still decides at authorization.
+    var expectedRegimeNow: ZakoRegime {
+        ZakoRegime.resolve(conversionTime: Date(), mode: settingsStore.ezzkAccountController.mode,
+                           preview: settings.zakoRecordFirstPreview).regime
+    }
+
+    /// Why the 1. 1. 2027 order cannot convert this original: record 1.2 names every
+    /// authorization by its type, and a qualification DSS left undecided has none. Said at
+    /// verification, so the advocate never reaches the card and PIN for a conversion that
+    /// cannot succeed. Nil before verification or in today's order.
+    var e2eRecordFirstRefusal: String? {
+        guard direction == .electronicToElectronic, recordFirstPending == nil,
+              let original = electronicOriginal, expectedRegimeNow == .recordFirst,
+              let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(original).first else {
+            return nil
+        }
+        return Self.e2eUndeterminedQualificationMessage(signer: unmappable.signerName)
+    }
+
+    /// Whether the verification view lets the advocate go on to the clause: the gate, and the
+    /// 1. 1. 2027 order's refusal by the Mac's clock.
+    var canLeaveVerification: Bool {
+        canContinueFromVerification && e2eRecordFirstRefusal == nil
+    }
+
     /// Whether the verification step may hand over to the clause step.
     var canContinueFromVerification: Bool {
         guard electronicOriginal != nil, let decision = e2eDecision else { return false }
@@ -59,8 +86,40 @@ extension ZakoSessionStore {
         return true
     }
 
+    /// The default "Druh dokumentu" of a file in a container with several files.
+    static let defaultE2EDocumentKind = "Iný dokument"
+
+    /// The "Druh dokumentu" of each file of a container with several files, in order; empty
+    /// for any other original. The record carries these, the E→E clause carries none.
+    var e2eFileDocumentTypes: [(file: ElectronicOriginal.File, type: String)] {
+        guard let original = electronicOriginal, original.kind == .asicEMultiple else { return [] }
+        return original.files.map { file in
+            (file, attestation.originalDocumentTypeLabels[file.entryName]?
+                .trimmingCharacters(in: .whitespaces) ?? "")
+        }
+    }
+
+    /// Whether every original document has its "Druh dokumentu": each file of a container with
+    /// several files, else the one common value.
+    var e2eDocumentTypesFilled: Bool {
+        let files = e2eFileDocumentTypes
+        if !files.isEmpty { return files.allSatisfy { !$0.type.isEmpty } }
+        return !attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Gives every file of a container with several files its own explicit "Druh dokumentu", so
+    /// no file silently falls back to a value set elsewhere.
+    func fillDefaultFileDocumentTypes() {
+        guard let original = electronicOriginal, original.kind == .asicEMultiple else { return }
+        for file in original.files
+        where (attestation.originalDocumentTypeLabels[file.entryName] ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+            attestation.originalDocumentTypeLabels[file.entryName] = Self.defaultE2EDocumentKind
+        }
+    }
+
     var e2eReadyToAuthorize: Bool {
         canContinueFromVerification
+            && e2eDocumentTypesFilled
             && !attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty
             && !attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty
             && !attestation.performingPerson.fullName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -83,15 +142,18 @@ extension ZakoSessionStore {
         sourceURL = url
         let stem = sourceName ?? url.deletingPathExtension().lastPathComponent
         attestation.originalDocumentName = url.lastPathComponent
-        attestation.newDocumentName = stem
+        // The new document is always a PDF, so its default name says so, as the delivered file
+        // does (`ConversionOutputNaming.containerDocumentName`).
+        attestation.newDocumentName = stem + ".pdf"
         // The clause and the record name the advocate from the active profile, as P→E does.
         attestation.performingPerson = activeProfile()
         attestation.usedDeviceDescription = E2EFormModel.defaultUsedDevice
         step = .verification
         await verifyElectronicOriginal()
-        // Several files become one new PDF named after the container (spec 2026-11-18, 7.4).
-        if electronicOriginal?.kind == .asicEMultiple, attestation.newDocumentName == stem {
-            attestation.newDocumentName = stem + ".pdf"
+        // A container without a PDF (images only) still gets a preview; the conversion itself
+        // never reads it (the new document is `PdfaFromSigned --merge`).
+        if document == nil, let original = electronicOriginal, !original.files.isEmpty {
+            document = Self.previewDocument(of: original.files)
         }
     }
 
@@ -124,10 +186,42 @@ extension ZakoSessionStore {
                 original = original.reordered(entryNames: chosenOrder)
             }
             electronicOriginal = original
+            fillDefaultFileDocumentTypes()
             e2eDecision = E2EVerificationGate.decide(original)
         } catch {
             verificationError = error.localizedDescription
         }
+    }
+
+    /// A preview of a container's files in order: PDFs as they are, a PNG or JPEG as one page.
+    /// Nil when no file can be shown.
+    static func previewDocument(of files: [ElectronicOriginal.File]) -> PDFDocument? {
+        let preview = PDFDocument()
+        for file in files {
+            switch file.kind {
+            case .pdf:
+                // Copies: a page moved out of its own document dangles once that document is freed.
+                guard let pdf = PDFDocument(data: file.data) else { continue }
+                for index in 0..<pdf.pageCount {
+                    if let page = pdf.page(at: index)?.copy() as? PDFPage {
+                        preview.insert(page, at: preview.pageCount)
+                    }
+                }
+            case .png, .jpeg:
+                // Only bytes that decode to a bitmap: PDFKit does not survive a broken image.
+                guard let bitmap = NSBitmapImageRep(data: file.data), bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0 else {
+                    continue
+                }
+                let image = NSImage(size: bitmap.size)
+                image.addRepresentation(bitmap)
+                if let page = PDFPage(image: image) {
+                    preview.insert(page, at: preview.pageCount)
+                }
+            case .other:
+                continue
+            }
+        }
+        return preview.pageCount > 0 ? preview : nil
     }
 
     func confirmUndetermined() {
@@ -206,7 +300,8 @@ extension ZakoSessionStore {
             return
         }
         // Record 1.2 names every authorization by its type; a qualification DSS left undecided
-        // has none, so the new order refuses it before anything is converted or allocated.
+        // has none, so the new order refuses it before anything is converted or allocated. The
+        // verification step says so already by the Mac's clock; this check stays as the guard.
         if expected.regime == .recordFirst,
            let unmappable = ConversionRecordE2E12Renderer.unmappableAuthorizations(original).first {
             lastError = Self.e2eUndeterminedQualificationMessage(signer: unmappable.signerName)

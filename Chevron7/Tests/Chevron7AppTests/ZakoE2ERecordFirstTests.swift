@@ -378,6 +378,27 @@ final class ZakoE2ERecordFirstTests: XCTestCase {
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
+    /// The new order cannot record an undetermined qualification: the verification says so and the
+    /// authorize button stays off, so the card and its PIN are never asked for. Today's order is unchanged.
+    func testE2EUndeterminedQualificationIsShownAtVerification() async throws {
+        var signature = E2EEvidenceFixtures.Signature()
+        signature.qualification = "INDETERMINATE_QESIG"
+        let (store, _, source, settingsStore) = try makeStore(signature: signature)
+        await store.loadElectronicOriginal(at: source)
+        if case .needsConfirmation = store.e2eDecision { store.confirmUndetermined() }
+        prepareForAuthorization(store)
+
+        XCTAssertEqual(store.e2eRecordFirstRefusal,
+                       ZakoSessionStore.e2eUndeterminedQualificationMessage(signer: "Ján Klient"))
+        XCTAssertFalse(store.canLeaveVerification)
+        XCTAssertFalse(store.canBeginAuthorization)
+
+        settingsStore.settings.zakoRecordFirstPreview = false
+        XCTAssertNil(store.e2eRecordFirstRefusal)
+        XCTAssertTrue(store.canLeaveVerification)
+        XCTAssertTrue(store.canBeginAuthorization)
+    }
+
     /// A content timestamp inside the client's PAdES signature (CAdES signed attribute) has no
     /// container carrier: record 1.2 cannot list it, so the dry run refuses before any number.
     func testE2EPAdESContentTimestampRefusedBeforeNumber() async throws {

@@ -6,6 +6,8 @@ import Chevron7Kit
 
 /// The card step the view shows while a guarded ZaKo action waits for it.
 enum ZakoCardPrompt: String, Identifiable, Equatable {
+    /// Shown at once while the drivers are asked which card is in the reader (seconds).
+    case checkingCard
     case insertCard
     case enterPIN
 
@@ -71,8 +73,7 @@ extension ZakoSessionStore {
             await fetchEvidenceNumber()
             return
         }
-        pendingCardAction = .evidenceNumber
-        await advanceCardFlow()
+        await startCardFlow(.evidenceNumber)
     }
 
     /// "Autorizovať konverziu": card, PIN or BOK, the MQC, then the signature.
@@ -93,16 +94,42 @@ extension ZakoSessionStore {
             await authorizeAndSign()
             return
         }
-        pendingCardAction = .authorization
+        await startCardFlow(.authorization)
+    }
+
+    /// Starts the card flow with feedback at once: asking the drivers which card is there takes
+    /// seconds, so "Kontrolujem kartu…" shows before the first await. When the reader slots
+    /// report no card at all, the prompt to insert one comes without asking the drivers.
+    private func startCardFlow(_ action: ZakoCardAction) async {
+        pendingCardAction = action
+        cardPrompt = .checkingCard
+        if await readerSlotsHaveCard() == false {
+            guard pendingCardAction == action, cardPrompt == .checkingCard else { return }
+            cardPrompt = .insertCard
+            return
+        }
         await advanceCardFlow()
+    }
+
+    nonisolated static let ezzkSignedOutMessage = "Prihláste sa do EZZK v Nastaveniach (EZZK)."
+
+    /// Outside Demo the number comes from EZZK, which needs the login saved in Settings. Said
+    /// before the card and its PIN, so a signed-out account never costs a typed PIN.
+    var ezzkSignInRefusal: String? {
+        let controller = settingsStore.ezzkAccountController
+        guard controller.mode != .demo, !controller.hasStoredCredentials else { return nil }
+        return Self.ezzkSignedOutMessage
     }
 
     /// The authorize button is live before a card is in: the card is a step of the flow.
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
+        if ezzkSignInRefusal != nil { return false }
         if recordFirstPending == nil, settings.zakoClientOutput == .singlePDF,
            singlePDFProductionRefusal != nil { return false }
-        if direction == .electronicToElectronic { return e2eReadyToAuthorize }
+        if direction == .electronicToElectronic {
+            return e2eReadyToAuthorize && e2eRecordFirstRefusal == nil
+        }
         let result = AttestationPreflight.evaluate(
             attestation,
             securityElements: securityElements,
@@ -120,10 +147,12 @@ extension ZakoSessionStore {
     func advanceCardFlow() async {
         guard !externalSigningIsBusy() else { return }
         guard let action = pendingCardAction else { return }
-        cardPrompt = nil
+        cardPrompt = .checkingCard
         // Only what the reader reports: `refreshIdentities` would also try a remembered PIN,
         // and the resolution below would then send a wrong one to the card a second time.
         await readCard()
+        // Cancelled while the drivers answered: the late result changes nothing.
+        guard pendingCardAction == action else { return }
         gate: switch mandateGate {
         case .notRequired:
             break
@@ -143,6 +172,7 @@ extension ZakoSessionStore {
                     return
                 }
                 await resolveCertificateForAuthorization(force: true)
+                guard pendingCardAction == action else { return }
                 guard hasResolvedCertificate else {
                     if cardNeedsTypedPIN {
                         // A refused PIN is never tried again on its own: it would burn a retry.
@@ -161,6 +191,7 @@ extension ZakoSessionStore {
             selectedIdentityID = mandate.id
         }
         pendingCardAction = nil
+        cardPrompt = nil
         switch action {
         case .evidenceNumber: await fetchEvidenceNumber()
         case .authorization: await authorizeAndSign()

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
-import Chevron7Kit
+import AppKit
+@testable import Chevron7Kit
 import Chevron7TestSupport
 import CryptoKit
 import Foundation
@@ -583,10 +584,58 @@ final class ZakoE2EFlowTests: XCTestCase {
         XCTAssertEqual(store.electronicOriginal?.files.map(\.entryName), ["c.jpg", "a.pdf", "b.png"])
     }
 
-    func testSingleFileKeepsItsDefaultNewDocumentName() async throws {
+    /// Every file of a container gets its own explicit "Druh dokumentu"; the common value never
+    /// stands in for one, and an emptied file keeps the authorization off.
+    func testMultiFileDocumentTypesAreExplicitPerFile() async throws {
+        let (store, _, source) = try makeMultiFileStore()
+        await store.loadElectronicOriginal(at: source)
+        XCTAssertEqual(store.attestation.originalDocumentTypeLabels,
+                       ["a.pdf": "Iný dokument", "b.png": "Iný dokument", "c.jpg": "Iný dokument"])
+
+        store.attestation.originalDocumentTypeLabels["b.png"] = "Osvedčenie"
+        store.attestation.originalDocumentTypeLabel = "Zmluva"
+        XCTAssertEqual(store.e2eFileDocumentTypes.map(\.type), ["Iný dokument", "Osvedčenie", "Iný dokument"])
+        XCTAssertTrue(store.e2eDocumentTypesFilled)
+        let original = try XCTUnwrap(store.electronicOriginal)
+        store.attestation.evidenceNumber = "DEMO-261119-1"
+        prepareForAuthorization(store)
+        store.attestation.originalDocumentTypeLabel = "Zmluva"
+        let model = try E2EFormModel.make(original: original, attestation: store.attestation,
+                                          newDocumentName: "spis.pdf", newDocumentData: Data("%PDF-1.7".utf8),
+                                          usedDevice: "Chevron7", qualifiedReport: nil)
+        XCTAssertEqual(model.originalDocumentTypes, ["Iný dokument", "Iný dokument", "Osvedčenie", "Iný dokument"],
+                       "a-1, a-2, b.png, c.jpg: each file's own type, never the common one")
+
+        store.attestation.originalDocumentTypeLabels["a.pdf"] = ""
+        XCTAssertFalse(store.e2eDocumentTypesFilled)
+        XCTAssertFalse(store.e2eReadyToAuthorize)
+    }
+
+    /// A container with only images still shows them in the verification preview.
+    func testImageOnlyContainerGetsAPreview() throws {
+        let image = NSImage(size: NSSize(width: 40, height: 30))
+        image.lockFocus()
+        NSColor.gray.setFill()
+        NSRect(x: 0, y: 0, width: 40, height: 30).fill()
+        image.unlockFocus()
+        let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?
+            .representation(using: .png, properties: [:]))
+        let file = ElectronicOriginal.File(entryName: "sample.png", displayName: "sample.png", kind: .png, data: png,
+                                           documentNames: ["sample.png"], embeddedFileNames: [],
+                                           changedAfterSignature: [])
+        let preview = try XCTUnwrap(ZakoSessionStore.previewDocument(of: [file]))
+        XCTAssertEqual(preview.pageCount, 1)
+        XCTAssertNil(ZakoSessionStore.previewDocument(of: []))
+        var broken = file
+        broken.data = Data("not an image".utf8)
+        XCTAssertNil(ZakoSessionStore.previewDocument(of: [broken]), "broken bytes are skipped, never drawn")
+    }
+
+
+    func testSingleFileDefaultNewDocumentNameEndsInPDF() async throws {
         let (store, _, source) = try makeStore()
         await store.loadElectronicOriginal(at: source)
-        XCTAssertEqual(store.attestation.newDocumentName, "zmluva")
+        XCTAssertEqual(store.attestation.newDocumentName, "zmluva.pdf")
     }
 
     // MARK: - Several-file fixtures

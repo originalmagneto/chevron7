@@ -22,6 +22,15 @@ struct AuthorizeView: View {
                         ZakoNotice(title: "Konverziu sa nepodarilo autorizovať", message: error, tone: .failure)
                     }
 
+                    if let signedOut = store.ezzkSignInRefusal {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ZakoNotice(title: "Nie ste prihlásený do EZZK", message: signedOut, tone: .warning)
+                            OpenSettingsButton(pane: .ezzk) {
+                                Label("Otvoriť nastavenia EZZK", systemImage: "gearshape")
+                            }
+                        }
+                    }
+
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 14) {
                             checklistCard
@@ -120,12 +129,16 @@ struct AuthorizeView: View {
     private var e2eChecklistItems: [(Bool, String, String)] {
         let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
         return [
-            (store.canContinueFromVerification, "Podpisy a časové pečiatky klienta overené", "signature.badge.checkmark"),
+            (store.canLeaveVerification,
+             store.e2eRecordFirstRefusal == nil ? "Podpisy a časové pečiatky klienta overené"
+                : "Kvalifikácia podpisu neurčená: postup od 1. 1. 2027 ju nepripúšťa", "signature.badge.checkmark"),
             (!store.e2eNeedsQualifiedReport || store.qualifiedReport != nil,
              store.e2eNeedsQualifiedReport ? "Výsledok kvalifikovanej služby validácie pripojený"
-                : "Overenie aplikáciou Chevron7 (testovacia evidencia)", "checkmark.seal"),
-            (!store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Druh dokumentu vyplnený", "text.badge.checkmark"),
+                : "Overenie aplikáciou Chevron7 (\(store.settingsStore.ezzkAccountController.mode.label))", "checkmark.seal"),
+            (store.e2eDocumentTypesFilled
+                && !store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
+             store.e2eFileDocumentTypes.isEmpty ? "Druh dokumentu vyplnený" : "Druh dokumentu vyplnený pri každom súbore",
+             "text.badge.checkmark"),
             (!store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
              "Názov nového dokumentu vyplnený", "doc.badge.gearshape"),
             (true, store.attestation.evidenceNumber.map { "Evidenčné číslo z EZZK: \($0)" }
@@ -176,6 +189,12 @@ struct AuthorizeView: View {
         ]
     }
 
+    /// Outside Demo the number comes from EZZK, so the saved login is a condition too.
+    private var ezzkChecklistItems: [(Bool, String, String)] {
+        guard store.settingsStore.ezzkAccountController.mode != .demo else { return [] }
+        return [(store.ezzkSignInRefusal == nil, "Prihlásenie do EZZK", "person.badge.shield.checkmark")]
+    }
+
     private var inputSignatureChecklistItem: (Bool, String, String) {
         switch store.inputSignatureInspection.state {
         case .valid:
@@ -194,7 +213,7 @@ struct AuthorizeView: View {
             Text("Zákonné náležitosti doložky")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(Array(checklistItems.enumerated()), id: \.offset) { _, item in
+            ForEach(Array((checklistItems + ezzkChecklistItems).enumerated()), id: \.offset) { _, item in
                 HStack(spacing: 8) {
                     Image(systemName: item.0 ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(item.0 ? Color.green : Color.secondary)
@@ -366,7 +385,7 @@ struct AuthorizeView: View {
             systemImage: "signature.badge.checkmark",
             workingText: store.analysisProgressText,
             disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
-                || !store.canBeginAuthorization,
+                || store.pendingCardAction != nil || !store.canBeginAuthorization,
             isWorking: store.isAuthorizing
         ) {
             Task { await store.beginAuthorization() }

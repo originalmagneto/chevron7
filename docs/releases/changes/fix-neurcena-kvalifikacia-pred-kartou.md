@@ -1,0 +1,1 @@
+- **Neurčenú kvalifikáciu podpisu Chevron7 ohlási hneď pri overení.** Pri postupe od 1. 1. 2027 (vrátane prepínača „Postup od 1. 1. 2027 vopred“) sa podpis klienta, ktorého kvalifikáciu sa nepodarilo určiť, nedá zapísať do záznamu. Chevron7 to teraz povie už pri overení podpisov a tlačidlo „Autorizovať konverziu“ zostane neaktívne, takže kartu ani PIN nezadávate zbytočne.

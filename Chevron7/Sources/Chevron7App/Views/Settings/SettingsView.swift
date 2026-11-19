@@ -48,6 +48,10 @@ struct SettingsView: View {
         .onChange(of: selection) { _, pane in
             if let pane { storedPane = pane.rawValue }
         }
+        // Another window (ZaKo's "Otvoriť nastavenia EZZK") picks the pane of an open window.
+        .onChange(of: storedPane) { _, raw in
+            if let pane = SettingsPane(rawValue: raw), pane != selection { selection = pane }
+        }
     }
 
     @ViewBuilder

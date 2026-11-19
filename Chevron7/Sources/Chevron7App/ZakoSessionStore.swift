@@ -104,6 +104,9 @@ final class ZakoSessionStore {
     private(set) var mandateCardState: MandateCertificate.CardState = .noCard
     /// Reads `mandateCardState`; tests substitute it.
     var readMandateCardState: () -> MandateCertificate.CardState = { MandateCertificate.currentCardState() }
+    /// Whether any reader slot holds a card (CryptoTokenKit slot state, no card session), or
+    /// nil when the slots cannot be read. The app sets it; tests substitute it.
+    var readerSlotsHaveCard: () async -> Bool? = { nil }
     /// The card step the view presents while a guarded action waits for it.
     var cardPrompt: ZakoCardPrompt?
     /// The action the card flow completes once the mandate certificate is confirmed.
@@ -202,10 +205,17 @@ final class ZakoSessionStore {
         settings.mobileSigningEnabled && !signingProviderIsDemo && settingsStore.ezzkAccountController.isDemoMode
     }
 
-    /// Why the phone cannot authorize with the chosen client output (the one PDF is signed with a
-    /// card only); nil for the container. The view disables the phone button with this text.
+    /// Why the phone cannot authorize: the one PDF is signed with a card only, and the order of
+    /// 1. 1. 2027 signs the record first, which the phone cannot. Nil when it may. The view
+    /// disables the phone button with this text; `authorizeAndSign` refuses on its own too.
     var mobileRefusalForClientOutput: String? {
-        settings.zakoClientOutput == .singlePDF ? ZakoSinglePDFDelivery.mobileRefusal : nil
+        if settings.zakoClientOutput == .singlePDF { return ZakoSinglePDFDelivery.mobileRefusal }
+        if recordFirstPending != nil || ZakoRegime.resolve(conversionTime: Date(),
+                                                            mode: settingsStore.ezzkAccountController.mode,
+                                                            preview: settings.zakoRecordFirstPreview).regime == .recordFirst {
+            return Self.recordFirstMobileMessage
+        }
+        return nil
     }
 
     /// Why Ostrá evidencia does not offer the one-PDF output yet (`SinglePDFProductionPolicy`);

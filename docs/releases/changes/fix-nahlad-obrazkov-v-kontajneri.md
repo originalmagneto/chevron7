@@ -1,0 +1,1 @@
+- **Kontajner len s obrázkami má náhľad.** Ak kontajner ASiC-E obsahuje iba obrázky PNG alebo JPEG, Chevron7 ich pri overení zobrazí v náhľade, každý na samostatnej strane, namiesto prázdnej plochy.

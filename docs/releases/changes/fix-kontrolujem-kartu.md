@@ -1,0 +1,1 @@
+- **Po kliknutí na „Autorizovať konverziu“ hneď vidíte, že sa niečo deje.** Zistenie, aká karta je v čítačke, trvá niekoľko sekúnd. Chevron7 počas neho zobrazí „Kontrolujem kartu…“ s možnosťou zrušiť. Keď v čítačke nie je žiadna karta, výzva „Vložte kartu“ príde okamžite.
