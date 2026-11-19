@@ -8,8 +8,8 @@ import Foundation
 /// signed and registered but whose client container is not signed yet. Everything the rest of
 /// the conversion needs is kept as it was when the record was signed, so a resume never reads
 /// a new server time, allocates a number or renders the record again.
-struct RecordFirstPending: Sendable {
-    enum Stage: Equatable, Sendable {
+struct RecordFirstPending: Codable, Equatable, Sendable {
+    enum Stage: String, Codable, Equatable, Sendable {
         /// The record is sent (or waiting to be sent) and EZZK has not reported it processed.
         case awaitingEZZK
         /// EZZK processed the record; the PDF/A and the clause are signed next.
@@ -18,6 +18,8 @@ struct RecordFirstPending: Sendable {
 
     let recordID: UUID
     var stage: Stage
+    /// When the record was signed: the background watcher's schedule counts from here.
+    var recordSignedAt = Date()
     /// The conversion's direction: the row and the client signature follow it.
     let direction: ConversionDirection
     /// E→E: the SHA-256 of the original's documents in order, as the record names them; a
