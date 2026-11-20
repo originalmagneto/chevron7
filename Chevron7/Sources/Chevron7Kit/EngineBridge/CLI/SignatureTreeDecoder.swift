@@ -31,7 +31,13 @@ enum SignatureTreeDecoder {
         // A timestamp inside the signed data dates the data, never the signature; an engine
         // payload without `inSignedData` lists signature timestamps only.
         let firstIntact = intact.first { bool($0["inSignedData"]) != true }
-        let firstData = intact.first { bool($0["inSignedData"]) == true }
+        // The engine lists every document timestamp of an earlier revision the signature
+        // covers, oldest first; the signature's own is the latest of them (F15).
+        let firstData = intact.filter { bool($0["inSignedData"]) == true }.max { lhs, rhs in
+            let left = string(lhs["productionTime"]).flatMap { ISO8601DateFormatter().date(from: $0) } ?? .distantPast
+            let right = string(rhs["productionTime"]).flatMap { ISO8601DateFormatter().date(from: $0) } ?? .distantPast
+            return left < right
+        }
         let intactTimestamp = firstIntact != nil
         return DocumentSignatureInfo(
             id: id,
