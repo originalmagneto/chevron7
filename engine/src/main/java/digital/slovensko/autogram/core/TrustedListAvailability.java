@@ -2,7 +2,7 @@ package digital.slovensko.autogram.core;
 
 import eu.europa.esig.dss.model.tsl.TLInfo;
 import eu.europa.esig.dss.model.tsl.TLValidationJobSummary;
-import eu.europa.esig.dss.tsl.sync.SynchronizationStrategy;
+import eu.europa.esig.dss.validation.job.sync.SynchronizationStrategy;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;

@@ -253,6 +253,49 @@ class ContentTimestampTest {
         assertEquals(java.nio.ByteBuffer.wrap(once), java.nio.ByteBuffer.wrap(java.util.Arrays.copyOf(twice, once.length)));
     }
 
+
+    /// Canary for the F12 workaround (SigningJob uses PAdESTimestampService directly): DSS 6.5.1
+    /// still adds validation data before PAdESService.timestamp and refuses a PDF signed at
+    /// Baseline T for want of revocation data. When this starts passing through, the plain DSS
+    /// path may be used again.
+    @Test
+    void dssStillRefusesToTimestampAPdfSignedAtBaselineT() throws Exception {
+        var once = signWith(baselineTWithContentTimestamp(), "dokument.pdf", pdf(), List.of(),
+                ContentTimestampTest::caIssuedToken);
+        var service = new eu.europa.esig.dss.pades.signature.PAdESService(new CommonCertificateVerifier());
+        service.setTspSource(authority());
+
+        assertThrows(eu.europa.esig.dss.alert.exception.AlertException.class, () -> service.timestamp(
+                new InMemoryDocument(once), new eu.europa.esig.dss.pades.PAdESTimestampParameters()));
+    }
+
+    /// Canary for the F15 workaround (MachineInspectionService.pdfDocumentTimestamps): DSS 6.5.1
+    /// still files the document timestamp added after the first signature as that signature's
+    /// timestamp, not as a detached one, so the second signature does not list it.
+    @Test
+    void dssStillFilesALaterDocumentTimestampUnderTheEarlierSignature() throws Exception {
+        var settings = baselineTWithContentTimestamp();
+        var once = signWith(settings, "dokument.pdf", pdf(), List.of(), ContentTimestampTest::caIssuedToken);
+        var twice = signWith(settings, "dokument.pdf", once, List.of(), ContentTimestampTest::caIssuedToken);
+
+        var validator = validator(twice);
+        var documentTimestamps = validator.getSignatures().stream()
+                .map(signature -> signature.getAllTimestamps().stream()
+                        .filter(timestamp -> timestamp.getTimeStampType() == TimestampType.DOCUMENT_TIMESTAMP).count())
+                .toList();
+        assertEquals(1, validator.getDetachedTimestamps().size());
+        assertEquals(1L, documentTimestamps.stream().mapToLong(Long::longValue).sum());
+    }
+
+    private static MachineSettings baselineTWithContentTimestamp() throws Exception {
+        var settings = new MachineSettings(true);
+        settings.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
+        settings.answerTimestampsWith(authority());
+        settings.setTsaServer(TSA, new eu.europa.esig.dss.service.http.commons.TimestampDataLoader());
+        settings.setContentTimestamp(true);
+        return settings;
+    }
+
     // Protocol
 
     @Test

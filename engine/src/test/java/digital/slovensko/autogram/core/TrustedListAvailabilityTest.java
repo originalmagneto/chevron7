@@ -2,10 +2,10 @@ package digital.slovensko.autogram.core;
 
 import eu.europa.esig.dss.model.tsl.LOTLInfo;
 import eu.europa.esig.dss.model.tsl.OtherTSLPointer;
-import eu.europa.esig.dss.model.tsl.ParsingInfoRecord;
+import eu.europa.esig.dss.model.tsl.TLParsingInfoRecord;
 import eu.europa.esig.dss.model.tsl.TLInfo;
 import eu.europa.esig.dss.model.tsl.TLValidationJobSummary;
-import eu.europa.esig.dss.tsl.sync.SynchronizationStrategy;
+import eu.europa.esig.dss.validation.job.sync.SynchronizationStrategy;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -54,7 +54,7 @@ class TrustedListAvailabilityTest {
         var pointer = mock(OtherTSLPointer.class);
         when(pointer.getSchemeTerritory()).thenReturn(territory);
         when(info.getOtherTSLPointer()).thenReturn(pointer);
-        var parsing = mock(ParsingInfoRecord.class);
+        var parsing = mock(TLParsingInfoRecord.class);
         when(parsing.isResultExist()).thenReturn(parsed);
         when(parsing.getTerritory()).thenReturn(parsed ? territory : null);
         when(info.getParsingCacheInfo()).thenReturn(parsing);
@@ -64,7 +64,7 @@ class TrustedListAvailabilityTest {
     private static LOTLInfo lotl(boolean parsed, TLInfo... lists) {
         var info = mock(LOTLInfo.class);
         when(info.getTLInfos()).thenReturn(List.of(lists));
-        var parsing = mock(ParsingInfoRecord.class);
+        var parsing = mock(TLParsingInfoRecord.class);
         when(parsing.isResultExist()).thenReturn(parsed);
         when(info.getParsingCacheInfo()).thenReturn(parsing);
         return info;

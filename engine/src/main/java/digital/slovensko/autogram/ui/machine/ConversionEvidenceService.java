@@ -65,8 +65,9 @@ import java.util.zip.ZipInputStream;
  * One validation against the trusted lists feeds all of it.
  */
 public final class ConversionEvidenceService {
-    static final String DSS_VERSION = "6.4";
-    /// Matched by local name: DSS 6.4 writes ETSI TS 119 102-2 v1.4.1, other versions differ.
+    /// Named in the E→E evidence register; ConversionEvidenceServiceTest ties it to the DSS jar.
+    static final String DSS_VERSION = "6.5.1";
+    /// Matched by local name: DSS 6.4 and 6.5.1 write ETSI TS 119 102-2 v1.4.1, other versions differ.
     static final String ANY_NAMESPACE = "*";
     private static final String MANDATE_POLICY_PREFIX = "1.3.158.36061701.1.1.";
 
