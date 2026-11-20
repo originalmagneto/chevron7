@@ -84,6 +84,25 @@ final class SignatureTreeTests: XCTestCase {
             authority: "Data TSA", time: ISO8601DateFormatter().date(from: "2026-10-15T10:00:00Z"), isQualified: true))
     }
 
+    /// F15: a PDF signed a third time lists every earlier document timestamp as covered data,
+    /// in file order; its own data timestamp is the latest one, not the one before the first signature.
+    func testTheDataTimestampIsTheLatestDocumentTimestampTheSignatureCovers() throws {
+        let tree = SignatureTreeDecoder.tree(from: try payload("""
+        {"signatures":[{"id":"S-3","valid":true,"indication":"TOTAL_PASSED","qualifiedTimestampValid":true,
+          "timestamps":[{"id":"T-a","valid":true,"qualification":"QTSA","type":"DOCUMENT_TIMESTAMP",
+                         "inSignedData":true,"producer":"BOSA","productionTime":"2026-11-19T21:13:31Z"},
+                        {"id":"T-b","valid":true,"qualification":"QTSA","type":"DOCUMENT_TIMESTAMP",
+                         "inSignedData":true,"producer":"BOSA","productionTime":"2026-11-20T05:12:18Z"},
+                        {"id":"T-c","valid":true,"qualification":"QTSA","type":"DOCUMENT_TIMESTAMP",
+                         "inSignedData":true,"producer":"BOSA","productionTime":"2026-11-20T06:18:42Z"},
+                        {"id":"T-s","valid":true,"qualification":"QTSA","type":"SIGNATURE_TIMESTAMP",
+                         "inSignedData":false,"producer":"BOSA","productionTime":"2026-11-20T06:18:44Z"}]}]}
+        """))
+
+        XCTAssertEqual(tree.signatures[0].dataTimestamp?.time, ISO8601DateFormatter().date(from: "2026-11-20T06:18:42Z"))
+        XCTAssertEqual(tree.signatures[0].timestampTime, ISO8601DateFormatter().date(from: "2026-11-20T06:18:44Z"))
+    }
+
     func testABaselineBSignatureWithOnlyAContentTimestampHasNoSignatureTimestamp() throws {
         let tree = SignatureTreeDecoder.tree(from: try payload("""
         {"signatures":[{"id":"S-1","valid":true,"indication":"TOTAL_PASSED","qualifiedTimestampValid":false,

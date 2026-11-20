@@ -1,0 +1,1 @@
+Pri dokumente podpísanom viackrát s kvalifikovanou časovou pečiatkou sa pri každom podpise ukazuje jeho vlastná časová pečiatka údajov. Doteraz sa pri ďalších podpisoch zobrazovala pečiatka spred prvého podpisu.
