@@ -196,3 +196,13 @@ Overené v appke s kartou I.CA, Testovacia evidencia, postup od 1. 1. 2027 vopre
 - Autorizácia: vľavo „Čo podpíšete“ s prvou stranou listiny a zoznamom, čo klient dostane (`UI2-listina.pdf`, osvedčovacia doložka ako posledné strany, doložka v XML ako príloha, jeden kvalifikovaný podpis nad celým PDF); vpravo karta, výstup a kontrolný zoznam. Prázdne miesto zmizlo.
 - Čakanie: vľavo časová os, vpravo súhrn konverzie (náhľad, `UI2-listina-konvertovane.pdf`, číslo 261120-iY580fC026, výstup, prostredie, časy podpisu a odoslania 15:03). EZZK záznam spracovalo o 15:29 s kódom 0; pripravený stav ukázal „Podpis doložky“ a „Dokončiť konverziu“, náhľad pri dokončení už uvádza skutočné názvy (`UI2-listina-konvertovane.pdf`, `261120-iY580fC026.xml.xdcf`). Výstup: 4 strany, príloha `261120-iY580fC026.xml.xdcf`, jeden platný podpis PAdES Baseline T mandátnym certifikátom (QESIG). Po teste: postup od 2027 vypnutý, rozšírené nastavenia skryté, režim Testovacia evidencia, nič nečaká.
 - Drobnosť: v overení E→E sekcia „Nový dokument“ píše „vznikne nový PDF/A-2b“ aj vtedy, keď je zapamätaný výstup „Jeden PDF“ (vznikne PDF/A-3).
+
+## 1.23.1 (20. 11. 2026): štyri drobnosti
+
+Overené v appke s kartou I.CA, Testovacia evidencia, postup od 1. 1. 2027 vopred, výstup „Jeden PDF s doložkou“, originál `UI3-listina.pdf` (kópia B1), číslo 261120-CT580FC01C (EZZK spracovalo s kódom 0, výstup s prílohou `261120-CT580FC01C.xml.xdcf` a jedným platným podpisom PAdES Baseline T mandátnym certifikátom, QESIG):
+
+- Overenie E→E pri zapamätanom výstupe Jeden PDF píše „vznikne nový PDF/A-3 s pripojenou doložkou“ (predtým PDF/A-2b).
+- Autorizácia hneď po otvorení píše „Karta je pripojená“, nepreblikne „Vložte kartu“.
+- Trénovanie detektora: dlhé názvy druhov sa zalamujú na dva riadky.
+- „Dokončiť konverziu“ v pripravenom stave: okno bolo v pozadí, kde macOS kreslí zvýraznené tlačidlá sivo, takže zvýraznenie sa nedalo overiť; tlačidlo funguje.
+- Po teste: postup od 2027 vypnutý, rozšírené nastavenia skryté, režim Testovacia evidencia, nič nečaká.
