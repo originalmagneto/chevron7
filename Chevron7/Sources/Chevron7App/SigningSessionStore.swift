@@ -83,6 +83,10 @@ final class SigningSessionStore {
     /// Top-level signatures, for callers that predate the tree.
     var existingSignatures: [DocumentSignatureInfo] { existingSignatureState.tree.signatures }
     var resultSignatures: [DocumentSignatureInfo] { resultSignatureState.tree.signatures }
+    /// The signature this session added, which the done screen describes (F14).
+    var resultAddedSignature: DocumentSignatureInfo? {
+        SignatureBannerModel.addedSignature(existing: existingSignatureState, result: resultSignatureState.tree)
+    }
     var isInspectingSignatures: Bool { existingSignatureState.phase == .inspecting }
     var existingValidationTask: Task<Void, Never>? { existingTrees.validationTask }
     var resultValidationTask: Task<Void, Never>? { resultTrees.validationTask }

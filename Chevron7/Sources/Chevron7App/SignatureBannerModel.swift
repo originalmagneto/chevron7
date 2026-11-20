@@ -104,6 +104,18 @@ struct SignatureBannerModel: Equatable {
         return Set(newest.prefix(added).map(\.id))
     }
 
+    /// The signature the done screen describes: the one this session added to the source,
+    /// else the newest by signing time, else the last one (a new signature is appended).
+    /// Never simply the first, which for a source signed before is its oldest signature (F14).
+    static func addedSignature(existing: SignatureTreeState, result: SignatureTree) -> DocumentSignatureInfo? {
+        let ids = newSignatureIDs(existing: existing, result: result)
+        if let added = result.signatures.last(where: { ids.contains($0.id) }) { return added }
+        if result.signatures.contains(where: { $0.signingTime != nil }) {
+            return result.signatures.max { ($0.signingTime ?? .distantPast) < ($1.signingTime ?? .distantPast) }
+        }
+        return result.signatures.last
+    }
+
     // MARK: Headlines
 
     private struct Counts {

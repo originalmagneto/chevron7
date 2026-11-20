@@ -117,6 +117,29 @@ final class SignatureBannerModelTests: XCTestCase {
         XCTAssertEqual(SignatureBannerModel.newSignatureIDs(existing: result, result: result), [])
     }
 
+    /// F14: the done screen's timestamp card named the times of the source's old signature
+    /// after a signed PDF was signed again, because it took the tree's first signature.
+    func testDoneScreenSignatureIsTheAddedOne() {
+        let old = sig("old", "Ján Novák", time: Date(timeIntervalSince1970: 100))
+        let new = sig("new", "Marián Čuprík", time: Date(timeIntervalSince1970: 200))
+        let result = SignatureTree(signatures: [old, new])
+        XCTAssertEqual(SignatureBannerModel.addedSignature(
+            existing: SignatureTreeState(tree: SignatureTree(signatures: [old]), phase: .validated),
+            result: result)?.id, "new")
+        // A source whose inspection never finished still names the newest signature.
+        XCTAssertEqual(SignatureBannerModel.addedSignature(
+            existing: SignatureTreeState(tree: SignatureTree(), phase: .failed("x")), result: result)?.id, "new")
+        // Without signing times the last one is the one just appended.
+        XCTAssertEqual(SignatureBannerModel.addedSignature(
+            existing: SignatureTreeState(tree: SignatureTree(), phase: .idle),
+            result: SignatureTree(signatures: [sig("a", "A"), sig("b", "B")]))?.id, "b")
+        XCTAssertEqual(SignatureBannerModel.addedSignature(
+            existing: SignatureTreeState(tree: SignatureTree(), phase: .structural),
+            result: SignatureTree(signatures: [new]))?.id, "new")
+        XCTAssertNil(SignatureBannerModel.addedSignature(
+            existing: SignatureTreeState(tree: SignatureTree(), phase: .structural), result: SignatureTree()))
+    }
+
     func testZakoInspectionMapsToTheSameTones() throws {
         XCTAssertNil(SignatureBannerModel.make(from: .unavailable(detail: "Bez podpisov.")))
         let valid = try XCTUnwrap(SignatureBannerModel.make(from: .completed(signatures: [sig("1", "A")])))
