@@ -109,15 +109,19 @@ struct AuthorizeView: View {
                 }
                 VStack(alignment: .trailing, spacing: 4) {
                     authorizeButton
-                    // Width-bound under the button: squeezed into the bar's row, text wrapped
-                    // word by word and grew the window.
+                    // Width-bound under the button and at most two lines: squeezed into the bar's
+                    // row at the window's narrowest, a note that may grow vertically wrapped word
+                    // by word and raised the window's minimum height (582 points). It truncates
+                    // instead there, with the whole text in the help tag.
                     if let note = authorizeButtonNote {
                         Label(note.text, systemImage: note.symbol)
                             .font(.caption)
                             .foregroundStyle(note.isRefusal ? Color.orange : Color.secondary)
                             .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
                             .frame(maxWidth: 320, alignment: .trailing)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .help(note.text)
                     }
                 }
             }
