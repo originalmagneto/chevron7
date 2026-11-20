@@ -1,0 +1,1 @@
+- **Podpisové jadro je aktualizované na novšiu verziu.** Knižnica, ktorá vytvára a overuje podpisy (európska DSS), je teraz vo verzii 6.5.1 a obsahuje opravy načítania dôveryhodných zoznamov krajín EÚ. Podpisovanie kartou aj mobilom, časové pečiatky, zaručená konverzia a overovanie podpisov fungujú rovnako a dávajú rovnaké výsledky ako doteraz, nič netreba meniť.
