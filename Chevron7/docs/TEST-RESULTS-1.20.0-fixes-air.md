@@ -188,3 +188,11 @@ Overené v appke s kartou I.CA (OPRÁVNENIE), Testovacia evidencia, postup od 1.
 - Trénovanie detektora a mriežka počtov v Nastaveniach podľa návrhu.
 - Drobnosti: pri otvorení autorizácie sa na chvíľu, kým appka hľadá certifikáty, zobrazí „Karta nie je delegovaná… Vložte kartu“; v trénovaní sa dlhé názvy druhov v úzkom okne orezávajú. Vlastník upozornil na prázdne miesto pri autorizácii a čakaní (rieši vetva `feat/zako-authorize-layout`).
 - Po teste: postup od 2027 vypnutý, rozšírené nastavenia skryté, režim zostáva Testovacia evidencia (pred testom bola Ostrá, prepnúť späť je na vlastníkovi), zapamätaný výstup „Jeden PDF s doložkou“.
+
+## 1.23.0 (20. 11. 2026): rozloženie autorizácie a čakania
+
+Overené v appke s kartou I.CA, Testovacia evidencia, postup od 1. 1. 2027 vopred, výstup „Jeden PDF s doložkou“, originál `UI2-listina.pdf` (kópia B1):
+
+- Autorizácia: vľavo „Čo podpíšete“ s prvou stranou listiny a zoznamom, čo klient dostane (`UI2-listina.pdf`, osvedčovacia doložka ako posledné strany, doložka v XML ako príloha, jeden kvalifikovaný podpis nad celým PDF); vpravo karta, výstup a kontrolný zoznam. Prázdne miesto zmizlo.
+- Čakanie: vľavo časová os, vpravo súhrn konverzie (náhľad, `UI2-listina-konvertovane.pdf`, číslo 261120-iY580fC026, výstup, prostredie, časy podpisu a odoslania 15:03). EZZK záznam spracovalo o 15:29 s kódom 0.
+- Drobnosť: v overení E→E sekcia „Nový dokument“ píše „vznikne nový PDF/A-2b“ aj vtedy, keď je zapamätaný výstup „Jeden PDF“ (vznikne PDF/A-3).
