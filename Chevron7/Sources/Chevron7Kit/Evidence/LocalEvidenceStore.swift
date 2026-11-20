@@ -97,7 +97,7 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     /// E→E: the validation evidence of the original's signatures, relative to the register
     /// folder (`validation/<uuid>.<ext>`), read with `LocalEvidenceStore.validationEvidenceData(for:)`.
     public var validationEvidencePath: String?
-    /// E→E: who produced that evidence, e.g. "Chevron7 (DSS 6.4)" or a qualified service's name.
+    /// E→E: who produced that evidence, e.g. "Chevron7 (DSS 6.5.1)" or a qualified service's name.
     public var validationEvidenceSource: String?
     /// What the client received; nil for rows written before the one-PDF output (a container).
     public var clientOutput: AppSettings.ZakoClientOutput?

@@ -70,6 +70,19 @@ class ConversionEvidenceServiceTest {
         return new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
     }
 
+    /// The evidence names the DSS that validated the original, so the constant must follow a bump
+    /// of `dss.version`: read the version Maven stamped into the dss-validation jar on the classpath.
+    @Test
+    void theRecordedDssVersionIsTheOneOnTheClasspath() throws Exception {
+        var properties = new java.util.Properties();
+        try (var stream = SignedDocumentValidator.class.getResourceAsStream(
+                "/META-INF/maven/eu.europa.ec.joinup.sd-dss/dss-validation/pom.properties")) {
+            assertNotNull(stream);
+            properties.load(stream);
+        }
+        assertEquals(properties.getProperty("version"), ConversionEvidenceService.DSS_VERSION);
+    }
+
     @Test
     void evidenceForSignedPdfCarriesSignatureValueAndRevision() throws Exception {
         var evidence = evidenceOf("sample_signed.pdf", List.of());
@@ -79,7 +92,7 @@ class ConversionEvidenceServiceTest {
         assertTrue(Base64.getDecoder().decode(signature.get("signatureValueBase64").getAsString()).length > 100);
         assertEquals(Files.size(resource("sample_signed.pdf")), signature.get("signedRevisionLength").getAsLong());
         assertTrue(decoded(evidence.get("etsiReportBase64").getAsString()).contains("ValidationReport"));
-        assertEquals("6.4", evidence.get("dssVersion").getAsString());
+        assertEquals("6.5.1", evidence.get("dssVersion").getAsString());
         assertNotNull(evidence.get("validationTime"));
         assertFalse(evidence.getAsJsonObject("pdf").get("pdfaCompliant").getAsBoolean());
         assertEquals(0, evidence.getAsJsonObject("pdf").getAsJsonArray("changesAfterLastSignature").size());
@@ -419,7 +432,7 @@ class ConversionEvidenceServiceTest {
         assertTrue(Base64.getDecoder().decode(signature.get("signatureValueBase64").getAsString()).length > 100);
         assertTrue(decoded(signature.get("etsiSignatureReportBase64").getAsString()).contains("SignatureValidationReport"));
         assertEquals(signed.length, signature.get("signedRevisionLength").getAsLong());
-        assertEquals("6.4", nested.get("dssVersion").getAsString());
+        assertEquals("6.5.1", nested.get("dssVersion").getAsString());
         assertNotNull(nested.get("validationTime"));
         assertTrue(decoded(nested.get("etsiReportBase64").getAsString()).contains("ValidationReport"));
         assertEquals(0, nested.getAsJsonObject("pdf").getAsJsonArray("changesAfterLastSignature").size());
