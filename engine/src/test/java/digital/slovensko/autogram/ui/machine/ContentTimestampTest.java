@@ -241,12 +241,15 @@ class ContentTimestampTest {
                 .map(value -> value.getAsJsonObject()).toList();
         assertEquals(List.of("PAdES_BASELINE_T", "PAdES_BASELINE_T"),
                 signatures.stream().map(signature -> signature.get("format").getAsString()).toList());
-        for (var signature : signatures) {
-            // Each signature covers a document timestamp of its own revision.
-            assertTrue(signature.getAsJsonArray("timestamps").asList().stream().map(value -> value.getAsJsonObject())
-                    .anyMatch(timestamp -> timestamp.get("type").getAsString().equals("DOCUMENT_TIMESTAMP")
-                            && timestamp.get("inSignedData").getAsBoolean()), signature.toString());
-        }
+        // Each signature covers the document timestamps of every earlier revision, its own one
+        // included: DSS lists the second one as an archive timestamp of the first signature, not
+        // as a detached one, and the second signature lost it (F15).
+        var covered = signatures.stream().map(signature -> signature.getAsJsonArray("timestamps").asList().stream()
+                .map(value -> value.getAsJsonObject())
+                .filter(timestamp -> timestamp.get("type").getAsString().equals("DOCUMENT_TIMESTAMP")
+                        && timestamp.get("inSignedData").getAsBoolean())
+                .count()).toList();
+        assertEquals(List.of(1L, 2L), covered, signatures.toString());
         assertEquals(java.nio.ByteBuffer.wrap(once), java.nio.ByteBuffer.wrap(java.util.Arrays.copyOf(twice, once.length)));
     }
 

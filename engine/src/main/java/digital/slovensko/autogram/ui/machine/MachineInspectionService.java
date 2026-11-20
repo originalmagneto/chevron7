@@ -318,16 +318,15 @@ public final class MachineInspectionService {
     /// revision: the signature's ByteRange covers that revision, so the timestamp is part of the
     /// signed data (the PAdES way to include one, § 23 ods. 1 písm. b) zákona č. 305/2013 Z. z.).
     static Map<String, List<SignatureTimestamp>> signatureTimestamps(SignedDocumentValidator validator) {
-        var detached = validator.getDetachedTimestamps();
+        var documentTimestamps = pdfDocumentTimestamps(validator);
         var result = new LinkedHashMap<String, List<SignatureTimestamp>>();
         for (var signature : validator.getSignatures()) {
             var timestamps = new ArrayList<SignatureTimestamp>();
             var ids = new LinkedHashSet<String>();
             if (signature instanceof PAdESSignature pades) {
-                for (var timestamp : detached) {
-                    if (timestamp instanceof PdfTimestampToken pdfTimestamp && precedes(pdfTimestamp, pades)
-                            && ids.add(timestamp.getDSSIdAsString())) {
-                        timestamps.add(new SignatureTimestamp(timestamp, true));
+                for (var pdfTimestamp : documentTimestamps) {
+                    if (precedes(pdfTimestamp, pades) && ids.add(pdfTimestamp.getDSSIdAsString())) {
+                        timestamps.add(new SignatureTimestamp(pdfTimestamp, true));
                     }
                 }
             }
@@ -347,6 +346,36 @@ public final class MachineInspectionService {
             return signatureTimestamps(validator);
         } catch (RuntimeException exception) {
             return Map.of();
+        }
+    }
+
+    /// Every PDF document timestamp in the file, in revision order. DSS reports a document
+    /// timestamp added after a signature as that signature's archive timestamp, not as a
+    /// detached one, so a signature added after it would not list it (F15).
+    private static List<PdfTimestampToken> pdfDocumentTimestamps(SignedDocumentValidator validator) {
+        var byId = new LinkedHashMap<String, PdfTimestampToken>();
+        for (var timestamp : validator.getDetachedTimestamps()) {
+            if (timestamp instanceof PdfTimestampToken pdfTimestamp) {
+                byId.putIfAbsent(timestamp.getDSSIdAsString(), pdfTimestamp);
+            }
+        }
+        for (var signature : validator.getSignatures()) {
+            for (var timestamp : signature.getAllTimestamps()) {
+                if (timestamp instanceof PdfTimestampToken pdfTimestamp) {
+                    byId.putIfAbsent(timestamp.getDSSIdAsString(), pdfTimestamp);
+                }
+            }
+        }
+        var ordered = new ArrayList<>(byId.values());
+        ordered.sort(java.util.Comparator.comparingLong(MachineInspectionService::revisionEnd));
+        return ordered;
+    }
+
+    private static long revisionEnd(PdfTimestampToken timestamp) {
+        try {
+            return timestamp.getPdfRevision().getByteRange().getSecondPartEnd();
+        } catch (RuntimeException exception) {
+            return Long.MAX_VALUE;
         }
     }
 
