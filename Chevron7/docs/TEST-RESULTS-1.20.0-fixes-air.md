@@ -134,3 +134,9 @@ Zdroje v `~/Desktop/chevron7-test`: B1 = `B1-listina_podpisane.pdf` (PAdES T s Q
 - **F13 (neopravené):** pri spustení aplikácie sa samo otvorí okno Nastavenia. Okno `Window("Nastavenia")` nemá `.restorationBehavior(.disabled)`, takže ho macOS obnoví, ak bolo otvorené pri ukončení (v systéme je vypnuté „Zatvárať okná pri ukončení aplikácie“).
 
 **Ešte neoverené:** obrázok na A4 (E4), postup od 1. 1. 2027 v kombinácii s Jedným PDF (P→E aj E→E), F7, F1, F2 a F8 vizuálne na Mac Studiu.
+
+## Kontrola po 1.21.2 (20. 11. 2026)
+
+- **F12 overené kartou (I.CA, OPRÁVNENIE):** `B1-listina_podpisane.pdf` podpísané znova ako PAdES so zapnutou QTS (BOSA) prešlo, výstup `B1-listina_podpisane_podpisane.pdf`. Prvých 360404 bajtov je zhodných s B1, súbor má dve časové pečiatky dokumentu a dva podpisy, pdfsig hodnotí oba podpisy ako platné a druhý pokrýva celý dokument (čas podpisu 20. 11. 2026 06:12:19). Pruh nad dokumentom: „Podpísané 2 podpismi, obe platné“.
+- **F14 (neopravené):** obrazovka po podpise ukazuje v karte „Časová pečiatka“ časy prvého, starého podpisu (19. 11. 2026 22:13:31) namiesto nového. `SigningDoneView` berie `store.resultSignatures.first`, čo je pri už podpísanom dokumente najstarší podpis, a nie ten, ktorý pruh označí ako „nový“.
+- **F13 nejasné:** pri tomto spustení bolo okno Nastavenia otvorené. Treba overiť, či ho otvoril používateľ, alebo ho macOS obnovil aj v 1.21.2.
