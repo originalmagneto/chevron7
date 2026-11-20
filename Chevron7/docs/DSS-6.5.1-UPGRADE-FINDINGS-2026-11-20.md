@@ -39,3 +39,13 @@ The engine suite (734 tests) and the Swift suite run without cards or real times
 2. ASiC-E XAdES with QTS on a card (Sectigo Qualified timestamp).
 3. A ZaKo conversion in Testovacia evidencia (record and client container signed, record accepted).
 4. Re-validate documents signed earlier with real cards and timestamp authorities and compare verdicts and qualifications with 6.4 (Bouncy Castle 1.86 parses them now).
+
+## Card test results (2026-11-20, Mac Studio, Developer ID-signed 1.21.6 build with DSS 6.5.1)
+
+- I.CA mandate card (OPRÁVNENIE 1042), PAdES with QTS: TOTAL_PASSED, QESIG, document timestamp and signature timestamp from BOSA (QTSA).
+- A second QTS signature of the same PDF (F12): succeeds. Both signatures are TOTAL_PASSED and QESIG, and each lists the document timestamps it covers (F15).
+- ASiC-E XAdES with QTS: TOTAL_PASSED, QESIG, AllDataObjectsTimeStamp and signature timestamp from Sectigo Qualified (QTSA).
+- ZaKo record-first in Testovacia evidencia, single-PDF output, E→E 261120-qd580FC023 and P→E 261120-WF580Fc022: EZZK processed both records with code 0, and both outputs validate as PAdES Baseline T, TOTAL_PASSED, QESIG.
+- Re-validation of ten earlier documents (eleven signatures, eID and I.CA, PAdES, XAdES and CAdES) through the 6.4 and 6.5.1 engines: identical output.
+- Live BOSA and Sectigo Qualified timestamps through the bundled runtime: QTSA, PASSED.
+- Open: the same PAdES and ASiC-E run with an eID card.
