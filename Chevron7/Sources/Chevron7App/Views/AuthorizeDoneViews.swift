@@ -593,6 +593,19 @@ struct DoneView: View {
     @State private var exportError: String?
     @State private var isWorkingOnEZZK = false
     var body: some View {
+        // In a scroll view at least as tall as the window: the content stays centered, but its
+        // height at the narrowest width no longer sets the window's minimum. Without it the
+        // waiting card's wrapped texts asked for about 3000 points and grew the main window
+        // past the screen (F16, 2026-11-20).
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 24) {
             Spacer()
 
@@ -668,7 +681,7 @@ struct DoneView: View {
 
             Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 24)
     }
 
     private func presentation(at now: Date) -> ZakoDonePresentation {
