@@ -555,6 +555,40 @@ class ConversionEvidenceServiceTest {
 
     @Test
     void mandantAndPoliciesAreExtracted() throws Exception {
+        var facts = ConversionEvidenceService.X509Facts.of(mandateCertificate().certificate().getEncoded());
+
+        assertEquals(List.of("MANDANT Advokátska kancelária s.r.o."), facts.mandants());
+        assertEquals("1.3.158.36061701.1.1.1042", facts.policies().get(0).oid());
+        assertEquals("OPRÁVNENIE 1042", facts.policies().get(0).explicitText());
+        assertEquals(null, facts.policies().get(1).explicitText());
+        assertEquals("1042 OPRÁVNENIE 1042", facts.mandate());
+    }
+
+    /// The whole path, not only the parser: a PDF signed with a SAK mandate certificate must
+    /// report the mandate and the mandant in its signer facts. DSS keeps no certificate bytes in
+    /// its diagnostic data unless asked, which left both empty in every clause (F17).
+    @Test
+    void signerFactsOfAMandateSignatureCarryTheMandateAndTheMandant() throws Exception {
+        var signer = mandateCertificate();
+        var signed = signWith(signer, ConversionTestPdfs.samplePdf());
+        var path = Files.write(Files.createTempDirectory("evidence").resolve("mandat.pdf"), signed);
+
+        var evidence = new ConversionEvidenceService(plainValidation(), List::of).evidence(path)
+                .getAsJsonObject("evidence");
+        var signature = evidence.getAsJsonArray("signatures").get(0).getAsJsonObject();
+
+        assertEquals("1042 OPRÁVNENIE 1042", signature.get("mandate").getAsString(), signature.toString());
+        assertEquals("MANDANT Advokátska kancelária s.r.o.",
+                signature.getAsJsonArray("mandants").get(0).getAsString());
+        assertTrue(signature.getAsJsonArray("policies").toString().contains("1.3.158.36061701.1.1.1042"));
+    }
+
+    private record TestSigner(java.security.PrivateKey key, java.security.cert.X509Certificate certificate) {
+    }
+
+    /// A self-signed certificate shaped like a SAK mandate certificate: a `MANDANT` subject
+    /// value and the mandate policy with its user notice.
+    private static TestSigner mandateCertificate() throws Exception {
         var keys = KeyPairGenerator.getInstance("RSA");
         keys.initialize(2048);
         var pair = keys.generateKeyPair();
@@ -571,18 +605,33 @@ class ConversionEvidenceServiceTest {
                 new PolicyInformation(new ASN1ObjectIdentifier("0.4.0.194112.1.2"),
                         new DERSequence(new PolicyQualifierInfo("https://example.test/cps")))
         });
-        var builder = new JcaX509v3CertificateBuilder(subject, BigInteger.ONE, new Date(), new Date(System.currentTimeMillis() + 86_400_000L),
-                subject, pair.getPublic());
+        var builder = new JcaX509v3CertificateBuilder(subject, BigInteger.ONE, new Date(System.currentTimeMillis() - 86_400_000L),
+                new Date(System.currentTimeMillis() + 86_400_000L), subject, pair.getPublic());
         builder.addExtension(Extension.certificatePolicies, false, policies);
-        var certificate = builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(pair.getPrivate())).getEncoded();
+        var holder = builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(pair.getPrivate()));
+        var certificate = new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().getCertificate(holder);
+        return new TestSigner(pair.getPrivate(), certificate);
+    }
 
-        var facts = ConversionEvidenceService.X509Facts.of(certificate);
-
-        assertEquals(List.of("MANDANT Advokátska kancelária s.r.o."), facts.mandants());
-        assertEquals("1.3.158.36061701.1.1.1042", facts.policies().get(0).oid());
-        assertEquals("OPRÁVNENIE 1042", facts.policies().get(0).explicitText());
-        assertEquals(null, facts.policies().get(1).explicitText());
-        assertEquals("1042 OPRÁVNENIE 1042", facts.mandate());
+    /// An invisible PAdES Baseline B signature of `pdf` by `signer`.
+    private static byte[] signWith(TestSigner signer, byte[] pdf) throws Exception {
+        var certificate = new eu.europa.esig.dss.model.x509.CertificateToken(signer.certificate());
+        var parameters = new eu.europa.esig.dss.pades.PAdESSignatureParameters();
+        parameters.setSignatureLevel(eu.europa.esig.dss.enumerations.SignatureLevel.PAdES_BASELINE_B);
+        parameters.setSigningCertificate(certificate);
+        parameters.setCertificateChain(List.of(certificate));
+        parameters.setDigestAlgorithm(eu.europa.esig.dss.enumerations.DigestAlgorithm.SHA256);
+        var service = new eu.europa.esig.dss.pades.signature.PAdESService(new CommonCertificateVerifier());
+        var document = new eu.europa.esig.dss.model.InMemoryDocument(pdf, "mandat.pdf");
+        var toSign = service.getDataToSign(document, parameters);
+        var signature = java.security.Signature.getInstance("SHA256withRSA");
+        signature.initSign(signer.key());
+        signature.update(toSign.getBytes());
+        var value = new eu.europa.esig.dss.model.SignatureValue(
+                eu.europa.esig.dss.enumerations.SignatureAlgorithm.RSA_SHA256, signature.sign());
+        try (var stream = service.signDocument(document, parameters, value).openStream()) {
+            return stream.readAllBytes();
+        }
     }
 
     /// The seal of a qualified validation service's report is made with the certificate the
