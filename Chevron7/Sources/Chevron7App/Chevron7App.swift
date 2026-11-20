@@ -188,11 +188,15 @@ struct Chevron7App: App {
         // Opened only on request: with "Close windows when quitting an app" off, macOS restored
         // it at every launch when it was open at quit (F13, 2026-11-19).
         .restorationBehavior(.disabled)
+        // The main group takes no external events, so SwiftUI handed a document opened
+        // from Finder to this scene and the open showed Settings (F13, 2026-11-20).
+        .handlesExternalEvents(matching: [])
         Window("Trénovanie detektora", id: DetectorTrainingWindow.id) {
             DetectorTrainingView(settingsStore: model.settingsStore)
         }
         .defaultSize(width: 680, height: 600)
         .restorationBehavior(.disabled)
+        .handlesExternalEvents(matching: [])
     }
 }
 
