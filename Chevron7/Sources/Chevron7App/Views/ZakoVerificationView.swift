@@ -218,7 +218,7 @@ struct ZakoVerificationView: View {
     }
 
     static func detailKey(_ authorization: ElectronicOriginal.Authorization) -> String {
-        "\(authorization.fileEntryName ?? "")|\(authorization.signatureID)"
+        SignatureRowModel.detailKey(authorization)
     }
 
     private func detailExpansion(_ key: String) -> Binding<Bool> {
@@ -230,65 +230,10 @@ struct ZakoVerificationView: View {
 
     private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool,
                                   fileName: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: icon(authorization.state))
-                        .foregroundStyle(tint(authorization.state))
-                        .accessibilityHidden(true)
-                    Text(authorization.signerName)
-                        .font(.callout.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Text(authorization.state.rawValue)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(tint(authorization.state))
-                }
-                Group {
-                    Text(authorization.typeOther ?? authorization.type.skName)
-                    if let time = authorization.signingTime {
-                        Text("Podpísané \(E2EDateText.string(time))")
-                    }
-                    if let mandate = authorization.mandate {
-                        Text("Mandát: \(mandate)")
-                    }
-                    if let timestamp = authorization.timestamp {
-                        Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
-                    } else {
-                        Text("Bez časovej pečiatky")
-                    }
-                    if let fileName {
-                        Text("Podpis v súbore \(fileName)")
-                    }
-                    if showsDocument {
-                        Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 24)
-            }
-            // One element for VoiceOver; the disclosure below stays its own control.
-            .accessibilityElement(children: .combine)
-            if let detail = authorization.technicalDetail {
-                let key = Self.detailKey(authorization)
-                // The label is a button too, so a click on the words opens it as the arrow does,
-                // and either is reached with the keyboard.
-                DisclosureGroup(isExpanded: detailExpansion(key)) {
-                    Text(detail)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                } label: {
-                    Button("Technický detail") { detailExpansion(key).wrappedValue.toggle() }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Zobrazí pôvodný text overenia")
-                }
-                .font(.caption)
-                .padding(.leading, 24)
-            }
-        }
+        SignatureRowView(model: SignatureRowModel(authorization: authorization, fileName: fileName,
+                                                  showsDocuments: showsDocument),
+                         density: .regular,
+                         detailExpanded: detailExpansion(Self.detailKey(authorization)))
     }
 
     /// The files of a container with several files, in the order the new document joins them.
