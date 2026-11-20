@@ -284,6 +284,15 @@ struct AttestationFormView: View {
                 Label(ZakoSessionStore.unlockCardMessage, systemImage: "key.horizontal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            case .insertCard where store.cardReading == .checking:
+                Label(ZakoSessionStore.checkingCardText, systemImage: "creditcard")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .insertCard where store.cardReading == .unreadCard:
+                Label(ZakoSessionStore.unreadCardText, systemImage: "creditcard")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             case .insertCard:
                 Label(ZakoSessionStore.insertMandateCardMessage, systemImage: "creditcard.and.123")
                     .font(.caption)

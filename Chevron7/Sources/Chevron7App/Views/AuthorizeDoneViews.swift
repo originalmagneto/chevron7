@@ -1050,7 +1050,11 @@ struct DoneView: View {
                     } label: {
                         Label("Dokončiť konverziu", systemImage: "signature")
                     }
+                    // The one action this state waits for: prominent, tinted and the default
+                    // (Return), so it never reads as an equal of "Nová konverzia" beside it.
                     .buttonStyle(.borderedProminent)
+                    .tint(.accentColor)
+                    .keyboardShortcut(.defaultAction)
                     .controlSize(.large)
                 }
                 Button {
@@ -1058,6 +1062,7 @@ struct DoneView: View {
                 } label: {
                     Label("Nová konverzia", systemImage: "plus")
                 }
+                .buttonStyle(.bordered)
                 .controlSize(.large)
             }
         }

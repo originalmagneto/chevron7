@@ -236,6 +236,9 @@ final class UIClaritySnapshotTests: XCTestCase {
         for scheme in Scheme.allCases {
             render(ZakoFlowView(store: store), named: "4-verification", scheme: scheme, to: output)
         }
+        // The one PDF remembered: the new document is said to become PDF/A-3 with the clause.
+        store.settingsStore.settings.zakoClientOutput = .singlePDF
+        render(ZakoFlowView(store: store), named: "4-verification-single-pdf", scheme: .light, to: output)
     }
 
     // MARK: 5. Detector training and the AI pane's counts
@@ -244,7 +247,9 @@ final class UIClaritySnapshotTests: XCTestCase {
         let output = try requireOutput()
         let settingsStore = makeSettingsStore()
         settingsStore.settings.learnFromReviews = true
-        let kinds: [SecurityElement.Kind] = [.officialStamp, .handwrittenSignature, .initial, .embossedSeal]
+        // The two longest names among them, which used to be cut off at the default width.
+        let kinds: [SecurityElement.Kind] = [.officialStamp, .handwrittenSignature, .initial, .embossedSeal,
+                                             .bindingCord, .waxSeal]
         for index in 0..<22 {
             let kind = kinds[index % kinds.count]
             let boxes = (0..<(index % 3 + 1)).map { _ in

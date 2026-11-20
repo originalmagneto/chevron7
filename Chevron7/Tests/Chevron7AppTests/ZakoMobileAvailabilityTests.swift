@@ -126,7 +126,7 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .asicContainer),
                        "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh.")
         XCTAssertEqual(ZakoVerificationPresentation.keepNote(output: .singlePDF),
-                       "Pri výstupe ako jeden PDF sa prevedie na nový PDF/A a doložka sa pripojí na koniec.")
+                       "Pri výstupe ako jeden PDF vznikne nový PDF/A-3 s pripojenou doložkou. Podpisy klienta zostanú zapísané v doložke.")
         XCTAssertEqual(ZakoVerificationPresentation.keptDocumentLine(formatName: "PDF/A-2b", output: .asicContainer),
                        "PDF/A-2b, nezmenený s podpismi klienta")
         XCTAssertEqual(ZakoVerificationPresentation.keptDocumentLine(formatName: "PDF/A-2b", output: .singlePDF),
@@ -139,9 +139,36 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         XCTAssertEqual(ZakoVerificationPresentation.convertNote(reason: "Dokument nie je PDF/A", output: .asicContainer),
                        "Dokument nie je PDF/A, preto vznikne nový PDF/A-2b. Podpisy klienta zostanú zapísané v doložke.")
         XCTAssertEqual(ZakoVerificationPresentation.convertNote(reason: "Dokument nie je PDF/A", output: .singlePDF),
-                       "Dokument nie je PDF/A, preto vznikne nový PDF/A-3 s doložkou. Podpisy klienta zostanú zapísané v doložke.")
+                       "Pri výstupe ako jeden PDF vznikne nový PDF/A-3 s pripojenou doložkou. Podpisy klienta zostanú zapísané v doložke.")
         XCTAssertEqual(ZakoVerificationPresentation.convertedDocumentLine(output: .asicContainer), "nový PDF/A-2b")
         XCTAssertEqual(ZakoVerificationPresentation.convertedDocumentLine(output: .singlePDF), "nový PDF/A-3 s doložkou")
+    }
+
+    /// The "Nový dokument" note follows the remembered output for a kept and a converted original
+    /// alike: the one PDF never says PDF/A-2b and never says the original stays unchanged.
+    func testNewDocumentNoteFollowsPlanAndOutput() {
+        let keep = ElectronicOriginal.NewDocumentPlan.keep(format: E2ECodelists.pdfa2Format, formatOther: nil)
+        let convert = ElectronicOriginal.NewDocumentPlan.convert(reason: "PDF nie je platné PDF/A")
+
+        let keptContainer = ZakoVerificationPresentation.newDocumentNote(plan: keep, output: .asicContainer)
+        XCTAssertEqual(keptContainer.text, "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh.")
+        XCTAssertEqual(keptContainer.symbol, "doc.on.doc")
+
+        let convertedContainer = ZakoVerificationPresentation.newDocumentNote(plan: convert, output: .asicContainer)
+        XCTAssertEqual(convertedContainer.text,
+                       "PDF nie je platné PDF/A, preto vznikne nový PDF/A-2b. Podpisy klienta zostanú zapísané v doložke.")
+        XCTAssertEqual(convertedContainer.symbol, "doc.badge.arrow.up")
+
+        for plan in [keep, convert] {
+            let single = ZakoVerificationPresentation.newDocumentNote(plan: plan, output: .singlePDF)
+            XCTAssertTrue(single.text.contains("PDF/A-3"), single.text)
+            XCTAssertTrue(single.text.contains("doložk"), single.text)
+            XCTAssertTrue(single.text.contains("Podpisy klienta zostanú zapísané v doložke."), single.text)
+            XCTAssertFalse(single.text.contains("PDF/A-2b"), single.text)
+            XCTAssertFalse(single.text.contains("nezmenený"), single.text)
+            XCTAssertFalse(single.text.contains("\u{2014}"), "no em dash")
+            XCTAssertEqual(single.symbol, "doc.badge.arrow.up")
+        }
     }
 }
 
