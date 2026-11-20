@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import AppKit
 import Foundation
 import XCTest
 import Chevron7Kit
@@ -92,7 +93,7 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         let unlocked = try XCTUnwrap(store.authorizeChecklist.items.first { $0.title == "Mandátny certifikát SAK pripravený" })
         XCTAssertEqual(unlocked.hint, "Načíta sa z karty pri autorizácii.")
 
-        XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .noMandate), ZakoSessionStore.authorizeNoMandateReason)
+        XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .noMandate), "Chýba na vloženej karte.")
     }
 
     // MARK: A card without a mandate
@@ -105,7 +106,7 @@ final class ZakoAuthorizeStepTests: XCTestCase {
 
         XCTAssertEqual(store.mandateGate, .noMandate)
         XCTAssertEqual(store.authorizeCardRefusal,
-                       "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom.")
+                       "Chýba mandátny certifikát SAK")
         XCTAssertFalse(store.canBeginAuthorization)
 
         await store.beginAuthorization()
@@ -156,7 +157,7 @@ final class ZakoAuthorizeStepTests: XCTestCase {
 
     func testRefusalNamesTheInsertedCardOnlyWhenOneIsIn() {
         XCTAssertEqual(ZakoSessionStore.authorizeCardRefusal(for: .noMandate),
-                       "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom.")
+                       "Chýba mandátny certifikát SAK")
         XCTAssertNil(ZakoSessionStore.authorizeCardRefusal(for: .insertCard), "an empty reader is asked for by the flow")
         XCTAssertNil(ZakoSessionStore.authorizeCardRefusal(for: .needsUnlock))
     }
@@ -171,6 +172,27 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         XCTAssertEqual(note?.isRefusal, true)
         XCTAssertEqual(ZakoSessionStore.authorizeButtonNote(cardRefusal: nil, rememberedPINNote: "PIN",
                                                             checkingCard: false)?.isRefusal, false)
+
+        let empty = ZakoSessionStore.authorizeButtonNote(cardRefusal: nil, rememberedPINNote: nil,
+                                                         checkingCard: false, readerEmpty: true)
+        XCTAssertEqual(empty?.text, "Vložte kartu s mandátnym certifikátom SAK")
+        XCTAssertEqual(empty?.isRefusal, false, "the button stays live; the flow asks for the card")
+        XCTAssertNil(ZakoSessionStore.authorizeButtonNote(cardRefusal: nil, rememberedPINNote: nil,
+                                                          checkingCard: false, readerEmpty: false))
+    }
+
+    /// The authorize step's symbols exist ("signature.badge.checkmark" never did and drew nothing).
+    func testAuthorizeStepSymbolsExist() throws {
+        var symbols = [ZakoSessionStore.authorizeButtonSymbol, ZakoSessionStore.mobileAuthorizeButtonSymbol]
+        let store = try makeStore()
+        store.isLoadedPendingConversion = false
+        symbols += store.authorizeChecklist.items.map(\.symbol)
+        for status in [ZakoTokenStatus.demo, .noCard, .typePending, .noMandate, .loaded] { symbols.append(status.symbol) }
+        if let note = ZakoSessionStore.authorizeButtonNote(cardRefusal: "x", rememberedPINNote: nil,
+                                                           checkingCard: false) { symbols.append(note.symbol) }
+        for symbol in Set(symbols) {
+            XCTAssertNotNil(NSImage(systemSymbolName: symbol, accessibilityDescription: nil), symbol)
+        }
     }
 
     func testPhoneNoticeOnlyWhereDemoWouldOfferThePhone() {

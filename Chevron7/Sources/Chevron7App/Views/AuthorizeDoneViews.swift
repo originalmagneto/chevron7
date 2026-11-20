@@ -400,7 +400,7 @@ struct AuthorizeView: View {
     private var authorizeButton: some View {
         HoldToConfirmButton(
             title: store.recordFirstPending == nil ? "Autorizovať konverziu" : "Dokončiť konverziu",
-            systemImage: "signature.badge.checkmark",
+            systemImage: ZakoSessionStore.authorizeButtonSymbol,
             workingText: store.cardPrompt == .checkingCard ? "Kontrolujem kartu…" : store.analysisProgressText,
             disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
                 || store.pendingCardAction != nil || !store.canBeginAuthorization,
@@ -422,7 +422,7 @@ struct AuthorizeView: View {
                     if store.isAuthorizing, store.isAuthorizingViaMobile {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                        Image(systemName: ZakoSessionStore.mobileAuthorizeButtonSymbol)
                     }
                     Text("Autorizovať mobilom")
                         .font(.body.weight(.semibold))

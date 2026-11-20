@@ -88,10 +88,16 @@ struct ZakoChecklistSummary: Equatable {
 }
 
 extension ZakoSessionStore {
-    /// Shown under the authorize button and as the checklist hint when a card is in the reader
-    /// but holds no mandate certificate: the button is off, so the card check never starts.
-    nonisolated static let authorizeNoMandateReason =
-        "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom."
+    /// The full explanation of a card without the mandate stays in the certificate card
+    /// (`noMandateMessage`); the other places say it short.
+    /// Under the disabled authorize button when the card in the reader holds no mandate.
+    nonisolated static let authorizeNoMandateReason = "Chýba mandátny certifikát SAK"
+    /// Under the (live) authorize button while the reader is empty.
+    nonisolated static let authorizeInsertCardNote = "Vložte kartu s mandátnym certifikátom SAK"
+
+    /// The authorize button's symbols, checked to exist by a test.
+    nonisolated static let authorizeButtonSymbol = "signature"
+    nonisolated static let mobileAuthorizeButtonSymbol = "iphone.gen3.radiowaves.left.and.right"
 
     /// Shown under the authorize button when the next authorization uses the PIN typed earlier.
     nonisolated static let rememberedPINMessage =
@@ -109,9 +115,11 @@ extension ZakoSessionStore {
     }
 
     /// The line under the authorize button: why a card is refused, else the remembered PIN
-    /// note; nothing while the card check runs, since that check is what decides.
+    /// note, else a request for the card while the reader is empty; nothing while the card
+    /// check runs, since that check is what decides.
     nonisolated static func authorizeButtonNote(cardRefusal: String?, rememberedPINNote: String?,
-                                                checkingCard: Bool) -> ZakoAuthorizeNote? {
+                                                checkingCard: Bool,
+                                                readerEmpty: Bool = false) -> ZakoAuthorizeNote? {
         guard !checkingCard else { return nil }
         if let cardRefusal {
             return ZakoAuthorizeNote(text: cardRefusal, symbol: "creditcard.trianglebadge.exclamationmark",
@@ -120,12 +128,16 @@ extension ZakoSessionStore {
         if let rememberedPINNote {
             return ZakoAuthorizeNote(text: rememberedPINNote, symbol: "key.horizontal", isRefusal: false)
         }
+        if readerEmpty {
+            return ZakoAuthorizeNote(text: authorizeInsertCardNote, symbol: "creditcard", isRefusal: false)
+        }
         return nil
     }
 
     var authorizeButtonNote: ZakoAuthorizeNote? {
         Self.authorizeButtonNote(cardRefusal: authorizeCardRefusal, rememberedPINNote: rememberedPINNoteText,
-                                 checkingCard: cardPrompt == .checkingCard)
+                                 checkingCard: cardPrompt == .checkingCard,
+                                 readerEmpty: mandateGate == .insertCard)
     }
 
     /// The card line above the checklist.
@@ -163,11 +175,12 @@ extension ZakoSessionStore {
     /// The hint of the card items: a card without the mandate is named as such, an empty
     /// reader asks for the card, and a card still to be unlocked is read at authorization.
     nonisolated static let insertMandateCardHint = "Vložte kartu s mandátnym certifikátom SAK."
+    nonisolated static let missingOnCardHint = "Chýba na vloženej karte."
     nonisolated static let readAtAuthorizationHint = "Načíta sa z karty pri autorizácii."
 
     nonisolated static func cardItemHint(for gate: ZakoMandateGate) -> String {
         switch gate {
-        case .noMandate: authorizeNoMandateReason
+        case .noMandate: missingOnCardHint
         case .insertCard: insertMandateCardHint
         case .notRequired, .ready, .needsUnlock: readAtAuthorizationHint
         }
@@ -208,7 +221,7 @@ extension ZakoSessionStore {
             ZakoChecklistItem(met: canLeaveVerification,
                               title: e2eRecordFirstRefusal == nil ? "Podpisy a časové pečiatky klienta overené"
                                   : "Kvalifikácia podpisu neurčená: postup od 1. 1. 2027 ju nepripúšťa",
-                              symbol: "signature.badge.checkmark",
+                              symbol: "signature",
                               hint: "Pozrite krok Overenie."),
             ZakoChecklistItem(met: !e2eNeedsQualifiedReport || qualifiedReport != nil,
                               title: e2eNeedsQualifiedReport ? "Výsledok kvalifikovanej služby validácie pripojený"
@@ -292,7 +305,7 @@ extension ZakoSessionStore {
     private var inputSignatureChecklistItem: ZakoChecklistItem {
         switch inputSignatureInspection.state {
         case .valid:
-            ZakoChecklistItem(met: true, title: "Vstupné podpisy overené", symbol: "signature.badge.checkmark")
+            ZakoChecklistItem(met: true, title: "Vstupné podpisy overené", symbol: "signature")
         case .invalid:
             ZakoChecklistItem(met: false, title: "Vstup obsahuje neplatný elektronický podpis", symbol: "xmark.seal",
                               hint: "Podrobnosti sú v správe o podpisoch nižšie.")

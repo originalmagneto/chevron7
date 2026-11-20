@@ -84,7 +84,7 @@ struct AsyncActionButton: View {
                 case .error:
                     Image(systemName: "exclamationmark.triangle")
                 case .idle, .disabled:
-                    Image(systemName: "signature.badge.checkmark")
+                    Image(systemName: "signature")
                 }
                 Text(labelText)
                     .font(.body.weight(.semibold))

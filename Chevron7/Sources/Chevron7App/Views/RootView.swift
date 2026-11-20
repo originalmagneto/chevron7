@@ -415,7 +415,7 @@ struct RootView: View {
                                 Task { await signingStore.prepareBatch(ids: ids) }
                             } label: {
                                 Label("Podpísať všetky (\(signingStore.unsignedQueueItems.count))",
-                                      systemImage: "signature.badge.checkmark")
+                                      systemImage: "signature")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(Color.accentColor)
                             }
