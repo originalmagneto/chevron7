@@ -1093,7 +1093,7 @@ struct SigningDoneView: View {
             if store.lastSignatureTimestamped || store.lastSignatureContentTimestamped {
                 GroupBox("Časová pečiatka") {
                     VStack(alignment: .leading, spacing: 5) {
-                        let signature = store.resultSignatures.first
+                        let signature = store.resultAddedSignature
                         ForEach(SigningTimestampPresentation.authorityRows(
                             mobileMethod: store.lastMobileSigningMethod,
                             settingsAuthorityName: (store.lastTimestampAuthority ?? store.settings.activeTSA).name,
@@ -1109,20 +1109,20 @@ struct SigningDoneView: View {
                                 .foregroundStyle(verdict == .qualified ? Color.green : Color.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if let signature = store.resultSignatures.first,
+                        if let signature = store.resultAddedSignature,
                            let signingTime = signature.signingTime {
                             detailRow("Čas podpisu", signingTime.formatted(date: .abbreviated, time: .standard))
                         }
-                        if let dataTime = store.resultSignatures.first?.dataTimestamp?.time {
+                        if let dataTime = store.resultAddedSignature?.dataTimestamp?.time {
                             detailRow(SignatureTreePresentation.dataTimestampLabel,
                                       dataTime.formatted(date: .abbreviated, time: .standard))
                         }
-                        if let timestampTime = store.resultSignatures.first?.timestampTime {
+                        if let timestampTime = store.resultAddedSignature?.timestampTime {
                             detailRow(store.lastSignatureContentTimestamped
                                       ? SignatureTreePresentation.signatureTimestampLabel : "Čas pečiatky",
                                       timestampTime.formatted(date: .abbreviated, time: .standard))
                         }
-                        if let detail = store.resultSignatures.first?.detail {
+                        if let detail = store.resultAddedSignature?.detail {
                             detailRow("Validácia", detail)
                         }
                     }
