@@ -56,22 +56,50 @@ final class ClausePresentationRendererTests: XCTestCase {
         let text = Self.text(of: document)
         XCTAssertTrue(text.contains("Čuprík"), text)
         XCTAssertTrue(text.contains("kancelária"), text)
-        for index in 0..<document.pageCount {
-            let page = try XCTUnwrap(document.page(at: index))
-            // The print margins (36 pt) leave the text inside this box; a row WebKit cut at a page
-            // break would reach into the margin or past the page edge.
-            let printable = page.bounds(for: .mediaBox).insetBy(dx: 30, dy: 30)
-            // The last glyph the page draws, i.e. its last line.
-            let last = try XCTUnwrap(
-                (0..<page.numberOfCharacters).reversed().lazy.map { page.characterBounds(at: $0) }.first { !$0.isEmpty },
-                "page \(index + 1) has no text")
-            XCTAssertTrue(printable.contains(last), "page \(index + 1): last character \(last) outside \(printable)")
-            for offset in 0..<page.numberOfCharacters {
-                let glyph = page.characterBounds(at: offset)
-                guard !glyph.isEmpty, !glyph.isNull else { continue }
-                XCTAssertTrue(printable.contains(glyph), "page \(index + 1): glyph \(offset) \(glyph) outside \(printable)")
-            }
-        }
+        try Self.assertTextStaysInsideThePrintableArea(document)
+    }
+
+    /// The official form lays out at fixed widths of up to 900 px; printed as it is, `.fit` shrank
+    /// it to 0.567 and body text to 6.8 pt. With the injected layout CSS it flows within the
+    /// printable width, so labels and values print at 9 pt or more and nothing runs into the margin.
+    @MainActor
+    func testP2EClauseBodyTextIsReadable() async throws {
+        let clause = try Self.p2eClause(finalPDF: Data("%PDF-1.7 readable".utf8))
+        let pdf = try await ClausePresentationRenderer().render(clauseXML: Data(clause.clauseXML.utf8), form: .clause_1_3)
+
+        let document = try XCTUnwrap(PDFDocument(data: pdf))
+        try Self.assertBodyTextIsReadable(document)
+        try Self.assertTextStaysInsideThePrintableArea(document)
+    }
+
+    @MainActor
+    func testLongE2EClauseBodyTextIsReadable() async throws {
+        let clause = try E2EDeliveryBuilder().clause(try Self.e2eModel(signatureCount: 6, timestampCount: 4,
+                                                                        office: Self.longOffice))
+        let pdf = try await ClausePresentationRenderer().render(clauseXML: Data(clause.xml.utf8), form: .clauseE2E_1_3)
+
+        let document = try XCTUnwrap(PDFDocument(data: pdf))
+        try Self.assertBodyTextIsReadable(document)
+    }
+
+    /// A value with no break opportunity (a long file name) must neither run past the page nor
+    /// make the print shrink the whole clause again.
+    @MainActor
+    func testUnbreakableValueStaysReadableAndInsideThePage() async throws {
+        let name = String(repeating: "Dlhy_nazov_dokumentu_bez_medzier_", count: 4) + "koniec.pdf"
+        var attestation = ConversionFormModelTests.attestation()
+        attestation.newDocumentName = name
+        let clause = try ZakoClauseDeliveryBuilder().build(
+            finalPDF: Data("%PDF-1.7 long name".utf8), attestation: attestation,
+            securityElements: [ConversionFormModelTests.scanElement()],
+            originalNonEmptyPageIndices: [0], usedDevice: "Chevron7 v0.5.0")
+        XCTAssertTrue(clause.clauseXML.contains(name))
+        let pdf = try await ClausePresentationRenderer().render(clauseXML: Data(clause.clauseXML.utf8), form: .clause_1_3)
+
+        let document = try XCTUnwrap(PDFDocument(data: pdf))
+        try Self.assertBodyTextIsReadable(document)
+        try Self.assertTextStaysInsideThePrintableArea(document)
+        XCTAssertTrue(Self.text(of: document).filter { !$0.isWhitespace }.contains("koniec.pdf"))
     }
 
     @MainActor
@@ -300,6 +328,49 @@ final class ClausePresentationRendererTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Body text is the size most characters print at (labels and values). The form's own
+    /// footnote (`trochuMensiText`, 0.6em) is smaller by design, so the floor for every glyph is lower.
+    private static func assertBodyTextIsReadable(_ document: PDFDocument,
+                                                 file: StaticString = #filePath, line: UInt = #line) throws {
+        var characters: [CGFloat: Int] = [:]
+        for index in 0..<document.pageCount {
+            guard let text = document.page(at: index)?.attributedString else { continue }
+            text.enumerateAttribute(.font, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+                guard let font = value as? NSFont else { return }
+                let visible = (text.string as NSString).substring(with: range).filter { !$0.isWhitespace }.count
+                characters[(font.pointSize * 10).rounded() / 10, default: 0] += visible
+            }
+        }
+        let body = try XCTUnwrap(characters.max { $0.value < $1.value }?.key, "no text", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(body, 9, "body text \(body) pt; sizes \(characters)", file: file, line: line)
+        let smallest = try XCTUnwrap(characters.keys.min(), file: file, line: line)
+        XCTAssertGreaterThanOrEqual(smallest, 7.5, "smallest text \(smallest) pt; sizes \(characters)",
+                                    file: file, line: line)
+    }
+
+    /// The print margins (36 pt) leave every glyph inside the page inset by 30 pt; a row WebKit cut
+    /// at a page break, or a line wider than the printable width, would reach into the margin.
+    private static func assertTextStaysInsideThePrintableArea(_ document: PDFDocument,
+                                                              file: StaticString = #filePath,
+                                                              line: UInt = #line) throws {
+        for index in 0..<document.pageCount {
+            let page = try XCTUnwrap(document.page(at: index), file: file, line: line)
+            let printable = page.bounds(for: .mediaBox).insetBy(dx: 30, dy: 30)
+            // The last glyph the page draws, i.e. its last line.
+            let last = try XCTUnwrap(
+                (0..<page.numberOfCharacters).reversed().lazy.map { page.characterBounds(at: $0) }.first { !$0.isEmpty },
+                "page \(index + 1) has no text", file: file, line: line)
+            XCTAssertTrue(printable.contains(last), "page \(index + 1): last character \(last) outside \(printable)",
+                          file: file, line: line)
+            for offset in 0..<page.numberOfCharacters {
+                let glyph = page.characterBounds(at: offset)
+                guard !glyph.isEmpty, !glyph.isNull else { continue }
+                XCTAssertTrue(printable.contains(glyph), "page \(index + 1): glyph \(offset) \(glyph) outside \(printable)",
+                              file: file, line: line)
+            }
+        }
+    }
 
     private static func text(of document: PDFDocument) -> String {
         (0..<document.pageCount).compactMap { document.page(at: $0)?.string }.joined(separator: "\n")

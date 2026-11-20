@@ -29,7 +29,16 @@ public struct ClausePresentationRenderer: Sendable {
     /// Print CSS added to the presentation: A4 pages whose margins come from the print info, and
     /// backgrounds printed as the form draws them. No `@page` margin: WebKit lets a CSS `margin:0`
     /// override the print info's 36 pt and then prints up to about 4 pt from the paper edge.
-    public static let printStyle = "<style>@page{size:A4} body{-webkit-print-color-adjust:exact}</style>"
+    ///
+    /// The rest is layout only, never text or order: the form lays out at fixed widths (`.layoutMain`
+    /// 900 px, labels with inline widths up to 870 px, value boxes such as `.sirokyTextBox665px`), so
+    /// `horizontalPagination = .fit` shrank it to about 0.567 and body text (12 px) printed at 6.8 pt.
+    /// Here the page box takes the printable width, no element is wider than its container, and value
+    /// boxes shrink to their text, so a value sits beside its label when both fit and below it
+    /// otherwise; WebKit then prints at its own minimum shrink (0.8), body text at 9.6 pt.
+    public static let printStyle = "<style>@page{size:A4} body{-webkit-print-color-adjust:exact}"
+        + " .layoutMain{width:auto !important} .layoutMain *{max-width:100% !important}"
+        + " .layoutMain .fieldContent,.layoutMain .fieldContent div{width:auto !important}</style>"
 
     /// ISO A4 in points.
     static let paperSize = NSSize(width: 595.2756, height: 841.8898)
