@@ -155,3 +155,9 @@ Zdroje v `~/Desktop/chevron7-test`: B1 = `B1-listina_podpisane.pdf` (PAdES T s Q
 ## Kontrola po 1.21.6 (20. 11. 2026)
 
 - **F15 overené:** `B1-listina_podpisane_podpisane_podpisane.pdf`, zoznam „Podpisy (3)“, všetky tri podpisy platné KEP. Časová pečiatka údajov: podpis 1 19. 11. 2026 22:13:31, podpis 2 20. 11. 2026 06:12:19, podpis 3 20. 11. 2026 07:18:43. Každá je o sekundu staršia než časová pečiatka podpisu, ako má byť.
+
+## E4: obrázok na A4 (1.21.6, 20. 11. 2026)
+
+- `E4-png-xades.asice` (jeden PNG `sample.png`, 628 × 605 px bez údaja o rozlíšení, testovací XAdES podpis s neovereným reťazcom): overenie s potvrdením „nie je možné zistiť“, doložka E→E, autorizácia kartou v Testovacej evidencii, číslo 261120-oV580fC024, EZZK prijalo záznam na spracovanie.
+- Výstup `E4-png-xades (2).asice`: `E4-png-xades.pdf` a `261120-oV580fC024.xml.xdcf`. PDF má jednu stranu A4 na šírku (841,89 × 595,28 pt), lebo obrázok je širší ako vyšší. Obrázok je vložený bez zmeny (628 × 605 px), pri predvolených 150 dpi meria 301,4 × 290,4 pt (asi 106 × 102 mm), je vycentrovaný, nezväčšený a vzpriamený.
+- **Overené.**
