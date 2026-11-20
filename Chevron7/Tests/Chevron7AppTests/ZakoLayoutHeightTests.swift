@@ -33,7 +33,9 @@ final class ZakoLayoutHeightTests: XCTestCase {
         settingsStore.settings.mobileSigningEnabled = true
         let store = ZakoSessionStore(settingsStore: settingsStore)
         store.step = .authorize
-        XCTAssertTrue(store.showsMobileOutsideDemoNotice)
+        // The notice shows until 1. 1. 2027 (the record-first order then refuses the phone and
+        // hides it); the step must fit either way.
+        XCTAssertEqual(store.showsMobileOutsideDemoNotice, store.mobileRefusalForClientOutput == nil)
 
         let size = minimumSize(ZakoFlowView(store: store))
 

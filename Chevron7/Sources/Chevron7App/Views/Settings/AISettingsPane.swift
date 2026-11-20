@@ -96,11 +96,18 @@ struct LearningBankCountsGrid: View {
                         }
                     }
                 }
+                // In the grid's own first columns, so it lines up with the kinds above
+                // instead of floating at the form's trailing edge.
+                GridRow {
+                    Text("Zamietnuté")
+                        .foregroundStyle(.secondary)
+                    Text("\(LearningCardText.rejected(counts: counts))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 14)
+                }
+                .padding(.top, 4)
             }
-            LabeledContent("Zamietnuté") {
-                Text("\(LearningCardText.rejected(counts: counts))").monospacedDigit()
-            }
-            .foregroundStyle(.secondary)
         }
         .font(.callout)
         .accessibilityElement(children: .ignore)

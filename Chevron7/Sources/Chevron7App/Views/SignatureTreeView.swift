@@ -94,7 +94,7 @@ enum SignatureTreePresentation {
         switch state {
         case .valid: "checkmark.seal.fill"
         case .invalid: "xmark.seal.fill"
-        case .indeterminate, .unknown: "questionmark.seal.fill"
+        case .indeterminate, .unknown: "questionmark.diamond.fill"
         }
     }
 }

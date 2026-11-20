@@ -76,6 +76,9 @@ struct ZakoConversionTimeline: Equatable {
 
     let phase: Phase
     let headline: String
+    /// Whether the headline already names the evidence number, so the card under it does not
+    /// say it again.
+    let headlineNamesNumber: Bool
     /// What comes next, or nil when nothing does.
     let line: String?
     let steps: [Step]
@@ -206,7 +209,9 @@ struct ZakoConversionTimeline: Equatable {
         let finishedStep = Step(kind: .finished, title: "Hotovo", state: phase == .done ? .done : .upcoming,
                                 detail: phase == .done ? "výstup pre klienta uložený" : nil)
 
-        return ZakoConversionTimeline(phase: phase, headline: headline, line: line,
+        let namesNumber = number != nil
+            && [.waitingNotSent, .waitingOutcomeUnknown, .waitingSent, .ready, .rejected].contains(phase)
+        return ZakoConversionTimeline(phase: phase, headline: headline, headlineNamesNumber: namesNumber, line: line,
                                       steps: [recordStep, sentStep, processingStep, clauseStep, finishedStep])
     }
 

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Marián Čuprík
 // SPDX-License-Identifier: EUPL-1.2
 
+import AppKit
 import Foundation
 import XCTest
 import Chevron7Kit
@@ -42,6 +43,16 @@ final class SignatureRowModelTests: XCTestCase {
         XCTAssertEqual(SignatureRowModel(bannerRow(verdict: .invalid)).tone, .invalid)
         XCTAssertEqual(SignatureRowModel(bannerRow(verdict: .indeterminate)).tone, .undetermined)
         XCTAssertEqual(SignatureRowModel(bannerRow(verdict: .unknown)).tone, .undetermined)
+    }
+
+    /// An undetermined row once drew no symbol at all: "questionmark.seal.fill" is not an SF Symbol.
+    func testEveryVerdictSymbolExistsAndUndeterminedMatchesTheVerification() {
+        for state in [DocumentSignatureInfo.State.valid, .invalid, .indeterminate, .unknown] {
+            let symbol = SignatureRowModel(bannerRow(verdict: state)).symbol
+            XCTAssertNotNil(NSImage(systemSymbolName: symbol, accessibilityDescription: nil), symbol)
+        }
+        XCTAssertEqual(SignatureTreePresentation.icon(.indeterminate), "questionmark.diamond.fill",
+                       "the same symbol as an undetermined authorization in the E→E verification")
     }
 
     func testBannerFileRowsAreNeutralOrWarnings() {

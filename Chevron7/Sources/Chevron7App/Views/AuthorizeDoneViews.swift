@@ -138,29 +138,10 @@ struct AuthorizeView: View {
     }
 
     private var tokenStatusRow: some View {
-        Group {
-            if store.signingProvider is DemoSigningProvider {
-                Label("Demo režim: kvalifikovaná karta nie je pripojená.",
-                      systemImage: "creditcard.and.123")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if store.identities.isEmpty {
-                Label("Karta nie je detegovaná: vložte eID alebo advokátsky preukaz.",
-                      systemImage: "creditcard.and.123")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if store.isCertificateTypePending {
-                Label("Karta je pripojená. Typ certifikátu sa overí po zadaní PIN.",
-                      systemImage: "creditcard.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Label("Karta je pripojená, certifikáty načítané.",
-                      systemImage: "creditcard.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-        }
+        let status = store.tokenStatus
+        return Label(status.text, systemImage: status.symbol)
+            .font(.caption)
+            .foregroundStyle(status.isWarning ? Color.orange : (status.isReady ? Color.green : Color.secondary))
     }
 
     private func checklistRow(_ item: ZakoChecklistItem) -> some View {
@@ -429,16 +410,7 @@ struct AuthorizeView: View {
         }
     }
 
-    /// The line under the authorize button: why a card is refused, else the remembered PIN note.
-    private var authorizeButtonNote: (text: String, symbol: String, isRefusal: Bool)? {
-        if let refusal = store.authorizeCardRefusal {
-            return (refusal, "creditcard.trianglebadge.exclamationmark", true)
-        }
-        if let pinNote = store.rememberedPINNoteText {
-            return (pinNote, "key.horizontal", false)
-        }
-        return nil
-    }
+    private var authorizeButtonNote: ZakoAuthorizeNote? { store.authorizeButtonNote }
 
     @ViewBuilder
     private var mobileAuthorizeButton: some View {
@@ -651,8 +623,9 @@ struct DoneView: View {
                 .glassCard(cornerRadius: 12, padding: 12)
                 .frame(maxWidth: 520)
             } else {
+                // Plain buttons under the timeline card: a card around one or two buttons
+                // read as a second, empty panel.
                 recordFirstCard
-                    .glassCard(cornerRadius: 12, padding: 12)
                     .frame(maxWidth: 520)
             }
 
@@ -774,7 +747,8 @@ struct DoneView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                if let evidence = store.attestation.evidenceNumber ?? record?.evidenceNumber {
+                if !timeline.headlineNamesNumber,
+                   let evidence = store.attestation.evidenceNumber ?? record?.evidenceNumber {
                     HStack(spacing: 6) {
                         Text("Evidenčné číslo:")
                             .foregroundStyle(.secondary)
@@ -897,7 +871,7 @@ struct DoneView: View {
     /// timeline above says where it stands; this card holds only the actions.
     @ViewBuilder
     private var recordFirstCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .center, spacing: 10) {
             if let warning = store.recordFirstPersistWarning {
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(.caption)

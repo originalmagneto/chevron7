@@ -244,7 +244,19 @@ final class ZakoSessionStore {
     /// EZZK is outside Demo mode: the button (`isMobileSigningAvailable`) hides in that case, so
     /// the view shows this notice instead of nothing.
     var showsMobileOutsideDemoNotice: Bool {
-        settings.mobileSigningEnabled && !settingsStore.ezzkAccountController.isDemoMode
+        Self.showsMobileOutsideDemoNotice(mobileEnabled: settings.mobileSigningEnabled,
+                                          ezzkDemo: settingsStore.ezzkAccountController.isDemoMode,
+                                          direction: direction,
+                                          phoneRefused: mobileRefusalForClientOutput != nil)
+    }
+
+    /// The notice says the phone works in Demo only, so it shows only where Demo would offer
+    /// the phone at all: never for E→E (no phone button in any mode), the order of 1. 1. 2027
+    /// or the one PDF (both refuse the phone in every mode).
+    nonisolated static func showsMobileOutsideDemoNotice(mobileEnabled: Bool, ezzkDemo: Bool,
+                                                         direction: ConversionDirection,
+                                                         phoneRefused: Bool) -> Bool {
+        mobileEnabled && !ezzkDemo && direction != .electronicToElectronic && !phoneRefused
     }
 
     /// Preflight for the mobile path: the certificate is known only after the phone

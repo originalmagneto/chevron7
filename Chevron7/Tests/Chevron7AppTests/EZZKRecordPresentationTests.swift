@@ -218,6 +218,22 @@ final class EZZKRecordPresentationTests: XCTestCase {
         XCTAssertEqual(EvidenceRegisterDetail.timeline(for: row(.outcomeUnknown)).map(\.done), [true, true, false, false])
     }
 
+    func testDetailOfARecordWhoseClauseWaitsSaysSoInTimelineAndState() {
+        let processed = row(.processed)
+        let stages = EvidenceRegisterDetail.timeline(for: processed, pendingStage: .signingClientContainer)
+        XCTAssertEqual(stages.map(\.label).last, "Podpis doložky")
+        XCTAssertEqual(stages.map(\.done), [true, true, true, true, false], "the conversion is not complete yet")
+
+        let facts = Dictionary(uniqueKeysWithValues: EvidenceRegisterDetail
+            .submissionFacts(for: processed, pendingStage: .signingClientContainer).map { ($0.label, $0.value) })
+        XCTAssertEqual(facts["Stav"], "Čaká na podpis doložky")
+
+        let plain = Dictionary(uniqueKeysWithValues: EvidenceRegisterDetail.submissionFacts(for: processed)
+            .map { ($0.label, $0.value) })
+        XCTAssertEqual(plain["Stav"], UXLabels.evidenceStatusLabel(for: .processed))
+        XCTAssertEqual(EvidenceRegisterDetail.timeline(for: processed).count, 4)
+    }
+
     func testDetailFactsShowTheSubmission() {
         var record = row(.rejected)
         record.submittedAt = now

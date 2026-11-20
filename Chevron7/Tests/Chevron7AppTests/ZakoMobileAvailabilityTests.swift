@@ -38,7 +38,9 @@ final class ZakoMobileAvailabilityTests: XCTestCase {
         settingsStore.settings.mobileSigningEnabled = true
         let store = ZakoSessionStore(settingsStore: settingsStore)
 
-        XCTAssertTrue(store.showsMobileOutsideDemoNotice)
+        // By the clock: from 1. 1. 2027 the record-first order refuses the phone in every mode,
+        // so the notice (which says Demo offers it) hides then.
+        XCTAssertEqual(store.showsMobileOutsideDemoNotice, store.mobileRefusalForClientOutput == nil)
     }
 
     /// In Demo the phone button itself is available (or the card path is the only one, but

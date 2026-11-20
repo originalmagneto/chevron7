@@ -54,6 +54,22 @@ final class ZakoVerificationVerdictTests: XCTestCase {
         XCTAssertEqual(verdict([bare, bare])?.sentence, "Všetky podpisy sú platné.")
     }
 
+    func testGateCardOnlyForRefusalsWarningsAndConfirmations() throws {
+        let valid = try authorization()
+        var decided = original!
+        decided.authorizations = [valid, valid]
+        let ready = E2EVerificationGate.decide(decided)
+        XCTAssertEqual(ready, .ready)
+        XCTAssertFalse(ZakoVerificationPresentation.showsGateCard(decision: ready, recordFirstRefused: false),
+                       "the verdict line says all is valid; no second card repeats it")
+        XCTAssertTrue(ZakoVerificationPresentation.showsGateCard(decision: ready, recordFirstRefused: true))
+        XCTAssertTrue(ZakoVerificationPresentation.showsGateCard(decision: .blocked("x"),
+                                                                 recordFirstRefused: false))
+        XCTAssertTrue(ZakoVerificationPresentation.showsGateCard(decision: .needsConfirmation([valid]),
+                                                                 recordFirstRefused: false))
+        XCTAssertFalse(ZakoVerificationPresentation.showsGateCard(decision: nil, recordFirstRefused: true))
+    }
+
     func testUndeterminedAsksForConfirmation() throws {
         let valid = try authorization()
         let unknown = try authorization { $0.state = .undetermined }

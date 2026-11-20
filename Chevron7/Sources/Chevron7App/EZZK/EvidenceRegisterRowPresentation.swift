@@ -39,6 +39,14 @@ struct EvidenceRegisterRowPresentation: Equatable {
         canFinish = Self.canFinish(pendingStage: pendingStage)
     }
 
+    /// The state as the table cell says it: beside "Dokončiť" the cell is narrow, so the
+    /// waiting clause reads "Čaká na doložku" (the full label stays in the help tag).
+    var tableStatusLabel: String {
+        canFinish ? Self.finishableShortLabel : status.label
+    }
+
+    static let finishableShortLabel = "Čaká na doložku"
+
     /// The same condition as the detail footer's "Dokončiť konverziu".
     static func canFinish(pendingStage: RecordFirstPending.Stage?) -> Bool {
         pendingStage == .signingClientContainer

@@ -57,6 +57,25 @@ final class ZakoConversionTimelineTests: XCTestCase {
         XCTAssertEqual(state(result, .finished), .upcoming)
     }
 
+    func testHeadlineNamesTheNumberOnlyWhileWaitingReadyOrRejected() {
+        let waiting = timeline(row(.acceptedForProcessing))
+        XCTAssertTrue(waiting.headlineNamesNumber)
+        XCTAssertTrue(waiting.headline.contains("1563-261120-1"))
+        XCTAssertTrue(timeline(row(.processed), stage: .signingClientContainer).headlineNamesNumber)
+
+        let done = timeline(row(.processed), stage: nil, delivered: true, withPending: false)
+        XCTAssertEqual(done.phase, .done)
+        XCTAssertFalse(done.headlineNamesNumber, "the done headline has no number, so the card keeps it")
+        XCTAssertFalse(done.headline.contains("1563-261120-1"))
+    }
+
+    func testClauseStepHasNoTimeLineWithoutASignatureTime() {
+        let done = timeline(row(.processed), stage: nil, delivered: true, withPending: false)
+        XCTAssertNil(detail(done, .clauseSigning))
+        let timed = timeline(row(.processed), stage: nil, delivered: true, clauseSignedAt: now, withPending: false)
+        XCTAssertEqual(detail(timed, .clauseSigning), ZakoConversionTimeline.timeText(now, now: now))
+    }
+
     func testFailedOrLateSendNeedsAttentionNotSent() {
         XCTAssertEqual(state(timeline(row(.submissionFailed, submitted: false)), .sent), .attention)
         XCTAssertEqual(state(timeline(row(.late, submitted: false)), .sent), .attention)

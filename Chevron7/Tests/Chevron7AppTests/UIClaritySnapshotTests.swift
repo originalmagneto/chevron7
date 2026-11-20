@@ -176,9 +176,11 @@ final class UIClaritySnapshotTests: XCTestCase {
                                  reviewedAt: Date(), detectorVersion: "snapshot"))
         }
         let size = NSSize(width: 680, height: 600)
-        // The window itself, as the app opens it (its report loads in a `.task`).
-        render(DetectorTrainingView(settingsStore: settingsStore), named: "5a0-detector-training-window",
-               scheme: .light, to: output, size: size, settle: 2.0)
+        // The window itself, as the app opens it. Its report loads in a `.task` whose main-actor
+        // continuations cannot run inside `RunLoop.main.run` (this test is itself a main-actor
+        // job), so this render yields with `Task.sleep` instead of spinning the run loop.
+        await renderYielding(DetectorTrainingView(settingsStore: settingsStore),
+                             named: "5a0-detector-training-window", scheme: .light, to: output, size: size)
 
         // The same chrome around the overview built from the same pages, so the overview
         // renders whether or not the window's own load finished in the snapshot.
@@ -355,6 +357,29 @@ final class UIClaritySnapshotTests: XCTestCase {
             clientTimestampServers: nil, clientTSAURL: nil)
         pending.recordSignedAt = signedAt
         return pending
+    }
+
+    /// `render`, but settling by suspending the test, so the view's own `.task` work can finish.
+    private func renderYielding<V: View>(_ view: V, named name: String, scheme: Scheme, to directory: URL,
+                                         size: NSSize, settle: Duration = .seconds(2)) async {
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = scheme.appearance
+        host.appearance = scheme.appearance
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        try? await Task.sleep(for: settle)
+        host.layoutSubtreeIfNeeded()
+        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        scheme.appearance?.performAsCurrentDrawingAppearance {
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+        }
+        let url = directory.appendingPathComponent("\(name)-\(scheme.suffix).png")
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        window.contentView = nil
+        window.close()
     }
 
     private func render<V: View>(_ view: V, named name: String, scheme: Scheme, to directory: URL,

@@ -8,9 +8,9 @@ import SwiftUI
 /// effect) is never mistaken for a real one. Pure values, tested without SwiftUI.
 enum EZZKEnvironmentBadgeModel {
     enum Form: Equatable {
-        /// Sidebar rows: "Skúšobný", "Test"; production says nothing.
+        /// Sidebar rows and the Register's number column: "Skúšobný", "Test"; production says nothing.
         case short
-        /// Lists such as the Register: the full name; production says nothing.
+        /// Lists with room for the full name; production says nothing.
         case list
         /// Where the environment is the subject (the ZaKo header): production is named too.
         case subject

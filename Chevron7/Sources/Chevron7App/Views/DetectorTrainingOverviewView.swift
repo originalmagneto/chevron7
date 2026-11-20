@@ -105,12 +105,15 @@ struct DetectorTrainingOverviewView: View {
             Spacer(minLength: 6)
             Text(row.countText)
                 .font(.callout.monospacedDigit())
-            Label {
-                Text(row.stateText)
-            } icon: {
-                Image(systemName: row.isEnough ? "checkmark" : "minus")
+            // A missing count after a middle dot: the "minus" symbol read as a dash.
+            Group {
+                if row.isEnough {
+                    Label(row.stateText, systemImage: "checkmark")
+                        .labelStyle(.titleAndIcon)
+                } else {
+                    Text("· \(row.stateText)")
+                }
             }
-            .labelStyle(.titleAndIcon)
             .font(.caption)
             .foregroundStyle(row.isEnough ? Color.green : Color.secondary)
             .frame(width: 74, alignment: .leading)

@@ -314,21 +314,33 @@ enum EvidenceRegisterDetail {
 
     static let recordContainerMissingMessage = "Podpísaný záznam o konverzii sa v Registri nenašiel."
 
-    static func timeline(for record: EvidenceRecord) -> [Stage] {
+    /// The stages above the detail. A record-first conversion still waiting in the background
+    /// (`pendingStage`) gets a last "Podpis doložky" stage, not done, so a processed record never
+    /// reads as a finished conversion while its clause waits.
+    static func timeline(for record: EvidenceRecord, pendingStage: RecordFirstPending.Stage? = nil) -> [Stage] {
         let status = record.status
-        return [
+        var stages = [
             Stage(label: "Evidenčné číslo", done: record.evidenceNumber != nil, failed: false),
             Stage(label: "Autorizácia KEP", done: status.progressIndex >= 3, failed: false),
             Stage(label: "Záznam v EZZK", done: EZZKRecordPresentation.isSent(status),
                   failed: EZZKRecordPresentation.isFailed(status) || status == .recordUnsigned),
             Stage(label: "Spracovaný", done: status == .processed || status == .submitted, failed: false)
         ]
+        if pendingStage != nil {
+            stages.append(Stage(label: "Podpis doložky", done: false, failed: false))
+        }
+        return stages
     }
 
-    /// State, mode and whatever the row knows about its submission (nothing it lacks).
-    static func submissionFacts(for record: EvidenceRecord) -> [Fact] {
+    /// State, mode and whatever the row knows about its submission (nothing it lacks). A
+    /// record-first conversion waiting in the background names that state, as the header does.
+    static func submissionFacts(for record: EvidenceRecord,
+                                pendingStage: RecordFirstPending.Stage? = nil) -> [Fact] {
+        let waiting = pendingStage.flatMap {
+            RecordFirstPendingPresentation.state(stage: $0, rowStatus: record.status)
+        }
         var facts = [
-            Fact(label: "Stav", value: UXLabels.evidenceStatusLabel(for: record.status)),
+            Fact(label: "Stav", value: waiting?.label ?? UXLabels.evidenceStatusLabel(for: record.status)),
             Fact(label: "Režim EZZK", value: record.ezzkMode?.label ?? "neuvedený")
         ]
         if let submittedAt = record.submittedAt {

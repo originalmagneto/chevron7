@@ -30,8 +30,10 @@ struct EvidenceDashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The separator sits on the bar: as a sibling between the bar and the table it had
+            // nothing opaque behind it and drew as a bright line in dark mode.
             summaryHeader
-            Divider().opacity(0.5)
+                .overlay(alignment: .bottom) { Divider() }
 
             if let loadError = settingsStore.evidenceStore.loadError {
                 // Never an empty register over one that could not be read.
@@ -53,11 +55,13 @@ struct EvidenceDashboardView: View {
                             if record.isOverdue, record.ezzkMode != .demo { OverdueDot() }
                             Text(record.evidenceNumber ?? "nezískané")
                                 .font(.callout.monospacedDigit().weight(.semibold))
-                            EZZKEnvironmentBadge(mode: record.ezzkMode, form: .list)
+                            // The short form: the full name took the number's room and
+                            // truncated it. The badge's help says the environment in full.
+                            EZZKEnvironmentBadge(mode: record.ezzkMode, form: .short)
                         }
                         .contextMenu { recordContextMenu(for: record) }
                     }
-                    .width(min: 130, ideal: 240)
+                    .width(min: 200, ideal: 250)
 
                     TableColumn("Stav") { record in
                         statusCell(record)
@@ -91,7 +95,7 @@ struct EvidenceDashboardView: View {
                     }
                     .width(min: 120, ideal: 140)
 
-                    TableColumn("Pôvodný dokument") { record in
+                    TableColumn("Dokument") { record in
                         Text(record.originalName).lineLimit(1)
                             .help(record.originalName)
                             .contextMenu { recordContextMenu(for: record) }
@@ -354,10 +358,11 @@ struct EvidenceDashboardView: View {
                                                       .pending(id: record.id)?.stage,
                                                   now: Date())
         return HStack(spacing: 6) {
-            Label(row.status.label, systemImage: row.status.symbol)
+            Label(row.tableStatusLabel, systemImage: row.status.symbol)
                 .foregroundStyle(Self.tint(for: row.status.tone))
                 .lineLimit(1)
                 .help(row.status.label)
+                .accessibilityLabel(row.status.label)
             if row.canFinish {
                 Spacer(minLength: 0)
                 Button("Dokončiť") {
@@ -644,7 +649,8 @@ struct RecordDetailView: View {
 
     private func overview(_ record: EvidenceRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            StatusTimeline(stages: EvidenceRegisterDetail.timeline(for: record)
+            StatusTimeline(stages: EvidenceRegisterDetail.timeline(
+                for: record, pendingStage: settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage)
                 .map { (label: $0.label, done: $0.done, failed: $0.failed) })
             submissionCard(record)
             factsGrid(record)
@@ -691,7 +697,9 @@ struct RecordDetailView: View {
         let verifyWaitsUntil = record.status == .outcomeUnknown ? nextCheck.flatMap { $0 > Date() ? $0 : nil } : nil
         return VStack(alignment: .leading, spacing: 10) {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                ForEach(EvidenceRegisterDetail.submissionFacts(for: record), id: \.label) { fact in
+                ForEach(EvidenceRegisterDetail.submissionFacts(
+                    for: record, pendingStage: settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage),
+                    id: \.label) { fact in
                     GridRow {
                         Text(fact.label).foregroundStyle(.secondary)
                         Text(fact.value).textSelection(.enabled)

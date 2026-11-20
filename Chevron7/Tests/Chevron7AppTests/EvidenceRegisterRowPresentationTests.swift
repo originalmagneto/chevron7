@@ -86,6 +86,7 @@ final class EvidenceRegisterRowPresentationTests: XCTestCase {
                                                     now: now)
         XCTAssertTrue(ready.canFinish)
         XCTAssertEqual(ready.status.label, "Čaká na podpis doložky")
+        XCTAssertEqual(ready.tableStatusLabel, "Čaká na doložku", "short beside the Dokončiť button")
     }
 
     func testStatusFallsBackToTheRowState() {
@@ -93,6 +94,7 @@ final class EvidenceRegisterRowPresentationTests: XCTestCase {
         XCTAssertEqual(plain.status.label, UXLabels.evidenceStatusLabel(for: .processed))
         XCTAssertEqual(plain.status.tone, .success)
         XCTAssertFalse(plain.canFinish)
+        XCTAssertEqual(plain.tableStatusLabel, plain.status.label)
     }
 
     func testSummaryTilesAreShortAndDemoOnlyWhenPresent() {

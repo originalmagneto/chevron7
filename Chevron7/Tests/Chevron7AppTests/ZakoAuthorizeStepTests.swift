@@ -76,14 +76,23 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         }
     }
 
-    func testCardItemsSayTheyComeFromTheCard() throws {
+    func testCardItemsAskForTheCardOrSayTheyComeFromIt() throws {
         let store = try makeStore()
         store.isLoadedPendingConversion = false
 
+        // An empty reader: the hint asks for the card.
+        XCTAssertEqual(store.mandateGate, .insertCard)
         let mandate = try XCTUnwrap(store.authorizeChecklist.items.first { $0.title == "Mandátny certifikát SAK pripravený" })
-
         XCTAssertFalse(mandate.met)
-        XCTAssertEqual(mandate.hint, "Načíta sa z karty pri autorizácii.")
+        XCTAssertEqual(mandate.hint, "Vložte kartu s mandátnym certifikátom SAK.")
+
+        // A card still to be unlocked: its certificates come at authorization.
+        store.identities = [Self.synthetic]
+        XCTAssertEqual(store.mandateGate, .needsUnlock)
+        let unlocked = try XCTUnwrap(store.authorizeChecklist.items.first { $0.title == "Mandátny certifikát SAK pripravený" })
+        XCTAssertEqual(unlocked.hint, "Načíta sa z karty pri autorizácii.")
+
+        XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .noMandate), ZakoSessionStore.authorizeNoMandateReason)
     }
 
     // MARK: A card without a mandate
@@ -95,7 +104,8 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         store.refreshMandateCardState()
 
         XCTAssertEqual(store.mandateGate, .noMandate)
-        XCTAssertEqual(store.authorizeCardRefusal, "Vložte kartu s mandátnym certifikátom SAK.")
+        XCTAssertEqual(store.authorizeCardRefusal,
+                       "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom.")
         XCTAssertFalse(store.canBeginAuthorization)
 
         await store.beginAuthorization()
@@ -122,6 +132,58 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         XCTAssertEqual(store.mandateGate, .ready(label: Self.mandate.label))
         XCTAssertTrue(store.canBeginAuthorization)
         XCTAssertNil(store.authorizeCardRefusal)
+    }
+
+    // MARK: Wording for a card without a mandate
+
+    func testTokenStatusWarnsWhenTheCardHoldsNoMandate() {
+        let refused = ZakoTokenStatus.make(isDemo: false, hasIdentities: true, certificateTypePending: false,
+                                           gate: .noMandate)
+        XCTAssertEqual(refused, .noMandate)
+        XCTAssertTrue(refused.isWarning)
+        XCTAssertFalse(refused.isReady, "never the green line while the card is refused")
+        XCTAssertEqual(refused.text, "Na vloženej karte nie je mandátny certifikát SAK.")
+
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: false, hasIdentities: true, certificateTypePending: false,
+                                            gate: .ready(label: "M")), .loaded)
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: false, hasIdentities: false, certificateTypePending: false,
+                                            gate: .insertCard), .noCard)
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: false, hasIdentities: true, certificateTypePending: true,
+                                            gate: .needsUnlock), .typePending)
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: true, hasIdentities: false, certificateTypePending: false,
+                                            gate: .notRequired), .demo)
+    }
+
+    func testRefusalNamesTheInsertedCardOnlyWhenOneIsIn() {
+        XCTAssertEqual(ZakoSessionStore.authorizeCardRefusal(for: .noMandate),
+                       "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom.")
+        XCTAssertNil(ZakoSessionStore.authorizeCardRefusal(for: .insertCard), "an empty reader is asked for by the flow")
+        XCTAssertNil(ZakoSessionStore.authorizeCardRefusal(for: .needsUnlock))
+    }
+
+    func testButtonNoteHidesWhileTheCardIsChecked() {
+        let refusal = ZakoSessionStore.authorizeNoMandateReason
+        XCTAssertNil(ZakoSessionStore.authorizeButtonNote(cardRefusal: refusal, rememberedPINNote: nil,
+                                                          checkingCard: true))
+        let note = ZakoSessionStore.authorizeButtonNote(cardRefusal: refusal, rememberedPINNote: "PIN",
+                                                        checkingCard: false)
+        XCTAssertEqual(note?.text, refusal)
+        XCTAssertEqual(note?.isRefusal, true)
+        XCTAssertEqual(ZakoSessionStore.authorizeButtonNote(cardRefusal: nil, rememberedPINNote: "PIN",
+                                                            checkingCard: false)?.isRefusal, false)
+    }
+
+    func testPhoneNoticeOnlyWhereDemoWouldOfferThePhone() {
+        XCTAssertTrue(ZakoSessionStore.showsMobileOutsideDemoNotice(mobileEnabled: true, ezzkDemo: false,
+                                                                     direction: .paperToElectronic, phoneRefused: false))
+        XCTAssertFalse(ZakoSessionStore.showsMobileOutsideDemoNotice(mobileEnabled: true, ezzkDemo: false,
+                                                                      direction: .electronicToElectronic,
+                                                                      phoneRefused: false), "E→E never offers the phone")
+        XCTAssertFalse(ZakoSessionStore.showsMobileOutsideDemoNotice(mobileEnabled: true, ezzkDemo: false,
+                                                                      direction: .paperToElectronic, phoneRefused: true),
+                       "the 2027 order and the one PDF refuse the phone in every mode")
+        XCTAssertFalse(ZakoSessionStore.showsMobileOutsideDemoNotice(mobileEnabled: true, ezzkDemo: true,
+                                                                      direction: .paperToElectronic, phoneRefused: false))
     }
 
     // MARK: The error clears when the card changes

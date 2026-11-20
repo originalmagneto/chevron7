@@ -177,7 +177,15 @@ struct ZakoVerificationView: View {
     /// One line that says whether the conversion may go on, in the gate's own words.
     @ViewBuilder
     private func verdictCard(_ original: ElectronicOriginal) -> some View {
-        if let refusal = store.e2eRecordFirstRefusal, store.e2eDecision != nil {
+        if !ZakoVerificationPresentation.showsGateCard(decision: store.e2eDecision,
+                                                       recordFirstRefused: store.e2eRecordFirstRefusal != nil) {
+            // The verdict line above already says that everything is valid: no second card
+            // repeating it, only what happens with the facts.
+            Text(ZakoVerificationPresentation.recordedFactsNote)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let refusal = store.e2eRecordFirstRefusal {
             ZakoNotice(title: "Konverziu nemožno vykonať postupom od 1. 1. 2027", message: refusal, tone: .failure)
         } else {
             decisionCard(original)
@@ -202,17 +210,7 @@ struct ZakoVerificationView: View {
                 }
             }
         case .ready, .none:
-            ZakoNotice(title: verdictTitle(original),
-                       message: "Údaje o podpisoch, ich overení a časových pečiatkach sa zapíšu do doložky aj záznamu.",
-                       tone: .success)
-        }
-    }
-
-    private func verdictTitle(_ original: ElectronicOriginal) -> String {
-        switch original.authorizations.count {
-        case 1: return "Podpis klienta je platný"
-        case 2: return "Oba podpisy sú platné"
-        default: return "Všetky podpisy (\(original.authorizations.count)) sú platné"
+            EmptyView()
         }
     }
 
@@ -909,6 +907,19 @@ enum ZakoVerificationPresentation {
     struct Verdict: Equatable {
         let sentence: String
         let tone: ZakoNotice.Tone
+    }
+
+    static let recordedFactsNote =
+        "Údaje o podpisoch, ich overení a časových pečiatkach sa zapíšu do doložky aj záznamu."
+
+    /// Whether the gate shows a card of its own under the verdict line: only for a refusal, a
+    /// warning or a confirmation. When everything is valid the verdict line says it alone.
+    static func showsGateCard(decision: E2EVerificationGate.Decision?, recordFirstRefused: Bool) -> Bool {
+        if recordFirstRefused, decision != nil { return true }
+        switch decision {
+        case .blocked, .needsConfirmation: return true
+        case .ready, .none: return false
+        }
     }
 
     static func verdict(decision: E2EVerificationGate.Decision?,

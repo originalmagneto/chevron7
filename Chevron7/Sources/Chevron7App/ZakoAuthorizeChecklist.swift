@@ -27,6 +27,53 @@ struct ZakoChecklistItem: Equatable, Identifiable {
     var id: String { title }
 }
 
+/// The line under the authorize button.
+struct ZakoAuthorizeNote: Equatable {
+    let text: String
+    let symbol: String
+    let isRefusal: Bool
+}
+
+/// The card line above the authorize checklist. Pure value: the view only draws it.
+enum ZakoTokenStatus: Equatable {
+    case demo
+    case noCard
+    case typePending
+    /// A card is in, but it holds no mandate certificate: a warning, never a green line.
+    case noMandate
+    case loaded
+
+    static func make(isDemo: Bool, hasIdentities: Bool, certificateTypePending: Bool,
+                     gate: ZakoMandateGate) -> ZakoTokenStatus {
+        if isDemo { return .demo }
+        if gate == .noMandate { return .noMandate }
+        if !hasIdentities { return .noCard }
+        if certificateTypePending { return .typePending }
+        return .loaded
+    }
+
+    var text: String {
+        switch self {
+        case .demo: "Demo režim: kvalifikovaná karta nie je pripojená."
+        case .noCard: "Karta nie je detegovaná: vložte eID alebo advokátsky preukaz."
+        case .typePending: "Karta je pripojená. Typ certifikátu sa overí po zadaní PIN."
+        case .noMandate: "Na vloženej karte nie je mandátny certifikát SAK."
+        case .loaded: "Karta je pripojená, certifikáty načítané."
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .demo, .noCard: "creditcard.and.123"
+        case .typePending, .loaded: "creditcard.fill"
+        case .noMandate: "creditcard.trianglebadge.exclamationmark"
+        }
+    }
+
+    var isWarning: Bool { self == .noMandate }
+    var isReady: Bool { self == .loaded }
+}
+
 /// The checklist as the authorize step shows it: met items fold into one row
 /// ("N z M pripravené"), unmet items stay visible one by one with their hint.
 struct ZakoChecklistSummary: Equatable {
@@ -41,17 +88,50 @@ struct ZakoChecklistSummary: Equatable {
 }
 
 extension ZakoSessionStore {
-    /// Shown under the authorize button when the card in the reader is known to hold no mandate
-    /// certificate: the button is off, so the card check never starts.
-    nonisolated static let authorizeNoMandateReason = "Vložte kartu s mandátnym certifikátom SAK."
+    /// Shown under the authorize button and as the checklist hint when a card is in the reader
+    /// but holds no mandate certificate: the button is off, so the card check never starts.
+    nonisolated static let authorizeNoMandateReason =
+        "Na vloženej karte nie je mandátny certifikát SAK. Vložte kartu advokáta s mandátnym certifikátom."
 
     /// Shown under the authorize button when the next authorization uses the PIN typed earlier.
     nonisolated static let rememberedPINMessage =
         "Použije sa PIN zadaný skôr. Aplikácia ho drží do zatvorenia alebo vybratia karty."
 
-    /// Why the authorize button is off because of the card itself, or nil.
+    /// Why the authorize button is off because of the card itself, or nil. Only a card that is
+    /// in the reader and known to lack the mandate refuses; an empty reader keeps the button
+    /// live, since the card flow asks for the card itself.
+    nonisolated static func authorizeCardRefusal(for gate: ZakoMandateGate) -> String? {
+        gate == .noMandate ? authorizeNoMandateReason : nil
+    }
+
     var authorizeCardRefusal: String? {
-        mandateGate == .noMandate ? Self.authorizeNoMandateReason : nil
+        Self.authorizeCardRefusal(for: mandateGate)
+    }
+
+    /// The line under the authorize button: why a card is refused, else the remembered PIN
+    /// note; nothing while the card check runs, since that check is what decides.
+    nonisolated static func authorizeButtonNote(cardRefusal: String?, rememberedPINNote: String?,
+                                                checkingCard: Bool) -> ZakoAuthorizeNote? {
+        guard !checkingCard else { return nil }
+        if let cardRefusal {
+            return ZakoAuthorizeNote(text: cardRefusal, symbol: "creditcard.trianglebadge.exclamationmark",
+                                     isRefusal: true)
+        }
+        if let rememberedPINNote {
+            return ZakoAuthorizeNote(text: rememberedPINNote, symbol: "key.horizontal", isRefusal: false)
+        }
+        return nil
+    }
+
+    var authorizeButtonNote: ZakoAuthorizeNote? {
+        Self.authorizeButtonNote(cardRefusal: authorizeCardRefusal, rememberedPINNote: rememberedPINNoteText,
+                                 checkingCard: cardPrompt == .checkingCard)
+    }
+
+    /// The card line above the checklist.
+    var tokenStatus: ZakoTokenStatus {
+        ZakoTokenStatus.make(isDemo: signingProvider is DemoSigningProvider, hasIdentities: !identities.isEmpty,
+                             certificateTypePending: isCertificateTypePending, gate: mandateGate)
     }
 
     /// A card flow is running ("Kontrolujem kartu…", the PIN or the card prompt): the step's
@@ -80,8 +160,21 @@ extension ZakoSessionStore {
         return ZakoChecklistSummary(items: items + ezzkChecklistItems)
     }
 
+    /// The hint of the card items: a card without the mandate is named as such, an empty
+    /// reader asks for the card, and a card still to be unlocked is read at authorization.
+    nonisolated static let insertMandateCardHint = "Vložte kartu s mandátnym certifikátom SAK."
+    nonisolated static let readAtAuthorizationHint = "Načíta sa z karty pri autorizácii."
+
+    nonisolated static func cardItemHint(for gate: ZakoMandateGate) -> String {
+        switch gate {
+        case .noMandate: authorizeNoMandateReason
+        case .insertCard: insertMandateCardHint
+        case .notRequired, .ready, .needsUnlock: readAtAuthorizationHint
+        }
+    }
+
     private var cardItemHint: String {
-        authorizeCardRefusal ?? "Načíta sa z karty pri autorizácii."
+        Self.cardItemHint(for: mandateGate)
     }
 
     private var identityChecklistItem: ZakoChecklistItem {
@@ -205,7 +298,7 @@ extension ZakoSessionStore {
                               hint: "Podrobnosti sú v správe o podpisoch nižšie.")
         case .unknown:
             ZakoChecklistItem(met: false, title: "Vstupné podpisy sa nepodarilo jednoznačne overiť",
-                              symbol: "questionmark.seal", hint: "Podrobnosti sú v správe o podpisoch nižšie.")
+                              symbol: "questionmark.diamond", hint: "Podrobnosti sú v správe o podpisoch nižšie.")
         case .unavailable:
             ZakoChecklistItem(met: false, title: "Overenie vstupných podpisov nie je dostupné",
                               symbol: "exclamationmark.triangle", hint: "Podrobnosti sú v správe o podpisoch nižšie.")
