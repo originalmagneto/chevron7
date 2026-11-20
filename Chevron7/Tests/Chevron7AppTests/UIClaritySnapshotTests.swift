@@ -50,7 +50,74 @@ final class UIClaritySnapshotTests: XCTestCase {
         store.cardPrompt = nil
     }
 
+    // MARK: 1c. Authorize step: preview beside the certificate, at every size
+
+    /// The owner's window (1775 x 1113 with the sidebar), the content area he sees (about 1500),
+    /// the default render size, and the small sizes the layout guards measure.
+    private static let authorizeSizes: [(String, NSSize)] = [
+        ("1775x1113", NSSize(width: 1775, height: 1113)),
+        ("1500x1000", NSSize(width: 1500, height: 1000)),
+        ("1200x800", NSSize(width: 1200, height: 800)),
+        ("900x640", NSSize(width: 900, height: 640)),
+        ("1000x300", NSSize(width: 1000, height: 300)),
+        ("520x640", NSSize(width: 520, height: 640)),
+    ]
+
+    func testRenderAuthorizeLayoutSizes() async throws {
+        let output = try requireOutput()
+        let store = try await makeE2EStore(identities: [
+            SigningIdentityInfo(id: "card", label: "JUDr. Ján Testovací - OPRÁVNENIE", issuerSummary: "I.CA Qualified 2 CA/RSA 02/2016",
+                                isMandateCertificate: true, isQualified: true),
+            SigningIdentityInfo(id: "eid", label: "Ján Testovací (eID)", issuerSummary: "Disig Qualified CA 2026",
+                                isMandateCertificate: false, isQualified: true),
+        ])
+        store.readMandateCardState = { .noCard }
+        store.attestation.originalDocumentTypeLabel = "Zmluva"
+        store.step = .authorize
+        await store.refreshIdentities()
+        for clientOutput in [AppSettings.ZakoClientOutput.asicContainer, .singlePDF] {
+            store.settingsStore.settings.zakoClientOutput = clientOutput
+            let suffix = clientOutput == .singlePDF ? "pdf" : "asice"
+            for (label, size) in Self.authorizeSizes where clientOutput == .asicContainer || label == "1775x1113" {
+                for scheme in Scheme.allCases where scheme == .light || label == "1775x1113" {
+                    render(ZakoFlowView(store: store), named: "7a-authorize-\(suffix)-\(label)", scheme: scheme,
+                           to: output, size: size)
+                }
+            }
+        }
+        store.settingsStore.settings.zakoClientOutput = .asicContainer
+    }
+
+    func testRenderLoadedPendingAuthorize() async throws {
+        let output = try requireOutput()
+        let settingsStore = makeSettingsStore(ezzkAccountController: signedInController())
+        let store = ZakoSessionStore(settingsStore: settingsStore,
+                                     exampleBank: ExampleBank(directory: makeTemporaryDirectory("clarity-loaded-bank")))
+        store.attestation.evidenceNumber = "261120-TEST000001"
+        store.attestation.evidenceNumberMode = .test
+        let signedAt = Date().addingTimeInterval(-40 * 60)
+        let id = store.currentRecordID
+        var row = record(id: id, name: "Zmluva o diele.pdf", number: "261120-TEST000001", mode: .test,
+                         status: .processed, recordFirst: true, created: signedAt, output: .singlePDF)
+        row.submittedAt = signedAt.addingTimeInterval(20)
+        settingsStore.evidenceStore.upsert(row)
+        store.attachRecordFirstPending(pending(id: id, attestation: store.attestation, stage: .signingClientContainer,
+                                               signedAt: signedAt, output: .singlePDF))
+        store.isLoadedPendingConversion = true
+        store.step = .authorize
+        for (label, size) in [("1775x1113", NSSize(width: 1775, height: 1113)), ("900x640", NSSize(width: 900, height: 640))] {
+            render(ZakoFlowView(store: store), named: "7b-authorize-loaded-pending-\(label)", scheme: .light,
+                   to: output, size: size)
+        }
+    }
+
     // MARK: 2. Record-first done step
+
+    private static let doneSizes: [(String, NSSize)] = [
+        ("1775x1113", NSSize(width: 1775, height: 1113)),
+        ("700x640", NSSize(width: 700, height: 640)),
+        ("1000x300", NSSize(width: 1000, height: 300)),
+    ]
 
     func testRenderRecordFirstDoneStates() async throws {
         let output = try requireOutput()
@@ -73,6 +140,10 @@ final class UIClaritySnapshotTests: XCTestCase {
         for scheme in Scheme.allCases {
             render(ZakoFlowView(store: store), named: "2a-done-waiting-for-ezzk", scheme: scheme, to: output)
         }
+        for (label, size) in Self.doneSizes {
+            render(ZakoFlowView(store: store), named: "2a-done-waiting-for-ezzk-\(label)", scheme: .light,
+                   to: output, size: size)
+        }
 
         row.status = .processed
         row.ezzkResultCode = 1
@@ -82,12 +153,20 @@ final class UIClaritySnapshotTests: XCTestCase {
         store.attachRecordFirstPending(pending(id: id, attestation: store.attestation, stage: .signingClientContainer,
                                                signedAt: signedAt))
         render(ZakoFlowView(store: store), named: "2b-done-ready-for-clause", scheme: .light, to: output)
+        for (label, size) in Self.doneSizes {
+            render(ZakoFlowView(store: store), named: "2b-done-ready-for-clause-\(label)", scheme: .light,
+                   to: output, size: size)
+        }
 
         store.discardRecordFirstPending()
         row.deliveredFileName = "Zmluva o diele.asice"
         settingsStore.evidenceStore.upsert(row)
         store.outputDirectory = makeTemporaryDirectory("clarity-output")
         render(ZakoFlowView(store: store), named: "2c-done-delivered", scheme: .light, to: output)
+        for (label, size) in Self.doneSizes {
+            render(ZakoFlowView(store: store), named: "2c-done-delivered-\(label)", scheme: .light,
+                   to: output, size: size)
+        }
     }
 
     // MARK: 3. Register and its detail sheet
@@ -350,7 +429,7 @@ final class UIClaritySnapshotTests: XCTestCase {
             recordID: id, stage: stage, direction: direction,
             originalFingerprints: direction == .electronicToElectronic ? [Data(repeating: 1, count: 32)] : nil,
             mode: .test, evidenceNumber: "261120-TEST000001", conversionTime: signedAt,
-            finalPDF: Data("%PDF-1.7\n".utf8), fingerprint: "00", containerDocumentName: "Zmluva o diele.pdf",
+            finalPDF: Self.samplePDF, fingerprint: "00", containerDocumentName: "Zmluva o diele.pdf",
             containerFiles: [], directory: FileManager.default.temporaryDirectory,
             stampsSignatures: false, timestampServers: nil, tsaURL: nil, attestation: attestation,
             clientOutput: output, appendedClause: nil, fixedTarget: nil,
@@ -358,6 +437,20 @@ final class UIClaritySnapshotTests: XCTestCase {
         pending.recordSignedAt = signedAt
         return pending
     }
+
+    /// A one-page contract, synthetic, so the previews show a page.
+    private static let samplePDF: Data = {
+        let a4 = CGSize(width: 595, height: 842)
+        return TestPDFBuilderApp.build(pages: [
+            (a4, { ctx, size in
+                TestPDFBuilderApp.text("Zmluva o diele", at: CGPoint(x: 60, y: size.height - 90), size: 20)(ctx, size)
+                for line in 0..<18 {
+                    TestPDFBuilderApp.text("Článok \(line + 1). Zmluvné strany sa dohodli na podmienkach diela.",
+                                           at: CGPoint(x: 60, y: size.height - 140 - CGFloat(line) * 30), size: 11)(ctx, size)
+                }
+            })
+        ])
+    }()
 
     /// `render`, but settling by suspending the test, so the view's own `.task` work can finish.
     private func renderYielding<V: View>(_ view: V, named name: String, scheme: Scheme, to directory: URL,

@@ -24,66 +24,37 @@ struct AuthorizeNoticePresentation: Equatable {
 struct AuthorizeView: View {
     @Bindable var store: ZakoSessionStore
     @State private var showsMetChecklistItems = false
+    @State private var previewCache = ZakoPagePreviewCache()
 
     /// Authorizing, or a card flow that may go on to sign: the step's other controls stay off.
     private var isBusy: Bool { store.isAuthorizing || store.isCardFlowActive }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Label("Pred autorizáciou: kontrolný zoznam", systemImage: "checklist")
-                        .font(.headline)
-
-                    tokenStatusRow
-
-                    if let error = store.lastError {
-                        let notice = AuthorizeNoticePresentation(message: error)
-                        ZakoNotice(title: notice.title, message: notice.message, tone: notice.tone)
+            // The measured area decides the layout, never the content: a wide and tall window
+            // gets the page and the client's files beside the certificate, anything smaller
+            // the one scrolling column, so the step's minimum size stays where it was.
+            GeometryReader { geometry in
+                if let preview = previewImage,
+                   let columns = ZakoAuthorizeLayout.columns(for: geometry.size,
+                                                             pageAspect: preview.size.width / preview.size.height) {
+                    HStack(spacing: 0) {
+                        previewColumn(preview, columns: columns)
+                            .frame(width: columns.previewWidth)
+                        Divider()
+                        ScrollView {
+                            detailsColumn
+                                .padding(ZakoAuthorizeLayout.padding)
+                        }
+                        .frame(width: columns.detailsWidth)
                     }
-
-                    if let signedOut = store.ezzkSignInRefusal {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ZakoNotice(title: "Nie ste prihlásený do EZZK", message: signedOut, tone: .warning)
-                            OpenSettingsButton(pane: .ezzk) {
-                                Label("Otvoriť nastavenia EZZK", systemImage: "gearshape")
-                            }
-                        }
-                    }
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 14) {
-                            checklistCard
-                            certificateCard
-                        }
-                        VStack(alignment: .leading, spacing: 14) {
-                            checklistCard
-                            certificateCard
-                        }
-                    }
-
-                    if store.rasterConversionOffered, !store.rasterConversionApproved {
-                        Button {
-                            store.rasterConversionApproved = true
-                            store.lastError = nil
-                        } label: {
-                            Label("Použiť rastrový PDF/A", systemImage: "photo.on.rectangle")
-                        }
-                        .help("Strany sa uložia ako obrázky v PDF/A-2b; text sa nebude dať označiť. Potom znova autorizujte.")
-                        .disabled(isBusy)
-                    }
-
-                    if !store.validationErrors.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(store.validationErrors.enumerated()), id: \.offset) { _, err in
-                                Text("• \(err.errorDescription ?? "")")
-                                    .font(.footnote)
-                                    .foregroundStyle(.orange)
-                            }
-                        }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        singleColumn
+                            .padding(20)
                     }
                 }
-                .padding(20)
             }
 
             StickyActionBar {
@@ -139,6 +110,120 @@ struct AuthorizeView: View {
             guard !Task.isCancelled else { return }
             await store.refreshIdentities()
         }
+    }
+
+    /// The first page of what will be signed, or nil when there is nothing to show.
+    private var previewImage: NSImage? {
+        previewCache.previewDocument(for: store).flatMap { previewCache.firstPage(of: $0) }
+    }
+
+    /// Errors and refusals first: they say why "Autorizovať" is off.
+    @ViewBuilder
+    private var leadingNotices: some View {
+        Label("Pred autorizáciou: kontrolný zoznam", systemImage: "checklist")
+            .font(.headline)
+
+        tokenStatusRow
+
+        if let error = store.lastError {
+            let notice = AuthorizeNoticePresentation(message: error)
+            ZakoNotice(title: notice.title, message: notice.message, tone: notice.tone)
+        }
+
+        if let signedOut = store.ezzkSignInRefusal {
+            VStack(alignment: .leading, spacing: 8) {
+                ZakoNotice(title: "Nie ste prihlásený do EZZK", message: signedOut, tone: .warning)
+                OpenSettingsButton(pane: .ezzk) {
+                    Label("Otvoriť nastavenia EZZK", systemImage: "gearshape")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trailingNotices: some View {
+        if store.rasterConversionOffered, !store.rasterConversionApproved {
+            Button {
+                store.rasterConversionApproved = true
+                store.lastError = nil
+            } label: {
+                Label("Použiť rastrový PDF/A", systemImage: "photo.on.rectangle")
+            }
+            .help("Strany sa uložia ako obrázky v PDF/A-2b; text sa nebude dať označiť. Potom znova autorizujte.")
+            .disabled(isBusy)
+        }
+
+        if !store.validationErrors.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(store.validationErrors.enumerated()), id: \.offset) { _, err in
+                    Text("• \(err.errorDescription ?? "")")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    /// A small or short window: everything in one column, the two cards side by side when
+    /// they fit.
+    private var singleColumn: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            leadingNotices
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    checklistCard
+                    certificateCard
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    checklistCard
+                    certificateCard
+                }
+            }
+            trailingNotices
+        }
+    }
+
+    /// Beside the preview: the certificate and the output first (they are chosen here), then
+    /// the checklist.
+    private var detailsColumn: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            leadingNotices
+            certificateCard
+            checklistCard
+            trailingNotices
+        }
+    }
+
+    /// "Čo podpíšete": the page and the client's files, beside the page when there is room.
+    private func previewColumn(_ image: NSImage, columns: ZakoAuthorizeLayout.Columns) -> some View {
+        let page = ZakoPagePreview(image: image, accessibilityLabel: store.deliveryPreviewCaption)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        let caption = Text(store.deliveryPreviewCaption)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        let plan = ZakoDeliveryPlanView(plan: store.deliveryPlan)
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("Čo podpíšete", systemImage: "signature")
+                .font(.headline)
+                .frame(height: ZakoAuthorizeLayout.headingHeight - 12, alignment: .leading)
+            if columns.planBesidePage {
+                HStack(alignment: .top, spacing: ZakoAuthorizeLayout.planGap) {
+                    page
+                    VStack(alignment: .leading, spacing: 16) {
+                        caption
+                        plan
+                    }
+                    .frame(width: ZakoAuthorizeLayout.planWidth, alignment: .topLeading)
+                }
+            } else {
+                page
+                caption
+                plan
+            }
+        }
+        .padding(ZakoAuthorizeLayout.padding)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var tokenStatusRow: some View {
@@ -544,23 +629,55 @@ struct DoneView: View {
     let store: ZakoSessionStore
     @State private var exportError: String?
     @State private var isWorkingOnEZZK = false
+    @State private var previewCache = ZakoPagePreviewCache()
+
+    /// The content's widest extent, and the width from which the summary sits beside the status.
+    static let maxContentWidth: CGFloat = 980
+    static let twoColumnMinWidth: CGFloat = 860
+    static let summaryWidth: CGFloat = 340
+
     var body: some View {
-        // In a scroll view at least as tall as the window: the content stays centered, but its
-        // height at the narrowest width no longer sets the window's minimum. Without it the
+        // In a scroll view at least as tall as the window: the content starts at the top, and
+        // its height at the narrowest width no longer sets the window's minimum. Without it the
         // waiting card's wrapped texts asked for about 3000 points and grew the main window
         // past the screen (F16, 2026-11-20).
         GeometryReader { geometry in
             ScrollView {
-                content
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                content(twoColumns: geometry.size.width >= Self.twoColumnMinWidth)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
             }
         }
     }
 
-    private var content: some View {
-        VStack(spacing: 24) {
-            Spacer()
+    private func content(twoColumns: Bool) -> some View {
+        VStack(spacing: 20) {
+            if twoColumns, let summary = summaryModel {
+                HStack(alignment: .top, spacing: 24) {
+                    statusColumn
+                        .frame(maxWidth: .infinity, alignment: .top)
+                    summaryCard(summary)
+                        .frame(width: Self.summaryWidth)
+                }
+            } else {
+                statusColumn
+                if let summary = summaryModel {
+                    summaryCard(summary)
+                        .frame(maxWidth: 520)
+                }
+            }
 
+            DetectorTrainingOfferBanner(settingsStore: store.settingsStore)
+                .frame(maxWidth: 520)
+
+            DetectorTrainingProgressLine(store: store)
+        }
+        .frame(maxWidth: Self.maxContentWidth)
+        .padding(24)
+    }
+
+    /// Where the conversion stands, then what can be done next.
+    private var statusColumn: some View {
+        VStack(spacing: 20) {
             // The stored row decides what is said (its state and the EZZK mode it was signed
             // in); the checker's change count redraws when the periodic check moves it on,
             // and the timeline when a waiting "Overiť v EZZK" becomes available.
@@ -574,73 +691,116 @@ struct DoneView: View {
                 }
             }
             if let directory = store.outputDirectory {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Priečinok s vygenerovanými súbormi:")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(directory.path)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    if let renamed = ZakoSinglePDFDelivery.renamedNotice(
-                        for: store.evidenceStore.record(id: store.currentRecordID)) {
-                        Label(renamed, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            NSWorkspace.shared.open(directory)
-                        } label: {
-                            Label("Ukázať vo Finderi", systemImage: "folder")
-                        }
-                        .controlSize(.large)
-
-                        Button {
-                            exportAs()
-                        } label: {
-                            Label("Uložiť ako…", systemImage: "square.and.arrow.up")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-
-                        Button {
-                            startNewConversion()
-                        } label: {
-                            Label("Nová konverzia", systemImage: "plus")
-                        }
-                        .controlSize(.large)
-                    }
-                    if let exportError {
-                        HStack(spacing: 8) {
-                            Text(exportError)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                            Button("Skúsiť znova", action: exportAs)
-                                .buttonStyle(.bordered)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
-                .glassCard(cornerRadius: 12, padding: 12)
-                .frame(maxWidth: 520)
+                deliveredActions(directory)
+                    .frame(maxWidth: 520)
             } else {
                 // Plain buttons under the timeline card: a card around one or two buttons
                 // read as a second, empty panel.
                 recordFirstCard
                     .frame(maxWidth: 520)
             }
-
-            DetectorTrainingOfferBanner(settingsStore: store.settingsStore)
-                .frame(maxWidth: 520)
-
-            DetectorTrainingProgressLine(store: store)
-
-            Spacer()
         }
-        .padding(.vertical, 24)
+    }
+
+    /// The delivered file: open the folder, save a copy, start the next conversion.
+    private func deliveredActions(_ directory: URL) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let renamed = ZakoSinglePDFDelivery.renamedNotice(
+                for: store.evidenceStore.record(id: store.currentRecordID)) {
+                Label(renamed, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    NSWorkspace.shared.open(directory)
+                } label: {
+                    Label("Ukázať vo Finderi", systemImage: "folder")
+                }
+                .controlSize(.large)
+
+                Button {
+                    exportAs()
+                } label: {
+                    Label("Uložiť ako…", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    startNewConversion()
+                } label: {
+                    Label("Nová konverzia", systemImage: "plus")
+                }
+                .controlSize(.large)
+            }
+            if let exportError {
+                HStack(spacing: 8) {
+                    Text(exportError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    Button("Skúsiť znova", action: exportAs)
+                        .buttonStyle(.bordered)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    /// The conversion at a glance; nil when there is neither a stored conversion nor a row.
+    private var summaryModel: ZakoDoneSummary? {
+        let pending = store.recordFirstPending
+        _ = store.settingsStore.statusChecker.changeCount
+        let record = store.evidenceStore.record(id: pending?.recordID ?? store.currentRecordID)
+        return ZakoDoneSummary.make(pending: pending, record: record,
+                                    evidenceNumber: store.attestation.evidenceNumber,
+                                    outputDirectory: store.outputDirectory)
+    }
+
+    private func summaryCard(_ summary: ZakoDoneSummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Konverzia")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let document = previewCache.previewDocument(for: store),
+               let image = previewCache.firstPage(of: document) {
+                ZakoPagePreview(image: image, accessibilityLabel: "Prvá strana nového dokumentu")
+                    .frame(maxWidth: .infinity, maxHeight: 220)
+                    .padding(.vertical, 4)
+            }
+            ForEach(summary.rows) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if row.id == "environment", let mode = summary.mode {
+                        EZZKEnvironmentBadge(mode: mode, form: .subject)
+                    } else {
+                        Text(row.value)
+                            .font(row.isMonospaced ? .callout.monospacedDigit().weight(.semibold) : .callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if let folder = summary.folder {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Priečinok s vygenerovanými súbormi")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(folder)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard(cornerRadius: 12, padding: 14)
     }
 
     private func presentation(at now: Date) -> ZakoDonePresentation {
