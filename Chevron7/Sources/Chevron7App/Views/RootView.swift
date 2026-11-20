@@ -344,9 +344,11 @@ struct RootView: View {
                         }
                     } header: {
                         historyHeader("Nedávne dokumenty") {
-                            Button("Vymazať zoznam", systemImage: "trash", role: .destructive) {
+                            // Forgets the list only; the documents stay where they are.
+                            Button("Vyčistiť", systemImage: "trash") {
                                 recentDocumentStore.clear()
                             }
+                            .help("Vyčistí zoznam nedávnych dokumentov. Súbory zostanú na disku.")
                         }
                     }
                 }
