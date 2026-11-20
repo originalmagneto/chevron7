@@ -330,16 +330,17 @@ final class EZZKRecordPresentationTests: XCTestCase {
         XCTAssertTrue(text.contains("chyba servera"), text)
     }
 
-    func testDeadlineColumn() {
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.late), now: now).text, EZZKRecordPresentation.lateWarning)
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.processed), now: now).text, "Spracovaný v EZZK")
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.acceptedForProcessing), now: now).tone, .success)
+    func testDeadlineColumn() throws {
+        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.late), now: now)?.text, EvidenceRegisterDetail.overdueText)
+        XCTAssertNil(EvidenceRegisterDetail.deadline(for: row(.processed), now: now), "no repeat of the state")
+        XCTAssertNil(EvidenceRegisterDetail.deadline(for: row(.acceptedForProcessing), now: now))
 
-        let today = EvidenceRegisterDetail.deadline(for: row(.queuedForSubmission), now: now)
+        let today = try XCTUnwrap(EvidenceRegisterDetail.deadline(for: row(.queuedForSubmission), now: now))
         XCTAssertEqual(today.text, "Odoslať ešte dnes, do polnoci")
         XCTAssertEqual(today.tone, .warning)
 
-        let unknown = EvidenceRegisterDetail.deadline(for: row(.outcomeUnknown), now: now.addingTimeInterval(2 * 86400))
+        let unknown = try XCTUnwrap(EvidenceRegisterDetail.deadline(for: row(.outcomeUnknown),
+                                                                     now: now.addingTimeInterval(2 * 86400)))
         XCTAssertEqual(unknown.text, "Najprv overte v EZZK")
         XCTAssertFalse(unknown.text.contains("\u{2014}"), "no em dash")
     }

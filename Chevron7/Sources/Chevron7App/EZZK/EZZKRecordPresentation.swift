@@ -409,34 +409,37 @@ enum EvidenceRegisterDetail {
         return question
     }
 
-    /// The Register's deadline column. EZZK expects the record on the Bratislava day the
-    /// number was allocated; a row past that day is late and says so.
-    static func deadline(for record: EvidenceRecord, now: Date) -> Deadline {
+    /// The Register's "Lehota EZZK" column: the deadline itself, never a repeat of the row's
+    /// state. EZZK expects the record on the Bratislava day the number was allocated, at the
+    /// latest within 24 hours of the conversion. Nil (an empty cell) once EZZK has the record,
+    /// for a Demo row (nothing goes to EZZK), and for a refused or unsigned row, whose state
+    /// already says everything.
+    static func deadline(for record: EvidenceRecord, now: Date) -> Deadline? {
         let status = record.status
-        if EZZKRecordPresentation.isSent(status) {
-            return Deadline(text: UXLabels.evidenceStatusLabel(for: status), tone: .success)
-        }
+        if record.ezzkMode == .demo || EZZKRecordPresentation.isSent(status) { return nil }
         switch status {
+        case .rejected, .recordUnsigned:
+            return nil
         case .late:
-            return Deadline(text: EZZKRecordPresentation.lateWarning, tone: .warning)
+            return Deadline(text: overdueText, tone: .failure)
         case .outcomeUnknown:
             return Deadline(text: "Najprv overte v EZZK", tone: .warning)
-        case .rejected, .recordUnsigned:
-            return Deadline(text: UXLabels.evidenceStatusLabel(for: status), tone: .failure)
         default:
             break
         }
         let deadlineText = EZZKRecordPresentation.timeText(record.submissionDeadline)
         guard status.isSubmissionPendingState else {
-            return Deadline(text: "Lehota: \(deadlineText)", tone: .pending)
+            return Deadline(text: "do \(deadlineText)", tone: .pending)
         }
         if let allocatedAt = record.evidenceNumberAllocatedAt,
            EZZKEvidenceNumberPolicy.isUsable(allocatedAt: allocatedAt, at: now) {
             return Deadline(text: "Odoslať ešte dnes, do polnoci", tone: .warning)
         }
         if now > record.submissionDeadline {
-            return Deadline(text: "Po lehote: \(deadlineText)", tone: .failure)
+            return Deadline(text: overdueText, tone: .failure)
         }
-        return Deadline(text: "Blíži sa lehota: do \(deadlineText)", tone: .warning)
+        return Deadline(text: "do \(deadlineText)", tone: .warning)
     }
+
+    static let overdueText = "Po lehote"
 }
