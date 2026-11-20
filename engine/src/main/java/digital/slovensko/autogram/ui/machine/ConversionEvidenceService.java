@@ -136,8 +136,9 @@ public final class ConversionEvidenceService {
                 .collect(Collectors.toSet());
         var signatures = new JsonArray();
         var diagnostic = reports.getDiagnosticData();
+        var certificates = signingCertificates(validator);
         for (var id : simple.getSignatureIdList()) {
-            signatures.add(signatureFacts(diagnostic, simple, id, etsi, unavailable));
+            signatures.add(signatureFacts(diagnostic, simple, id, etsi, unavailable, certificates));
         }
         evidence.add("signatures", signatures);
         evidence.add("documentTimestamps", documentTimestamps(diagnostic, simple));
@@ -149,8 +150,26 @@ public final class ConversionEvidenceService {
         return new EvidenceBody(evidence, reports);
     }
 
+    /// The bytes of every signing certificate, by the certificate's DSS id. DSS's diagnostic
+    /// data carries no certificate bytes by default (`TokenExtractionStrategy.NONE`), so the
+    /// subject `MANDANT` values and the mandate policy are read from the validator's own tokens.
+    private static Map<String, byte[]> signingCertificates(SignedDocumentValidator validator) {
+        var certificates = new HashMap<String, byte[]>();
+        try {
+            for (var signature : validator.getSignatures()) {
+                var token = signature.getSigningCertificateToken();
+                if (token != null) {
+                    certificates.putIfAbsent(token.getDSSIdAsString(), token.getEncoded());
+                }
+            }
+        } catch (RuntimeException exception) {
+            // Without the bytes the clause omits the mandate, as before.
+        }
+        return certificates;
+    }
+
     private static JsonObject signatureFacts(DiagnosticData diagnostic, SimpleReport simple, String id, String etsi,
-            Set<String> unavailable) {
+            Set<String> unavailable, Map<String, byte[]> certificates) {
         var facts = new JsonObject();
         facts.addProperty("id", id);
         var signature = diagnostic.getSignatureById(id);
@@ -172,7 +191,7 @@ public final class ConversionEvidenceService {
         facts.addProperty("productionPlace", productionPlace(signature));
         var certificate = signature.getSigningCertificate();
         if (certificate != null) {
-            addCertificateFacts(facts, certificate);
+            addCertificateFacts(facts, certificate, certificates.get(certificate.getId()));
         }
         facts.addProperty("trustedListUnavailable",
                 simple.getIndication(id) == Indication.INDETERMINATE
@@ -278,7 +297,7 @@ public final class ConversionEvidenceService {
         return timestamps;
     }
 
-    static void addCertificateFacts(JsonObject facts, CertificateWrapper certificate) {
+    static void addCertificateFacts(JsonObject facts, CertificateWrapper certificate, byte[] encoded) {
         facts.addProperty("signerCommonName", certificate.getCommonName());
         if (certificate.getSubjectSerialNumber() != null && !certificate.getSubjectSerialNumber().isBlank()) {
             facts.addProperty("signerSerialNumber", certificate.getSubjectSerialNumber());
@@ -297,7 +316,7 @@ public final class ConversionEvidenceService {
             }
         }
         facts.add("trustServiceTypes", services);
-        var subject = X509Facts.of(certificate.getBinaries());
+        var subject = X509Facts.of(encoded != null ? encoded : certificate.getBinaries());
         var mandants = new JsonArray();
         subject.mandants().forEach(mandants::add);
         facts.add("mandants", mandants);
