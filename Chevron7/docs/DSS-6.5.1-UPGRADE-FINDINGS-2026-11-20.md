@@ -48,4 +48,4 @@ The engine suite (734 tests) and the Swift suite run without cards or real times
 - ZaKo record-first in Testovacia evidencia, single-PDF output, E→E 261120-qd580FC023 and P→E 261120-WF580Fc022: EZZK processed both records with code 0, and both outputs validate as PAdES Baseline T, TOTAL_PASSED, QESIG.
 - Re-validation of ten earlier documents (eleven signatures, eID and I.CA, PAdES, XAdES and CAdES) through the 6.4 and 6.5.1 engines: identical output.
 - Live BOSA and Sectigo Qualified timestamps through the bundled runtime: QTSA, PASSED.
-- Open: the same PAdES and ASiC-E run with an eID card.
+- eID card, same run: PAdES with QTS, a second QTS signature of the same PDF (F12) and ASiC-E with QTS all TOTAL_PASSED and QESIG, with BOSA (PAdES) and Sectigo Qualified (XAdES) QTSA timestamps, and the F15 listing as with I.CA.
