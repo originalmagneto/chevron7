@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
 import AppKit
+import PDFKit
 import SwiftUI
 import XCTest
 import Chevron7Kit
@@ -40,5 +41,21 @@ final class ZakoLayoutHeightTests: XCTestCase {
         let size = minimumSize(ZakoFlowView(store: store))
 
         XCTAssertLessThan(size.height, 300, "the authorization step must not need more height than a small window")
+    }
+
+    /// With a document open the step may show its page beside the certificate, but only when
+    /// the window has room: the minimum stays that of the one column.
+    func testAuthorizationWithAPagePreviewKeepsTheMinimumSize() {
+        let settingsStore = makeSettingsStore()
+        let store = ZakoSessionStore(settingsStore: settingsStore)
+        let a4 = CGSize(width: 595, height: 842)
+        store.document = PDFDocument(data: TestPDFBuilderApp.build(pages: [(a4, { _, _ in })]))
+        store.step = .authorize
+        XCTAssertNotNil(store.document)
+
+        let size = minimumSize(ZakoFlowView(store: store))
+
+        XCTAssertLessThanOrEqual(size.width, 320, "minimum \(size)")
+        XCTAssertLessThan(size.height, 300, "minimum \(size)")
     }
 }

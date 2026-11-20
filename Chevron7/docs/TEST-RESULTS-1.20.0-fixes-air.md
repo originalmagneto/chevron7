@@ -175,3 +175,16 @@ Nastavenie: Testovacia evidencia, „Postup od 1. 1. 2027 vopred“ zapnutý, v�
 ## Po 1.21.7 (20. 11. 2026): F16
 
 - **F16 overené na 1.21.7 (karta I.CA, OPRÁVNENIE):** zaručená konverzia E→E `F16-listina.pdf` (kópia B1) v Testovacej evidencii s postupom od 1. 1. 2027 vopred a výstupom „Jeden PDF s doložkou“. Záznam podpísaný a odoslaný, číslo 261120-Wg580fC029. Po prechode do stavu „Záznam o konverzii je v EZZK a čaká na spracovanie“ ostalo hlavné okno 1775 × 1113 bodov, rovnako ako pred autorizáciou, a celý krok je na obrazovke. EZZK záznam spracovalo asi za 14 minút; „Dokončiť konverziu“ podpísala doložku a okno ostalo 1775 × 1113 bodov počas podpisu aj na kroku „Zaručená konverzia je dokončená“. Výstup `F16-listina-konvertovane.pdf`: príloha `261120-Wg580fC029.xml.xdcf`, jeden podpis PAdES Baseline T mandátnym certifikátom, platný, KEP. Po teste: „Postup od 1. 1. 2027 vopred“ vypnutý, rozšírené nastavenia skryté, režim Testovacia evidencia, nič nečaká.
+
+## 1.22.0 (20. 11. 2026): prehľadnejšia konverzia a register
+
+Overené v appke s kartou I.CA (OPRÁVNENIE), Testovacia evidencia, postup od 1. 1. 2027 vopred, výstup „Jeden PDF s doložkou“, originál `UI-listina.pdf` (kópia B1):
+
+- Register: štítky „Test“ a „Skúšobný“ pri čísle, stĺpce Smer a Výstup, lehota, filter prostredia; detail záznamu bez orezaných textov, menu „Akcie“. Riadok čakajúcej konverzie „Čaká na doložku“ s tlačidlom „Dokončiť“ otvoril podpis doložky.
+- Hlavička konverzie s krokmi (Overenie až Hotovo vrátane „Záznam do EZZK“ a „Podpis doložky“) a štítkami poradia, výstupu a prostredia.
+- Overenie E→E: veta s verdiktom navrchu; riadok podpisu uvádza mandát „1042 … Opravnenie 1042 Advokat“ (F17 opravené v 1.21.9).
+- Autorizácia: zbalený kontrolný zoznam, „Kontrolujem kartu…“ v lište so „Zrušiť“, poznámka o zapamätanom PIN-e pri dokončení.
+- Číslo 261120-Bf580Fc027: záznam podpísaný a odoslaný 14:12, EZZK ho spracovalo o 14:29 s kódom 0; výstup `UI-listina-konvertovane.pdf`, 4 strany (dokument a 3 strany doložky s čitateľným písmom), príloha `261120-Bf580Fc027.xml.xdcf`, jeden platný podpis PAdES Baseline T mandátnym certifikátom (QESIG).
+- Trénovanie detektora a mriežka počtov v Nastaveniach podľa návrhu.
+- Drobnosti: pri otvorení autorizácie sa na chvíľu, kým appka hľadá certifikáty, zobrazí „Karta nie je delegovaná… Vložte kartu“; v trénovaní sa dlhé názvy druhov v úzkom okne orezávajú. Vlastník upozornil na prázdne miesto pri autorizácii a čakaní (rieši vetva `feat/zako-authorize-layout`).
+- Po teste: postup od 2027 vypnutý, rozšírené nastavenia skryté, režim zostáva Testovacia evidencia (pred testom bola Ostrá, prepnúť späť je na vlastníkovi), zapamätaný výstup „Jeden PDF s doložkou“.
