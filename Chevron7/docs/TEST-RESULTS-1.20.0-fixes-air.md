@@ -171,3 +171,7 @@ Nastavenie: Testovacia evidencia, „Postup od 1. 1. 2027 vopred“ zapnutý, v�
 - Oba riadky v registri: „Spracovaný v EZZK“, žiadna čakajúca konverzia nezostala.
 - **F16 (opravené):** po prechode do stavu „Záznam … čaká na spracovanie v EZZK“ sa hlavné okno samo natiahlo na výšku 3437 bodov (predtým 1204), presahovalo obrazovku a tlačidlo „Vybrať súbor…“ na ďalšej konverzii bolo mimo nej. Pomohlo Okno → Roztiahnuť. Príčina: krok „Hotovo“ sa dal zúžiť na 130 bodov a pri tej šírke sa zalomené texty karty natiahli asi na 3000 bodov, čo sa stalo minimálnou výškou okna. Oprava: obsah je v posúvateľnej ploche aspoň takej vysokej ako okno (`DoneView`), test `ZakoDoneWindowSizeTests`.
 - Po teste: „Postup od 1. 1. 2027 vopred“ vypnutý, rozšírené nastavenia skryté, režim zostáva Testovacia evidencia; zapamätaný výstup pre klienta je teraz „Jeden PDF s doložkou“.
+
+## Po 1.21.7 (20. 11. 2026): F16
+
+- **F16 overené na 1.21.7 (karta I.CA, OPRÁVNENIE):** zaručená konverzia E→E `F16-listina.pdf` (kópia B1) v Testovacej evidencii s postupom od 1. 1. 2027 vopred a výstupom „Jeden PDF s doložkou“. Záznam podpísaný a odoslaný, číslo 261120-Wg580fC029. Po prechode do stavu „Záznam o konverzii je v EZZK a čaká na spracovanie“ ostalo hlavné okno 1775 × 1113 bodov, rovnako ako pred autorizáciou, a celý krok je na obrazovke. Ešte neoverené: stav pri podpise doložky po „Dokončiť konverziu“, ktorý pokrýva test `ZakoDoneWindowSizeTests`.
