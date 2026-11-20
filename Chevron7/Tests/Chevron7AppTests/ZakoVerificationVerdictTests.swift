@@ -89,6 +89,14 @@ final class ZakoVerificationVerdictTests: XCTestCase {
         XCTAssertEqual(verdict([noList])?.sentence, "Overenie sa nedokončilo: konverziu zatiaľ nemožno vykonať.")
     }
 
+    /// A refusal the sentence cannot name still reads as one.
+    func testOtherBlockedDecisionFallsBack() throws {
+        XCTAssertEqual(ZakoVerificationPresentation.verdict(decision: .blocked("Iný dôvod."),
+                                                            authorizations: [try authorization()],
+                                                            undeterminedConfirmed: false, recordFirstRefused: false),
+                       .init(sentence: "Konverziu nemožno vykonať.", tone: .failure))
+    }
+
     func testRecordFirstRefusalLeads() throws {
         XCTAssertEqual(verdict([try authorization()], recordFirstRefused: true),
                        .init(sentence: "Konverziu nemožno vykonať postupom od 1. 1. 2027.", tone: .failure))

@@ -423,9 +423,13 @@ struct ZakoVerificationView: View {
     /// What the new document will be, beside the client output it is delivered in.
     private func newDocumentSection(_ original: ElectronicOriginal) -> some View {
         ZakoSection(title: "Nový dokument", symbol: "doc.badge.gearshape") {
+            // The output is chosen at authorization (the header shows no chip before it), so this
+            // names the remembered choice the note below follows, not a decision.
             if let output = ZakoConversionHeaderModel.outputChip(for: store.settings.zakoClientOutput) {
-                LabeledContent("Výstup pre klienta", value: output)
-                    .font(.callout)
+                Text("Výstup pre klienta zvolíte pri autorizácii (naposledy: \(output)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             switch original.plan {
             case .keep:
