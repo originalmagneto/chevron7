@@ -65,12 +65,14 @@ struct ZakoVerificationView: View {
                         } else if let error = store.verificationError {
                             ZakoNotice(title: "Podpisy sa nepodarilo overiť", message: error, tone: .failure)
                         } else if let original = store.electronicOriginal {
+                            verdictLine(original)
                             verdictCard(original)
                             if original.kind == .asicEMultiple {
                                 filesSection(original)
                             }
                             authorizationsSection(original)
                             documentSection(original)
+                            newDocumentSection(original)
                             qualifiedSection
                         }
                     }
@@ -153,10 +155,37 @@ struct ZakoVerificationView: View {
         .glassCard(padding: 14)
     }
 
+    /// The one-sentence verdict the step leads with, above the gate's own card.
+    @ViewBuilder
+    private func verdictLine(_ original: ElectronicOriginal) -> some View {
+        if let verdict = ZakoVerificationPresentation.verdict(
+            decision: store.e2eDecision, authorizations: original.authorizations,
+            undeterminedConfirmed: store.undeterminedConfirmed,
+            recordFirstRefused: store.e2eRecordFirstRefusal != nil) {
+            Label {
+                Text(verdict.sentence)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: ZakoNotice.symbol(for: verdict.tone))
+                    .foregroundStyle(ZakoNotice.color(for: verdict.tone))
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     /// One line that says whether the conversion may go on, in the gate's own words.
     @ViewBuilder
     private func verdictCard(_ original: ElectronicOriginal) -> some View {
-        if let refusal = store.e2eRecordFirstRefusal, store.e2eDecision != nil {
+        if !ZakoVerificationPresentation.showsGateCard(decision: store.e2eDecision,
+                                                       recordFirstRefused: store.e2eRecordFirstRefusal != nil) {
+            // The verdict line above already says that everything is valid: no second card
+            // repeating it, only what happens with the facts.
+            Text(ZakoVerificationPresentation.recordedFactsNote)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let refusal = store.e2eRecordFirstRefusal {
             ZakoNotice(title: "Konverziu nemožno vykonať postupom od 1. 1. 2027", message: refusal, tone: .failure)
         } else {
             decisionCard(original)
@@ -181,17 +210,7 @@ struct ZakoVerificationView: View {
                 }
             }
         case .ready, .none:
-            ZakoNotice(title: verdictTitle(original),
-                       message: "Údaje o podpisoch, ich overení a časových pečiatkach sa zapíšu do doložky aj záznamu.",
-                       tone: .success)
-        }
-    }
-
-    private func verdictTitle(_ original: ElectronicOriginal) -> String {
-        switch original.authorizations.count {
-        case 1: return "Podpis klienta je platný"
-        case 2: return "Oba podpisy sú platné"
-        default: return "Všetky podpisy (\(original.authorizations.count)) sú platné"
+            EmptyView()
         }
     }
 
@@ -218,7 +237,7 @@ struct ZakoVerificationView: View {
     }
 
     static func detailKey(_ authorization: ElectronicOriginal.Authorization) -> String {
-        "\(authorization.fileEntryName ?? "")|\(authorization.signatureID)"
+        SignatureRowModel.detailKey(authorization)
     }
 
     private func detailExpansion(_ key: String) -> Binding<Bool> {
@@ -230,65 +249,10 @@ struct ZakoVerificationView: View {
 
     private func authorizationRow(_ authorization: ElectronicOriginal.Authorization, showsDocument: Bool,
                                   fileName: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: icon(authorization.state))
-                        .foregroundStyle(tint(authorization.state))
-                        .accessibilityHidden(true)
-                    Text(authorization.signerName)
-                        .font(.callout.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Text(authorization.state.rawValue)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(tint(authorization.state))
-                }
-                Group {
-                    Text(authorization.typeOther ?? authorization.type.skName)
-                    if let time = authorization.signingTime {
-                        Text("Podpísané \(E2EDateText.string(time))")
-                    }
-                    if let mandate = authorization.mandate {
-                        Text("Mandát: \(mandate)")
-                    }
-                    if let timestamp = authorization.timestamp {
-                        Text("Časová pečiatka \(timestamp.typeItem.skName.lowercased()), \(timestamp.state.rawValue): \(timestamp.publisherCommonName), \(E2EDateText.string(timestamp.created))")
-                    } else {
-                        Text("Bez časovej pečiatky")
-                    }
-                    if let fileName {
-                        Text("Podpis v súbore \(fileName)")
-                    }
-                    if showsDocument {
-                        Text("Pokrýva \(authorization.documentNames.joined(separator: ", "))")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 24)
-            }
-            // One element for VoiceOver; the disclosure below stays its own control.
-            .accessibilityElement(children: .combine)
-            if let detail = authorization.technicalDetail {
-                let key = Self.detailKey(authorization)
-                // The label is a button too, so a click on the words opens it as the arrow does,
-                // and either is reached with the keyboard.
-                DisclosureGroup(isExpanded: detailExpansion(key)) {
-                    Text(detail)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                } label: {
-                    Button("Technický detail") { detailExpansion(key).wrappedValue.toggle() }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Zobrazí pôvodný text overenia")
-                }
-                .font(.caption)
-                .padding(.leading, 24)
-            }
-        }
+        SignatureRowView(model: SignatureRowModel(authorization: authorization, fileName: fileName,
+                                                  showsDocuments: showsDocument),
+                         density: .regular,
+                         detailExpanded: detailExpansion(Self.detailKey(authorization)))
     }
 
     /// The files of a container with several files, in the order the new document joins them.
@@ -437,7 +401,7 @@ struct ZakoVerificationView: View {
     }
 
     private func documentSection(_ original: ElectronicOriginal) -> some View {
-        ZakoSection(title: "Dokument", symbol: "doc.text") {
+        ZakoSection(title: "Pôvodný dokument", symbol: "doc.text") {
             ForEach(original.documents, id: \.name) { document in
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(document.name) · \(document.formatOther ?? document.format.skName)")
@@ -451,7 +415,20 @@ struct ZakoVerificationView: View {
                         .help(document.sha256.map { String(format: "%02x", $0) }.joined())
                 }
             }
-            Divider()
+        }
+    }
+
+    /// What the new document will be, beside the client output it is delivered in.
+    private func newDocumentSection(_ original: ElectronicOriginal) -> some View {
+        ZakoSection(title: "Nový dokument", symbol: "doc.badge.gearshape") {
+            // The output is chosen at authorization (the header shows no chip before it), so this
+            // names the remembered choice the note below follows, not a decision.
+            if let output = ZakoConversionHeaderModel.outputChip(for: store.settings.zakoClientOutput) {
+                Text("Výstup pre klienta zvolíte pri autorizácii (naposledy: \(output)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             switch original.plan {
             case .keep:
                 Label(ZakoVerificationPresentation.keepNote(output: store.settings.zakoClientOutput),
@@ -565,7 +542,10 @@ struct ZakoNotice: View {
     let message: String
     let tone: Tone
 
-    private var color: Color {
+    private var color: Color { Self.color(for: tone) }
+    private var symbol: String { Self.symbol(for: tone) }
+
+    static func color(for tone: Tone) -> Color {
         switch tone {
         case .success: return .green
         case .info: return .blue
@@ -574,7 +554,7 @@ struct ZakoNotice: View {
         }
     }
 
-    private var symbol: String {
+    static func symbol(for tone: Tone) -> String {
         switch tone {
         case .success: return "checkmark.seal.fill"
         case .info: return "info.circle.fill"
@@ -918,6 +898,69 @@ enum ZakoVerificationPresentation {
         case 1: return "1 strana"
         case 2...4: return "\(count) strany"
         default: return "\(count) strán"
+        }
+    }
+
+    /// The one sentence the verification step leads with, from the gate's decision: the same
+    /// order as `E2EVerificationGate` (trusted list, invalid signature, invalid timestamp,
+    /// undetermined) with the 2027 refusal first, as the card beneath it. Nil before a decision.
+    struct Verdict: Equatable {
+        let sentence: String
+        let tone: ZakoNotice.Tone
+    }
+
+    static let recordedFactsNote =
+        "Údaje o podpisoch, ich overení a časových pečiatkach sa zapíšu do doložky aj záznamu."
+
+    /// Whether the gate shows a card of its own under the verdict line: only for a refusal, a
+    /// warning or a confirmation. When everything is valid the verdict line says it alone.
+    static func showsGateCard(decision: E2EVerificationGate.Decision?, recordFirstRefused: Bool) -> Bool {
+        if recordFirstRefused, decision != nil { return true }
+        switch decision {
+        case .blocked, .needsConfirmation: return true
+        case .ready, .none: return false
+        }
+    }
+
+    static func verdict(decision: E2EVerificationGate.Decision?,
+                        authorizations: [ElectronicOriginal.Authorization],
+                        undeterminedConfirmed: Bool, recordFirstRefused: Bool) -> Verdict? {
+        guard let decision else { return nil }
+        if recordFirstRefused {
+            return Verdict(sentence: "Konverziu nemožno vykonať postupom od 1. 1. 2027.", tone: .failure)
+        }
+        let total = authorizations.count
+        switch decision {
+        case .blocked:
+            if authorizations.contains(where: \.trustedListUnavailable) {
+                return Verdict(sentence: "Overenie sa nedokončilo: konverziu zatiaľ nemožno vykonať.", tone: .failure)
+            }
+            let invalid = authorizations.filter { $0.state == .invalid }.count
+            if invalid > 0 {
+                let subject = invalid > 1 ? "Niektoré podpisy nie sú platné"
+                    : total == 1 ? "Podpis nie je platný" : "Jeden podpis nie je platný"
+                return Verdict(sentence: "\(subject): konverziu nemožno vykonať.", tone: .failure)
+            }
+            if authorizations.contains(where: { $0.timestamp?.state == .invalid }) {
+                return Verdict(sentence: "Časová pečiatka podpisu nie je platná: konverziu nemožno vykonať.",
+                               tone: .failure)
+            }
+            return Verdict(sentence: "Konverziu nemožno vykonať.", tone: .failure)
+        case .needsConfirmation(let list):
+            let subject = list.count == 1
+                ? (total == 1 ? "Podpis" : "Jeden podpis")
+                : "\(list.count) \(list.count < 5 ? "podpisy" : "podpisov")"
+            let tail = undeterminedConfirmed ? "pokračovanie ste potvrdili." : "potvrďte, že chcete pokračovať."
+            return Verdict(sentence: "\(subject) nie je možné overiť: \(tail)", tone: .warning)
+        case .ready:
+            let timestamped = authorizations.contains { $0.timestamp != nil }
+            let sentence: String
+            if total == 1 {
+                sentence = timestamped ? "Podpis aj jeho časová pečiatka sú platné." : "Podpis je platný."
+            } else {
+                sentence = timestamped ? "Všetky podpisy a časové pečiatky sú platné." : "Všetky podpisy sú platné."
+            }
+            return Verdict(sentence: sentence, tone: .success)
         }
     }
 

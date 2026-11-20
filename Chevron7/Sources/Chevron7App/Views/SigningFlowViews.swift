@@ -1735,7 +1735,7 @@ struct SigningBatchView: View {
                 Button {
                     Task { await store.startBatch() }
                 } label: {
-                    Label("Spustiť dávku", systemImage: "signature.badge.checkmark")
+                    Label("Spustiť dávku", systemImage: "signature")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)

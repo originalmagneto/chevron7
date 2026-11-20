@@ -13,7 +13,7 @@ struct ZakoFlowView: View {
     @State private var isTargeted = false
 
     var body: some View {
-        stepContent
+        headedStepContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaPadding(.top)
             .background(Color(nsColor: .windowBackgroundColor))
@@ -29,7 +29,7 @@ struct ZakoFlowView: View {
                 guard isGone, store.isLoadedPendingConversion, !store.isAuthorizing else { return }
                 store.resetSession(keepingProfile: true)
             }
-            .sheet(item: $store.cardPrompt) { prompt in
+            .sheet(item: cardPromptSheet) { prompt in
                 ZakoCardPromptSheet(store: store, prompt: prompt)
                     .interactiveDismissDisabled()
             }
@@ -43,9 +43,34 @@ struct ZakoFlowView: View {
                             Label("Iný dokument", systemImage: "chevron.left")
                         }
                         .help("Vybrať iný dokument na konverziu")
-                        .disabled(store.isAuthorizing)
+                        .disabled(store.isAuthorizing || store.isCardFlowActive)
                     }
             }
+        }
+    }
+
+    /// The card prompts that need a sheet: the PIN and "Vložte kartu". "Kontrolujem kartu…"
+    /// shows inline in the authorize step's action bar.
+    private var cardPromptSheet: Binding<ZakoCardPrompt?> {
+        Binding(
+            get: { store.cardPrompt == .checkingCard ? nil : store.cardPrompt },
+            set: { prompt in
+                // The sheet closing because the flow moved on to the inline check changes nothing.
+                if prompt == nil, store.cardPrompt == .checkingCard { return }
+                store.cardPrompt = prompt
+            })
+    }
+
+    /// Every step after intake sits under the conversion header (document, steps, order,
+    /// output, EZZK environment); the window subtitle still names the step.
+    private var headedStepContent: some View {
+        VStack(spacing: 0) {
+            if store.step != .intake {
+                ZakoConversionHeader(model: store.conversionHeaderModel)
+                Divider()
+            }
+            stepContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

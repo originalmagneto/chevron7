@@ -218,6 +218,22 @@ final class EZZKRecordPresentationTests: XCTestCase {
         XCTAssertEqual(EvidenceRegisterDetail.timeline(for: row(.outcomeUnknown)).map(\.done), [true, true, false, false])
     }
 
+    func testDetailOfARecordWhoseClauseWaitsSaysSoInTimelineAndState() {
+        let processed = row(.processed)
+        let stages = EvidenceRegisterDetail.timeline(for: processed, pendingStage: .signingClientContainer)
+        XCTAssertEqual(stages.map(\.label).last, "Podpis doložky")
+        XCTAssertEqual(stages.map(\.done), [true, true, true, true, false], "the conversion is not complete yet")
+
+        let facts = Dictionary(uniqueKeysWithValues: EvidenceRegisterDetail
+            .submissionFacts(for: processed, pendingStage: .signingClientContainer).map { ($0.label, $0.value) })
+        XCTAssertEqual(facts["Stav"], "Čaká na podpis doložky")
+
+        let plain = Dictionary(uniqueKeysWithValues: EvidenceRegisterDetail.submissionFacts(for: processed)
+            .map { ($0.label, $0.value) })
+        XCTAssertEqual(plain["Stav"], UXLabels.evidenceStatusLabel(for: .processed))
+        XCTAssertEqual(EvidenceRegisterDetail.timeline(for: processed).count, 4)
+    }
+
     func testDetailFactsShowTheSubmission() {
         var record = row(.rejected)
         record.submittedAt = now
@@ -330,16 +346,17 @@ final class EZZKRecordPresentationTests: XCTestCase {
         XCTAssertTrue(text.contains("chyba servera"), text)
     }
 
-    func testDeadlineColumn() {
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.late), now: now).text, EZZKRecordPresentation.lateWarning)
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.processed), now: now).text, "Spracovaný v EZZK")
-        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.acceptedForProcessing), now: now).tone, .success)
+    func testDeadlineColumn() throws {
+        XCTAssertEqual(EvidenceRegisterDetail.deadline(for: row(.late), now: now)?.text, EvidenceRegisterDetail.overdueText)
+        XCTAssertNil(EvidenceRegisterDetail.deadline(for: row(.processed), now: now), "no repeat of the state")
+        XCTAssertNil(EvidenceRegisterDetail.deadline(for: row(.acceptedForProcessing), now: now))
 
-        let today = EvidenceRegisterDetail.deadline(for: row(.queuedForSubmission), now: now)
+        let today = try XCTUnwrap(EvidenceRegisterDetail.deadline(for: row(.queuedForSubmission), now: now))
         XCTAssertEqual(today.text, "Odoslať ešte dnes, do polnoci")
         XCTAssertEqual(today.tone, .warning)
 
-        let unknown = EvidenceRegisterDetail.deadline(for: row(.outcomeUnknown), now: now.addingTimeInterval(2 * 86400))
+        let unknown = try XCTUnwrap(EvidenceRegisterDetail.deadline(for: row(.outcomeUnknown),
+                                                                     now: now.addingTimeInterval(2 * 86400)))
         XCTAssertEqual(unknown.text, "Najprv overte v EZZK")
         XCTAssertFalse(unknown.text.contains("\u{2014}"), "no em dash")
     }

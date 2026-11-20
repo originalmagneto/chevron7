@@ -35,14 +35,83 @@ enum AIPromptPreset: String, CaseIterable, Identifiable {
     }
 }
 
+/// The learning card's bank counts as a small grid: one cell per kind group
+/// and the rejected examples apart. Pure and tested.
 enum LearningCardText {
+    struct Cell: Equatable, Identifiable {
+        var title: String
+        var count: Int
+        var id: String { title }
+    }
+
+    static func cells(counts: [BankLabel: Int]) -> [Cell] {
+        func n(_ kind: SecurityElement.Kind) -> Int { counts[.kind(kind)] ?? 0 }
+        let protection: [SecurityElement.Kind] = [.watermark, .securityPattern, .opticallyVariable, .securityFoil, .lamination]
+        return [
+            Cell(title: "Pečiatky", count: n(.officialStamp)),
+            Cell(title: "Podpisy", count: n(.handwrittenSignature)),
+            Cell(title: "Slepotlač", count: n(.embossedSeal)),
+            Cell(title: "Parafy", count: n(.initial)),
+            Cell(title: "Šnúrky", count: n(.bindingCord)),
+            Cell(title: "Pásky", count: n(.securityTape)),
+            Cell(title: "Pečate", count: n(.waxSeal)),
+            Cell(title: "Ochranné prvky", count: protection.reduce(0) { $0 + n($1) }),
+            Cell(title: "Iné", count: n(.other)),
+        ]
+    }
+
+    static func rejected(counts: [BankLabel: Int]) -> Int { counts[.negative] ?? 0 }
+
+    /// Cells split into rows of `columns` for a `Grid`.
+    static func rows(counts: [BankLabel: Int], columns: Int = 3) -> [[Cell]] {
+        let all = cells(counts: counts)
+        return stride(from: 0, to: all.count, by: columns).map { Array(all[$0..<min($0 + columns, all.count)]) }
+    }
+
+    /// One spoken line for VoiceOver.
     static func summary(counts: [BankLabel: Int]) -> String {
-        func n(_ label: BankLabel) -> Int { counts[label] ?? 0 }
-        return "Pečiatky: \(n(.kind(.officialStamp))) · Podpisy: \(n(.kind(.handwrittenSignature))) · " +
-               "Slepotlač: \(n(.kind(.embossedSeal))) · Parafy: \(n(.kind(.initial))) · " +
-               "Šnúrky: \(n(.kind(.bindingCord))) · Pásky: \(n(.kind(.securityTape))) · Pečate: \(n(.kind(.waxSeal))) · " +
-               "Ochranné prvky: \([SecurityElement.Kind.watermark, .securityPattern, .opticallyVariable, .securityFoil, .lamination].reduce(0) { $0 + n(.kind($1)) }) · " +
-               "Iné: \(n(.kind(.other))) · Zamietnuté: \(n(.negative))"
+        (cells(counts: counts).map { "\($0.title): \($0.count)" } + ["Zamietnuté: \(rejected(counts: counts))"])
+            .joined(separator: ", ")
+    }
+}
+
+/// The bank counts grid; a zero count is dimmed, the rejected examples sit apart.
+struct LearningBankCountsGrid: View {
+    let counts: [BankLabel: Int]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                ForEach(Array(LearningCardText.rows(counts: counts).enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(row) { cell in
+                            Text(cell.title)
+                                .foregroundStyle(cell.count == 0 ? .tertiary : .secondary)
+                            Text("\(cell.count)")
+                                .monospacedDigit()
+                                .fontWeight(cell.count == 0 ? .regular : .medium)
+                                .foregroundStyle(cell.count == 0 ? .tertiary : .primary)
+                                .gridColumnAlignment(.trailing)
+                                .padding(.trailing, 14)
+                        }
+                    }
+                }
+                // In the grid's own first columns, so it lines up with the kinds above
+                // instead of floating at the form's trailing edge.
+                GridRow {
+                    Text("Zamietnuté")
+                        .foregroundStyle(.secondary)
+                    Text("\(LearningCardText.rejected(counts: counts))")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 14)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .font(.callout)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(LearningCardText.summary(counts: counts))
     }
 }
 
@@ -95,9 +164,7 @@ struct AISettingsPane: View {
                        isOn: $settingsStore.settings.useFoundationModelClassifier)
                     .disabled(!modelAvailable)
                 Toggle("Učiť sa z potvrdených a odmietnutých prvkov", isOn: $settingsStore.settings.learnFromReviews)
-                Text(LearningCardText.summary(counts: counts))
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                LearningBankCountsGrid(counts: counts)
                 HStack {
                     if showAdvanced {
                         Button("Exportovať dataset pre Create ML…") { exportDataset() }

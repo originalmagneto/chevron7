@@ -100,6 +100,8 @@ final class ZakoSessionStore {
     /// Kept for the whole app run once typed (the owner's choice), only in memory; cleared
     /// when the card leaves the reader or the card refuses it, so it never reaches another card.
     var signingPIN = ""
+    /// The card the reader reported last (`applyReaderIdentities`), to tell when it changes.
+    @ObservationIgnored private var lastReaderCard: ZakoReaderCard?
     /// What CryptoTokenKit reports about the inserted card, read without a PIN.
     private(set) var mandateCardState: MandateCertificate.CardState = .noCard
     /// Reads `mandateCardState`; tests substitute it.
@@ -218,9 +220,7 @@ final class ZakoSessionStore {
     /// disables the phone button with this text; `authorizeAndSign` refuses on its own too.
     var mobileRefusalForClientOutput: String? {
         if settings.zakoClientOutput == .singlePDF { return ZakoSinglePDFDelivery.mobileRefusal }
-        if recordFirstPending != nil || ZakoRegime.resolve(conversionTime: Date(),
-                                                            mode: settingsStore.ezzkAccountController.mode,
-                                                            preview: settings.zakoRecordFirstPreview).regime == .recordFirst {
+        if isRecordFirstOrder {
             return Self.recordFirstMobileMessage
         }
         return nil
@@ -244,7 +244,19 @@ final class ZakoSessionStore {
     /// EZZK is outside Demo mode: the button (`isMobileSigningAvailable`) hides in that case, so
     /// the view shows this notice instead of nothing.
     var showsMobileOutsideDemoNotice: Bool {
-        settings.mobileSigningEnabled && !settingsStore.ezzkAccountController.isDemoMode
+        Self.showsMobileOutsideDemoNotice(mobileEnabled: settings.mobileSigningEnabled,
+                                          ezzkDemo: settingsStore.ezzkAccountController.isDemoMode,
+                                          direction: direction,
+                                          phoneRefused: mobileRefusalForClientOutput != nil)
+    }
+
+    /// The notice says the phone works in Demo only, so it shows only where Demo would offer
+    /// the phone at all: never for E→E (no phone button in any mode), the order of 1. 1. 2027
+    /// or the one PDF (both refuse the phone in every mode).
+    nonisolated static func showsMobileOutsideDemoNotice(mobileEnabled: Bool, ezzkDemo: Bool,
+                                                         direction: ConversionDirection,
+                                                         phoneRefused: Bool) -> Bool {
+        mobileEnabled && !ezzkDemo && direction != .electronicToElectronic && !phoneRefused
     }
 
     /// Preflight for the mobile path: the certificate is known only after the phone
@@ -1190,7 +1202,18 @@ final class ZakoSessionStore {
 
     func applyReaderIdentities(_ discovered: [SigningIdentityInfo]) {
         refreshMandateCardState()
+        // Whether a card is in the reader and what CryptoTokenKit sees on it, not the identity
+        // list: resolving the PIN rewrites that list without any card changing.
+        let card = ZakoReaderCard(hasCard: !discovered.isEmpty, mandate: mandateCardState)
+        let cardChanged = lastReaderCard.map { $0 != card } ?? false
+        lastReaderCard = card
         guard !isAuthorizing, !isResolvingCertificate else { return }
+        // An error about the previous card no longer applies once it was taken out or swapped.
+        // Only on the authorize step and outside a card flow: the done step's error is about
+        // EZZK, and a running flow reports on the card it reads.
+        if cardChanged, step == .authorize, pendingCardAction == nil, lastError != nil {
+            lastError = nil
+        }
         if identities != discovered { identities = discovered }
         if identities.isEmpty {
             if !signingPIN.isEmpty { signingPIN = "" }

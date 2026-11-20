@@ -23,6 +23,10 @@ struct AuthorizeNoticePresentation: Equatable {
 
 struct AuthorizeView: View {
     @Bindable var store: ZakoSessionStore
+    @State private var showsMetChecklistItems = false
+
+    /// Authorizing, or a card flow that may go on to sign: the step's other controls stay off.
+    private var isBusy: Bool { store.isAuthorizing || store.isCardFlowActive }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +70,7 @@ struct AuthorizeView: View {
                             Label("Použiť rastrový PDF/A", systemImage: "photo.on.rectangle")
                         }
                         .help("Strany sa uložia ako obrázky v PDF/A-2b; text sa nebude dať označiť. Potom znova autorizujte.")
+                        .disabled(isBusy)
                     }
 
                     if !store.validationErrors.isEmpty {
@@ -90,13 +95,35 @@ struct AuthorizeView: View {
                         Label("Späť na doložku", systemImage: "chevron.left")
                     }
                     .controlSize(.large)
-                    .disabled(store.isAuthorizing)
+                    .disabled(isBusy)
                 }
 
                 Spacer()
 
                 mobileAuthorizeButton
-                authorizeButton
+                if store.cardPrompt == .checkingCard {
+                    // The card check runs inline; the PIN and the card prompts stay sheets.
+                    Button("Zrušiť", role: .cancel) { store.cancelCardFlow() }
+                        .keyboardShortcut(.cancelAction)
+                        .controlSize(.large)
+                }
+                VStack(alignment: .trailing, spacing: 4) {
+                    authorizeButton
+                    // Width-bound under the button and at most two lines: squeezed into the bar's
+                    // row at the window's narrowest, a note that may grow vertically wrapped word
+                    // by word and raised the window's minimum height (582 points). It truncates
+                    // instead there, with the whole text in the help tag.
+                    if let note = authorizeButtonNote {
+                        Label(note.text, systemImage: note.symbol)
+                            .font(.caption)
+                            .foregroundStyle(note.isRefusal ? Color.orange : Color.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 320, alignment: .trailing)
+                            .help(note.text)
+                    }
+                }
             }
         }
         .sheet(isPresented: Bindable(store.mobileSigning).isPresented) {
@@ -115,127 +142,35 @@ struct AuthorizeView: View {
     }
 
     private var tokenStatusRow: some View {
-        Group {
-            if store.signingProvider is DemoSigningProvider {
-                Label("Demo režim: kvalifikovaná karta nie je pripojená.",
-                      systemImage: "creditcard.and.123")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if store.identities.isEmpty {
-                Label("Karta nie je detegovaná: vložte eID alebo advokátsky preukaz.",
-                      systemImage: "creditcard.and.123")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if store.isCertificateTypePending {
-                Label("Karta je pripojená. Typ certifikátu sa overí po zadaní PIN.",
-                      systemImage: "creditcard.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Label("Karta je pripojená, certifikáty načítané.",
-                      systemImage: "creditcard.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-        }
+        let status = store.tokenStatus
+        return Label(status.text, systemImage: status.symbol)
+            .font(.caption)
+            .foregroundStyle(status.isWarning ? Color.orange : (status.isReady ? Color.green : Color.secondary))
     }
 
-    private var e2eChecklistItems: [(Bool, String, String)] {
-        let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
-        return [
-            (store.canLeaveVerification,
-             store.e2eRecordFirstRefusal == nil ? "Podpisy a časové pečiatky klienta overené"
-                : "Kvalifikácia podpisu neurčená: postup od 1. 1. 2027 ju nepripúšťa", "signature.badge.checkmark"),
-            (!store.e2eNeedsQualifiedReport || store.qualifiedReport != nil,
-             store.e2eNeedsQualifiedReport ? "Výsledok kvalifikovanej služby validácie pripojený"
-                : "Overenie aplikáciou Chevron7 (\(store.settingsStore.ezzkAccountController.mode.label))", "checkmark.seal"),
-            (store.e2eDocumentTypesFilled
-                && !store.attestation.originalDocumentTypeLabel.trimmingCharacters(in: .whitespaces).isEmpty,
-             store.e2eFileDocumentTypes.isEmpty ? "Druh dokumentu vyplnený" : "Druh dokumentu vyplnený pri každom súbore",
-             "text.badge.checkmark"),
-            (!store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Názov nového dokumentu vyplnený", "doc.badge.gearshape"),
-            (true, store.attestation.evidenceNumber.map { "Evidenčné číslo z EZZK: \($0)" }
-                ?? "Evidenčné číslo pridelí EZZK pri autorizácii", "number.square.fill"),
-            (!store.attestation.performingPerson.fullName.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Osoba vykonávajúca konverziu vyplnená", "person.crop.circle"),
-            (identitySelected, "Identita pre podpis vybraná", "person.badge.key"),
-            (store.mandateRequirementSatisfied, "Mandátny certifikát SAK pripravený", "checkmark.seal"),
-            (true, "QTS z kvalifikovaných autorít časových pečiatok", "clock.badge.checkmark")
-        ]
-    }
-
-    private var checklistItems: [(Bool, String, String)] {
-        if store.direction == .electronicToElectronic { return e2eChecklistItems }
-        let identitySelected = store.selectedIdentityID != nil && store.selectedIdentity != nil
-        // Outside Demo the switch is hidden and the qualified built-in authorities always stamp.
-        let qtsReady = store.showsQualifiedTimestampToggle
-            ? (!store.usesQualifiedTimestamp
-               || !store.settings.selectedTSAURL.trimmingCharacters(in: .whitespaces).isEmpty)
-            : !TimestampAuthority.qualifiedURLs.isEmpty
-        let qtsLabel = !store.showsQualifiedTimestampToggle
-            ? "QTS z kvalifikovaných autorít časových pečiatok"
-            : (store.usesQualifiedTimestamp ? "QTS pripravená s TSA službou" : "QTS nepoužitá")
-        return [
-            inputSignatureChecklistItem,
-            (store.attestation.originConfirmed,
-             "Originál alebo úradne osvedčená kópia potvrdená", "checkmark.seal"),
-            (!store.attestation.originalDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Názov pôvodného dokumentu vyplnený", "text.badge.checkmark"),
-            (!store.attestation.newDocumentName.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Názov elektronického dokumentu vyplnený", "doc.badge.gearshape"),
-            (store.effectiveSheetCount > 0,
-             "Počet listov určený (\(store.effectiveSheetCount))", "rectangle.stack"),
-            (store.confirmedSecurityElements.count > 0 && store.pendingSecurityElementCount == 0,
-             "Bezpečnostné prvky potvrdené (\(store.confirmedSecurityElements.count))", "shield.checkerboard"),
-            (store.unreviewedNonEmptyPages.isEmpty && store.analysis.nonEmptyPages > 0,
-             "Všetky neprázdne strany skontrolované", "doc.text.magnifyingglass"),
-            // Authorization allocates the number itself, so this item never blocks.
-            (true, store.attestation.evidenceNumber.map { "Evidenčné číslo z EZZK: \($0)" }
-                ?? "Evidenčné číslo pridelí EZZK pri autorizácii", "number.square.fill"),
-            (!store.attestation.performingPerson.fullName.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Osoba vykonávajúca konverziu vyplnená", "person.crop.circle"),
-            (!store.attestation.performingPerson.registrationNumber.trimmingCharacters(in: .whitespaces).isEmpty,
-             "Evidenčné číslo advokáta vyplnené", "building.columns"),
-            (identitySelected, "Identita pre podpis vybraná", "person.badge.key"),
-            (store.mandateRequirementSatisfied, "Mandátny certifikát SAK pripravený", "checkmark.seal"),
-            (qtsReady, qtsLabel, "clock.badge.checkmark")
-        ]
-    }
-
-    private func checklistRow(_ item: (Bool, String, String), blocksBeforeCard: Bool = false) -> some View {
-        let marker = ChecklistMarker(met: item.0, blocksBeforeCard: blocksBeforeCard)
-        return HStack(spacing: 8) {
+    private func checklistRow(_ item: ZakoChecklistItem) -> some View {
+        let marker = ChecklistMarker(met: item.met, blocksBeforeCard: item.blocksBeforeCard)
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: marker.symbol)
                 .foregroundStyle(marker.color)
-            Image(systemName: item.2)
+            Image(systemName: item.symbol)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
-            Text(item.1)
-                .font(.callout)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let hint = item.hint {
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(marker.accessibilityValue)
-    }
-
-    /// Outside Demo the number comes from EZZK, so the saved login is a condition too.
-    private var ezzkChecklistItems: [(Bool, String, String)] {
-        guard store.settingsStore.ezzkAccountController.mode != .demo else { return [] }
-        return [(store.ezzkSignInRefusal == nil, "Prihlásenie do EZZK", "person.badge.shield.checkmark")]
-    }
-
-    private var inputSignatureChecklistItem: (Bool, String, String) {
-        switch store.inputSignatureInspection.state {
-        case .valid:
-            return (true, "Vstupné podpisy overené", "signature.badge.checkmark")
-        case .invalid:
-            return (false, "Vstup obsahuje neplatný elektronický podpis", "xmark.seal")
-        case .unknown:
-            return (false, "Vstupné podpisy sa nepodarilo jednoznačne overiť", "questionmark.seal")
-        case .unavailable:
-            return (false, "Overenie vstupných podpisov nie je dostupné", "exclamationmark.triangle")
-        }
     }
 
     @ViewBuilder
@@ -258,10 +193,12 @@ struct AuthorizeView: View {
                 .font(.callout.weight(.semibold))
             Label("Evidenčné číslo \(pending.evidenceNumber)", systemImage: "number")
                 .font(.callout)
-            Label(pending.stage == .signingClientContainer
-                  ? "EZZK záznam spracovalo" : "Záznam ešte čaká na EZZK",
-                  systemImage: pending.stage == .signingClientContainer ? "checkmark.seal" : "hourglass")
-                .font(.callout)
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                if let timeline = store.conversionTimeline(now: context.date) {
+                    ZakoConversionTimelineView(timeline: timeline, compact: true)
+                        .padding(.vertical, 2)
+                }
+            }
             Text(pending.clientOutput == .singlePDF
                  ? "Podpíše sa uložená doložka pripojená k dokumentu v jednom PDF (\(pending.containerDocumentName))."
                  : "Podpíše sa uložená doložka s dokumentom \(pending.containerDocumentName) v kontajneri ASiC-E.")
@@ -279,17 +216,29 @@ struct AuthorizeView: View {
     }
 
     private var formChecklistCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let checklist = store.authorizeChecklist
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Zákonné náležitosti doložky")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(Array(checklistItems.enumerated()), id: \.offset) { _, item in
+            // What is still missing leads; the met items fold into one row.
+            ForEach(checklist.unmet) { item in
                 checklistRow(item)
             }
-            // The EZZK login stops the authorization before the card, so an unmet one looks like
-            // the warning above the list, not like the card items still to come.
-            ForEach(Array(ezzkChecklistItems.enumerated()), id: \.offset) { _, item in
-                checklistRow(item, blocksBeforeCard: true)
+            if !checklist.met.isEmpty {
+                DisclosureGroup(isExpanded: $showsMetChecklistItems) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(checklist.met) { item in
+                            checklistRow(item)
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Label(checklist.foldedTitle, systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(checklist.allMet ? Color.green : Color.primary)
+                        .accessibilityLabel("\(checklist.foldedTitle) z kontrolného zoznamu")
+                }
             }
             if store.direction == .electronicToElectronic {
                 EmptyView()
@@ -323,6 +272,7 @@ struct AuthorizeView: View {
                     IdentityRow(identity: identity,
                                isSelected: store.selectedIdentityID == identity.id,
                                onSelect: { store.selectedIdentityID = identity.id })
+                        .disabled(isBusy)
                 }
             }
 
@@ -370,7 +320,7 @@ struct AuthorizeView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .disabled(store.isAuthorizing || store.recordFirstPending != nil)
+                    .disabled(isBusy || store.recordFirstPending != nil)
                 }
                 // Ostrá evidencia does not run the one PDF yet: said here, before any card step.
                 if let refusal = store.singlePDFProductionRefusal, store.recordFirstPending == nil {
@@ -395,7 +345,7 @@ struct AuthorizeView: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .disabled(timestampLocked)
+                .disabled(timestampLocked || isBusy)
             }
 
             if store.requiresMandateOverride {
@@ -454,15 +404,17 @@ struct AuthorizeView: View {
     private var authorizeButton: some View {
         HoldToConfirmButton(
             title: store.recordFirstPending == nil ? "Autorizovať konverziu" : "Dokončiť konverziu",
-            systemImage: "signature.badge.checkmark",
-            workingText: store.analysisProgressText,
+            systemImage: ZakoSessionStore.authorizeButtonSymbol,
+            workingText: store.cardPrompt == .checkingCard ? "Kontrolujem kartu…" : store.analysisProgressText,
             disabled: store.isAuthorizing || store.isResolvingCertificate || store.cardPrompt != nil
                 || store.pendingCardAction != nil || !store.canBeginAuthorization,
-            isWorking: store.isAuthorizing
+            isWorking: store.isAuthorizing || store.cardPrompt == .checkingCard
         ) {
             Task { await store.beginAuthorization() }
         }
     }
+
+    private var authorizeButtonNote: ZakoAuthorizeNote? { store.authorizeButtonNote }
 
     @ViewBuilder
     private var mobileAuthorizeButton: some View {
@@ -474,7 +426,7 @@ struct AuthorizeView: View {
                     if store.isAuthorizing, store.isAuthorizingViaMobile {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                        Image(systemName: ZakoSessionStore.mobileAuthorizeButtonSymbol)
                     }
                     Text("Autorizovať mobilom")
                         .font(.body.weight(.semibold))
@@ -483,7 +435,7 @@ struct AuthorizeView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(store.isAuthorizing || !store.isMobilePreflightComplete || store.recordFirstPending != nil
+            .disabled(isBusy || !store.isMobilePreflightComplete || store.recordFirstPending != nil
                 || store.mobileRefusalForClientOutput != nil)
             .help(store.mobileRefusalForClientOutput
                   ?? "Vyžaduje mandátny certifikát na občianskom preukaze. Bez neho sa konverzia odmietne.")
@@ -613,7 +565,13 @@ struct DoneView: View {
             // in); the checker's change count redraws when the periodic check moves it on,
             // and the timeline when a waiting "Overiť v EZZK" becomes available.
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                ezzkStatus(presentation(at: context.date))
+                // The order of 1. 1. 2027 shows where the conversion stands as a timeline;
+                // today's order keeps its result screen.
+                if let timeline = store.conversionTimeline(now: context.date) {
+                    recordFirstStatus(timeline, done: presentation(at: context.date))
+                } else {
+                    ezzkStatus(presentation(at: context.date))
+                }
             }
             if let directory = store.outputDirectory {
                 VStack(alignment: .leading, spacing: 6) {
@@ -669,8 +627,9 @@ struct DoneView: View {
                 .glassCard(cornerRadius: 12, padding: 12)
                 .frame(maxWidth: 520)
             } else {
+                // Plain buttons under the timeline card: a card around one or two buttons
+                // read as a second, empty panel.
                 recordFirstCard
-                    .glassCard(cornerRadius: 12, padding: 12)
                     .frame(maxWidth: 520)
             }
 
@@ -766,6 +725,91 @@ struct DoneView: View {
         }
     }
 
+    /// The record-first waiting and done screen: one headline, the timeline, what comes next.
+    /// The environment is in the conversion header, so it is not repeated here.
+    @ViewBuilder
+    private func recordFirstStatus(_ timeline: ZakoConversionTimeline, done: ZakoDonePresentation) -> some View {
+        let record = store.evidenceStore.record(id: store.recordFirstPending?.recordID ?? store.currentRecordID)
+        let tint = timelineTint(timeline.phase)
+        VStack(spacing: 16) {
+            Label {
+                Text(timeline.headline)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: timelineSymbol(timeline.phase))
+                    .foregroundStyle(tint)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: 520)
+
+            if let result = store.result, timeline.phase == .done, !result.isLegallyBinding {
+                Text("DEMO režim: konverzia nemá právne účinky")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                if !timeline.headlineNamesNumber,
+                   let evidence = store.attestation.evidenceNumber ?? record?.evidenceNumber {
+                    HStack(spacing: 6) {
+                        Text("Evidenčné číslo:")
+                            .foregroundStyle(.secondary)
+                        Text(evidence)
+                            .font(.callout.monospacedDigit().weight(.bold))
+                            .textSelection(.enabled)
+                    }
+                    .font(.callout)
+                }
+                ZakoConversionTimelineView(timeline: timeline)
+                if let line = timeline.line {
+                    Text(line)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(ZakoConversionTimeline.supplementaryLines(done.lines, record: record), id: \.self) { line in
+                    Text(line)
+                        .font(.callout)
+                        .foregroundStyle(done.tone == .success ? Color.secondary : toneColor(done.tone))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ezzkActionButton(done)
+                if let error = done.error {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: 496, alignment: .leading)
+            .glassCard(cornerRadius: 12, padding: 12)
+            .frame(maxWidth: 520)
+        }
+    }
+
+    private func timelineSymbol(_ phase: ZakoConversionTimeline.Phase) -> String {
+        switch phase {
+        case .waitingNotSent: "tray.and.arrow.up.fill"
+        case .waitingOutcomeUnknown: "questionmark.circle.fill"
+        case .waitingSent: "hourglass"
+        case .ready, .signing: "signature"
+        case .done: "checkmark.seal.fill"
+        case .rejected: "xmark.seal.fill"
+        }
+    }
+
+    private func timelineTint(_ phase: ZakoConversionTimeline.Phase) -> Color {
+        switch phase {
+        case .done: .green
+        case .rejected: .red
+        case .waitingNotSent, .waitingOutcomeUnknown: .orange
+        case .waitingSent, .ready, .signing: .accentColor
+        }
+    }
+
     @ViewBuilder
     private func ezzkActionButton(_ done: ZakoDonePresentation) -> some View {
         switch done.action {
@@ -827,34 +871,11 @@ struct DoneView: View {
     }
 
     /// Nothing delivered yet: a record-first conversion waits for EZZK in the background, is
-    /// ready for its clause signature, or ended (rejected) and leaves only a new start.
+    /// ready for its clause signature, or ended (rejected) and leaves only a new start. The
+    /// timeline above says where it stands; this card holds only the actions.
     @ViewBuilder
     private var recordFirstCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let pending = store.recordFirstPending {
-                if pending.stage == .awaitingEZZK {
-                    // Only a record EZZK has (or may have) is said to be sent; a failed send
-                    // is offered again above ("Odoslať do EZZK").
-                    let sent = [.acceptedForProcessing, .outcomeUnknown].contains(
-                        store.evidenceStore.record(id: pending.recordID)?.status)
-                    Label(sent ? "Záznam č. \(pending.evidenceNumber) čaká na spracovanie v EZZK"
-                               : "Záznam č. \(pending.evidenceNumber) ešte nie je v EZZK",
-                          systemImage: sent ? "hourglass" : "tray.and.arrow.up")
-                        .font(.headline)
-                    Text(sent ? ZakoSessionStore.recordFirstSentInBackgroundMessage
-                              : ZakoSessionStore.recordFirstNotSentMessage)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Label("EZZK spracovalo záznam č. \(pending.evidenceNumber)", systemImage: "signature")
-                        .font(.headline)
-                    Text("Podpíšte doložku s dokumentom pre klienta kartou s mandátnym certifikátom.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+        VStack(alignment: .center, spacing: 10) {
             if let warning = store.recordFirstPersistWarning {
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(.caption)

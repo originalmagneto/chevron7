@@ -29,6 +29,7 @@ final class DetectorTrainingFlow {
     var errorText: String?
     var showBatteryConfirm = false
     var trainedBefore = false
+    var snoozedUntil: Date?
     var finishedWhileAway = false
     private let job = DetectorTrainingJob()
     private var runTask: Task<Void, Never>?
@@ -64,11 +65,23 @@ final class DetectorTrainingFlow {
                 snoozedUntil: state.snoozedUntil)
             let eligible = report?.reviewedPages ?? 0
             trainedBefore = state.lastRunAt != nil
+            snoozedUntil = state.snoozedUntil
             estimateText = DetectorTrainingEstimate.slovak(
                 pages: eligible, secondsPerPage: state.secondsPerPage)
         } catch {
             errorText = "Správu sa nepodarilo načítať: \(error.localizedDescription)"
         }
+    }
+
+    /// The overview step's wording, derived from the report and the settings.
+    var overview: DetectorTrainingOverview? {
+        guard let report else { return nil }
+        let settings = settingsStore.settings
+        return DetectorTrainingOverview.make(
+            report: report, trainedBefore: trainedBefore,
+            learnOn: settings.learnFromReviews,
+            offersEnabled: settings.detectorTrainingOffersEnabled,
+            snoozedUntil: snoozedUntil)
     }
 
     func startTraining() {
@@ -402,10 +415,16 @@ struct DetectorTrainingView: View {
                 Button("Pokračovať") { flow.step = .estimate }
                     .buttonStyle(.borderedProminent)
             } else {
+                if let reason = flow.overview?.continueBlockedReason {
+                    Text(reason)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
                 Button("Pokračovať") {}
                     .buttonStyle(.borderedProminent)
                     .disabled(true)
-                    .help("Dostupné po splnení brány: 40 strán z 8 dokumentov.")
+                    .help(flow.overview?.continueBlockedReason ?? "")
             }
         case .estimate:
             Button("Spustiť trénovanie") { flow.startTraining() }
@@ -429,70 +448,9 @@ struct DetectorTrainingView: View {
 
     @ViewBuilder
     private func reportStep(flow: DetectorTrainingFlow) -> some View {
-        @Bindable var flow = flow
-        if let report = flow.report {
-            heroCard(report: report, trainedBefore: flow.trainedBefore)
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Iba na tomto Macu", systemImage: "lock.shield")
-                    .font(.headline)
-                Text("Detektor sa učí z vašich skontrolovaných strán. Nič nikam neposiela a nové návrhy bude stále potvrdzovať človek.")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassCard()
-            VStack(alignment: .leading, spacing: 8) {
-                Label(flow.trainedBefore ? "Nové strany od posledného trénovania" : "Skontrolované strany",
-                      systemImage: "doc.on.doc")
-                    .font(.headline)
-                if flow.trainedBefore {
-                    ProgressView(value: Double(report.newSinceLastTraining),
-                                 total: Double(DetectorTrainingReadiness.retrainNewPages))
-                    Text("\(report.newSinceLastTraining) z \(UXLabels.count(DetectorTrainingReadiness.retrainNewPages, one: "novej", few: "nových", many: "nových"))")
-                        .font(.callout.monospacedDigit())
-                } else {
-                    ProgressView(value: Double(report.reviewedPages),
-                                 total: Double(DetectorTrainingReadiness.firstRunPages))
-                    Text("\(report.reviewedPages) z \(UXLabels.count(DetectorTrainingReadiness.firstRunPages, one: "strany", few: "strany", many: "strán"))")
-                        .font(.callout.monospacedDigit())
-                    ProgressView(value: Double(report.documents),
-                                 total: Double(DetectorTrainingReadiness.firstRunDocuments))
-                    Text("\(report.documents) z \(UXLabels.count(DetectorTrainingReadiness.firstRunDocuments, one: "dokumentu", few: "dokumentov", many: "dokumentov"))")
-                        .font(.callout.monospacedDigit())
-                }
-            }
-            .glassCard()
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Druhy prvkov", systemImage: "square.grid.2x2")
-                    .font(.headline)
-                ForEach(report.trainedLabels.sorted(), id: \.self) { label in
-                    kindRow(label: label, count: report.boxesPerLabel[label] ?? 0,
-                            needed: DetectorTrainingReadiness.boxesPerLabelMinimum)
-                }
-                ForEach(report.leftOutLabels.keys.sorted(), id: \.self) { label in
-                    kindRow(label: label, count: report.leftOutLabels[label] ?? 0,
-                            needed: DetectorTrainingReadiness.boxesPerLabelMinimum)
-                }
-            }
-            .glassCard()
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Detektor z iného Macu", systemImage: "square.and.arrow.down")
-                    .font(.headline)
-                Text("Dovezený detektor pochádza z cudzieho Macu a vašim dokumentom môže škodiť. Overím ho preto na vašich skontrolovaných stranách a aktivujem ho, len keď prejde rovnakou bránou ako vlastné trénovanie. Prenáša sa iba model, nikdy vaše skeny.")
-                    .foregroundStyle(.secondary)
-                Button("Importovať detektor zo súboru…") { pickImportFile(flow: flow) }
-                    .controlSize(.small)
-            }
-            .glassCard()
-            if !report.offerDue {
-                Label {
-                    Text("Na prvé trénovanie treba \(UXLabels.count(DetectorTrainingReadiness.firstRunPages, one: "stranu", few: "strany", many: "strán")) z \(UXLabels.count(DetectorTrainingReadiness.firstRunDocuments, one: "dokumentov", few: "dokumentov", many: "dokumentov")). Každá skontrolovaná strana vás k nemu priblíži.")
-                } icon: {
-                    Image(systemName: "info.circle")
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassCard()
-            }
+        if let overview = flow.overview {
+            DetectorTrainingOverviewView(overview: overview,
+                                         onImport: { pickImportFile(flow: flow) })
         } else {
             ProgressView("Načítavam správu…")
                 .frame(maxWidth: .infinity, minHeight: 200)
@@ -509,87 +467,6 @@ struct DetectorTrainingView: View {
         flow.importModel(from: url)
     }
 
-    private func heroCard(report: DetectorTrainingReadiness, trainedBefore: Bool) -> some View {
-        let fraction = DetectorTrainingReadiness.overallFraction(
-            pages: report.reviewedPages, documents: report.documents,
-            newSince: report.newSinceLastTraining, trainedBefore: trainedBefore)
-        let percent = Int((fraction * 100).rounded())
-        return VStack(alignment: .leading, spacing: 8) {
-            Label("Pripravenosť na trénovanie", systemImage: "speedometer")
-                .font(.headline)
-            HStack(spacing: 16) {
-                Gauge(value: fraction, in: 0...1) {
-                    Text("Hotovo")
-                } currentValueLabel: {
-                    Text("\(percent) %")
-                        .font(.title2.monospacedDigit())
-                }
-                .frame(width: 110, height: 110)
-                Text(bindingLine(report: report, trainedBefore: trainedBefore))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pripravenosť na trénovanie \(percent) percent. \(bindingLine(report: report, trainedBefore: trainedBefore))")
-    }
-
-    private func bindingLine(report: DetectorTrainingReadiness, trainedBefore: Bool) -> String {
-        if report.offerDue {
-            return "Brána splnená, môžete spustiť trénovanie."
-        }
-        if trainedBefore {
-            return "Počíta sa \(UXLabels.count(report.newSinceLastTraining, one: "nová strana", few: "nové strany", many: "nových strán")) z \(DetectorTrainingReadiness.retrainNewPages)."
-        }
-        let pagesFraction = Double(report.reviewedPages) / Double(DetectorTrainingReadiness.firstRunPages)
-        let docsFraction = Double(report.documents) / Double(DetectorTrainingReadiness.firstRunDocuments)
-        if pagesFraction <= docsFraction {
-            return "Najpomalšie rastú strany: \(report.reviewedPages) z \(DetectorTrainingReadiness.firstRunPages)."
-        }
-        return "Najpomalšie rastú dokumenty: \(report.documents) z \(DetectorTrainingReadiness.firstRunDocuments)."
-    }
-
-    private func trainingIcon(for kind: SecurityElement.Kind?) -> String {
-        switch kind {
-        case .officialStamp: return "rosette"
-        case .initial: return "scribble"
-        case .waxSeal: return "seal"
-        default: return kind?.sfSymbol ?? "questionmark.circle"
-        }
-    }
-
-    private func kindRow(label trainingLabel: String, count: Int, needed: Int) -> some View {
-        let kind = VisionTrainSplit.kind(forTrainingLabel: trainingLabel)
-        let ready = count >= needed
-        return HStack(spacing: 10) {
-            Image(systemName: trainingIcon(for: kind))
-                .foregroundStyle(ready ? Color.green : Color.secondary)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(kind?.label ?? trainingLabel)
-                    .font(.callout)
-                ProgressView(value: min(1, Double(count) / Double(max(needed, 1))))
-                    .tint(ready ? .green : .accentColor)
-                if !ready {
-                    Text("Ešte \(UXLabels.count(needed - count, one: "príklad", few: "príklady", many: "príkladov")) do \(needed). Bez nich sa tento druh nenaučí.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Text("\(count)/\(needed)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            if ready {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(kind?.label ?? trainingLabel), \(count) z \(needed)")
-    }
 
     @ViewBuilder
     private func estimateStep(flow: DetectorTrainingFlow) -> some View {

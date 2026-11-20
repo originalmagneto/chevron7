@@ -72,7 +72,7 @@ struct SignatureBanner: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(model.rows) { row in
-                        SignatureBannerRow(row: row)
+                        SignatureRowView(model: SignatureRowModel(row), density: .compact)
                         if row.id != model.rows.last?.id { Divider() }
                     }
                 }
@@ -126,57 +126,5 @@ struct SignatureBanner: View {
         case .warning: "exclamationmark.triangle.fill"
         case .invalid: "xmark.seal.fill"
         }
-    }
-}
-
-private struct SignatureBannerRow: View {
-    let row: SignatureBannerModel.Row
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            if let verdict = row.verdict {
-                Image(systemName: SignatureTreePresentation.icon(verdict))
-                    .foregroundStyle(SignatureTreePresentation.tint(verdict))
-                    .frame(width: 16)
-            } else {
-                Image(systemName: row.warning == nil ? "doc.text" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(row.warning == nil ? Color.secondary : Color.orange)
-                    .frame(width: 16)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(row.title).font(.caption.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                    if row.isNew {
-                        Text("nový").font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                    }
-                    ForEach(row.badges, id: \.self) { badge in
-                        Text(badge).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    }
-                    if let verdictLabel = row.verdictLabel, let verdict = row.verdict {
-                        Text(verdictLabel).font(.caption2).foregroundStyle(SignatureTreePresentation.tint(verdict))
-                    }
-                }
-                if !row.detail.isEmpty {
-                    Text(row.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                }
-                if let dataTimestamp = row.dataTimestamp {
-                    Text(dataTimestamp).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                }
-                if let timestamp = row.timestamp {
-                    Text(timestamp).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                }
-                if let reason = row.reason {
-                    Text(reason).font(.caption2).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let warning = row.warning {
-                    Text(warning).font(.caption2).foregroundStyle(.orange)
-                }
-            }
-        }
-        .padding(.leading, CGFloat(row.depth) * 18)
-        .accessibilityElement(children: .combine)
     }
 }

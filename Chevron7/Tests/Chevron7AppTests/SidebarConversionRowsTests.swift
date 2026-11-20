@@ -136,7 +136,29 @@ final class SidebarConversionRowsTests: XCTestCase {
     func testAccessibilityLabelCarriesNameNumberAndState() {
         let row = SidebarConversionRows.row(for: record(name: "Zmluva", status: .rejected), now: now)
         XCTAssertEqual(row.accessibilityLabel,
+                       "Zaručená konverzia Zmluva, evidenčné číslo 1563-260924-1, stav Odmietnutý v EZZK, prostredie Testovacia evidencia")
+        let live = SidebarConversionRows.row(for: record(name: "Zmluva", status: .rejected, mode: .production), now: now)
+        XCTAssertEqual(live.accessibilityLabel,
                        "Zaručená konverzia Zmluva, evidenčné číslo 1563-260924-1, stav Odmietnutý v EZZK")
+    }
+
+    func testEnvironmentBadgeBesideTheNumberNotInIt() {
+        let test = SidebarConversionRows.row(for: record(name: "T"), now: now)
+        XCTAssertEqual(test.evidenceNumber, "1563-260924-1")
+        XCTAssertEqual(test.environmentBadge, "Test")
+
+        let demo = SidebarConversionRows.row(for: record(name: "D", mode: .demo), now: now)
+        XCTAssertEqual(demo.evidenceNumber, "1563-260924-1", "no suffix in the number")
+        XCTAssertEqual(demo.environmentBadge, "Skúšobný")
+        XCTAssertEqual(demo.stateLabel, "Skúšobný režim, mimo EZZK")
+
+        let waitingDemo = SidebarConversionRows.row(for: record(name: "W", status: .acceptedForProcessing, mode: .demo),
+                                                    now: now, pendingStage: .awaitingEZZK)
+        XCTAssertEqual(waitingDemo.evidenceNumber, "1563-260924-1")
+        XCTAssertEqual(waitingDemo.environmentBadge, "Skúšobný")
+
+        XCTAssertNil(SidebarConversionRows.row(for: record(name: "P", mode: .production), now: now).environmentBadge)
+        XCTAssertNil(SidebarConversionRows.row(for: record(name: "O", mode: nil), now: now).environmentBadge)
     }
 
     func testReadsTheRegisterRowsAsStored() {
@@ -158,11 +180,12 @@ final class SidebarConversionRowsTests: XCTestCase {
                         number: String? = "1563-260924-1",
                         status: EvidenceRecord.Status = .queuedForSubmission,
                         createdAt: Date? = nil,
-                        conversionTime: Date? = nil) -> EvidenceRecord {
+                        conversionTime: Date? = nil,
+                        mode: AppSettings.EZZKMode? = .test) -> EvidenceRecord {
         EvidenceRecord(createdAt: createdAt ?? now, status: status, direction: .paperToElectronic,
                        originalName: name, newDocumentName: newName, evidenceNumber: number,
                        fingerprintSHA256Hex: "ab", attestationXML: "<x/>",
                        conversionTime: conversionTime ?? now, performingPersonName: "JUDr. Test Testovací",
-                       securityElementCount: 0, totalPages: 1, totalSheets: 1, ezzkMode: .test)
+                       securityElementCount: 0, totalPages: 1, totalSheets: 1, ezzkMode: mode)
     }
 }

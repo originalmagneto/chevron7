@@ -235,6 +235,23 @@ final class RecentDocumentStoreTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: "app.slovensko.chevron7.recentDocuments.v1"))
     }
 
+    /// The sidebar's "Vyčistiť" forgets the list only: the documents stay on disk.
+    func testClearKeepsTheDocumentsOnDisk() {
+        let settingsStore = makeSettingsStore()
+        settingsStore.settings.retainRecentDocuments = true
+        let store = RecentDocumentStore(settingsStore: settingsStore, defaults: makeDefaults())
+        let one = makeDocument(named: "one.pdf")
+        let two = makeDocument(named: "two.pdf")
+        store.record(url: one)
+        store.record(url: two)
+
+        store.clear()
+
+        XCTAssertTrue(store.entries.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: one.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: two.path))
+    }
+
     func testRetainRecentDocumentsDefaultsToFalseWhenMissingFromEncodedSettings() throws {
         let settings = AppSettings()
         let encoded = try JSONEncoder().encode(settings)

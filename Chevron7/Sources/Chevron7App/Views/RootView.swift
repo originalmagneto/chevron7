@@ -183,10 +183,13 @@ struct RootView: View {
                         .font(.callout)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(row.evidenceNumber)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(row.evidenceNumber)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        EZZKEnvironmentBadge(mode: row.environment, form: .short)
+                    }
                 }
             }
             .padding(.vertical, 1)
@@ -341,9 +344,11 @@ struct RootView: View {
                         }
                     } header: {
                         historyHeader("Nedávne dokumenty") {
-                            Button("Vymazať zoznam", systemImage: "trash", role: .destructive) {
+                            // Forgets the list only; the documents stay where they are.
+                            Button("Vyčistiť", systemImage: "trash") {
                                 recentDocumentStore.clear()
                             }
+                            .help("Vyčistí zoznam nedávnych dokumentov. Súbory zostanú na disku.")
                         }
                     }
                 }
@@ -410,7 +415,7 @@ struct RootView: View {
                                 Task { await signingStore.prepareBatch(ids: ids) }
                             } label: {
                                 Label("Podpísať všetky (\(signingStore.unsignedQueueItems.count))",
-                                      systemImage: "signature.badge.checkmark")
+                                      systemImage: "signature")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(Color.accentColor)
                             }

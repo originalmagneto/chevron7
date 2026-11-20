@@ -18,11 +18,21 @@ enum SidebarConversionRows {
         let stateLabel: String
         let symbol: String
         let tone: EZZKRecordPresentation.Tone
+        /// The EZZK environment the row's number came from; nil for a row written before modes
+        /// were stored.
+        var environment: AppSettings.EZZKMode? = nil
         /// A record-first conversion waiting in the background: the row opens it in ZaKo.
         var pendingStage: RecordFirstPending.Stage? = nil
 
+        /// "Skúšobný" or "Test" beside the number; nothing for Ostrá evidencia.
+        var environmentBadge: String? {
+            EZZKEnvironmentBadgeModel.text(for: environment, form: .short)
+        }
+
         var accessibilityLabel: String {
-            "Zaručená konverzia \(name), evidenčné číslo \(evidenceNumber), stav \(stateLabel)"
+            let base = "Zaručená konverzia \(name), evidenčné číslo \(evidenceNumber), stav \(stateLabel)"
+            guard let environment, environmentBadge != nil else { return base }
+            return base + ", prostredie \(EZZKEnvironmentBadgeModel.text(for: environment, form: .list) ?? environment.label)"
         }
     }
 
@@ -57,24 +67,26 @@ enum SidebarConversionRows {
         let isOverdue = record.status.isSubmissionPendingState && now > record.submissionDeadline
         let stateLabel = UXLabels.evidenceStatusLabel(for: record.status, isOverdue: isOverdue)
         let showsOverdue = stateLabel != UXLabels.evidenceStatusLabel(for: record.status)
-        // A Demo row never reached EZZK: its number says so, its state is the simulation's.
+        // A Demo row never reached EZZK: its badge says so, its state is the simulation's.
         let isDemo = record.ezzkMode == .demo
         if let pendingStage,
            let waiting = RecordFirstPendingPresentation.state(stage: pendingStage, rowStatus: record.status) {
             return Row(id: record.id,
                        name: displayName(for: record),
-                       evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · skúšobný režim" : ""),
+                       evidenceNumber: nonEmpty(record.evidenceNumber) ?? "nezískané",
                        stateLabel: waiting.label,
                        symbol: waiting.symbol,
                        tone: waiting.tone,
+                       environment: record.ezzkMode,
                        pendingStage: pendingStage)
         }
         return Row(id: record.id,
                    name: displayName(for: record),
-                   evidenceNumber: (nonEmpty(record.evidenceNumber) ?? "nezískané") + (isDemo ? " · skúšobný režim" : ""),
+                   evidenceNumber: nonEmpty(record.evidenceNumber) ?? "nezískané",
                    stateLabel: isDemo ? "Skúšobný režim, mimo EZZK" : stateLabel,
                    symbol: showsOverdue ? "clock.badge.exclamationmark" : record.status.sfSymbol,
-                   tone: showsOverdue ? .failure : EZZKRecordPresentation.tone(for: record.status))
+                   tone: showsOverdue ? .failure : EZZKRecordPresentation.tone(for: record.status),
+                   environment: record.ezzkMode)
     }
 
     /// The original's name, else the new document's, never an empty row.

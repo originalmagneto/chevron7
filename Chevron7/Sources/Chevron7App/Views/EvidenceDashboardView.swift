@@ -16,6 +16,7 @@ struct EvidenceDashboardView: View {
     @State private var records: [EvidenceRecord] = []
     @State private var filterText = ""
     @State private var statusFilter: EvidenceRecord.Status?
+    @State private var environmentFilter: EvidenceRegisterFilter.Environment = .all
     @State private var selectedRecordID: UUID?
     @State private var showDetail = false
     @State private var isSubmitting = false
@@ -29,8 +30,10 @@ struct EvidenceDashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The separator sits on the bar: as a sibling between the bar and the table it had
+            // nothing opaque behind it and drew as a bright line in dark mode.
             summaryHeader
-            Divider().opacity(0.5)
+                .overlay(alignment: .bottom) { Divider() }
 
             if let loadError = settingsStore.evidenceStore.loadError {
                 // Never an empty register over one that could not be read.
@@ -52,32 +55,38 @@ struct EvidenceDashboardView: View {
                             if record.isOverdue, record.ezzkMode != .demo { OverdueDot() }
                             Text(record.evidenceNumber ?? "nezískané")
                                 .font(.callout.monospacedDigit().weight(.semibold))
-                            if record.ezzkMode == .demo { DemoBadge() }
+                            // The short form: the full name took the number's room and
+                            // truncated it. The badge's help says the environment in full.
+                            EZZKEnvironmentBadge(mode: record.ezzkMode, form: .short)
                         }
                         .contextMenu { recordContextMenu(for: record) }
                     }
-                    .width(min: 130, ideal: 170)
+                    .width(min: 200, ideal: 250)
 
                     TableColumn("Stav") { record in
-                        Group {
-                            if let waiting = pendingState(record) {
-                                Label(waiting.label, systemImage: waiting.symbol)
-                                    .foregroundStyle(Self.tint(for: waiting.tone))
-                            } else {
-                                Label(UXLabels.evidenceStatusLabel(for: record.status, isOverdue: record.isOverdue),
-                                      systemImage: record.status.sfSymbol)
-                                    .foregroundStyle(statusTint(record.status))
-                            }
-                        }
-                        .contextMenu { recordContextMenu(for: record) }
-                    }
-                    .width(min: 150, ideal: 190)
-
-                    TableColumn("Lehota EZZK") { record in
-                        deadlineLabel(record)
+                        statusCell(record)
                             .contextMenu { recordContextMenu(for: record) }
                     }
-                    .width(min: 140, ideal: 220)
+                    .width(min: 150, ideal: 230)
+
+                    TableColumn("Smer") { record in
+                        let direction = EvidenceRegisterRowPresentation.direction(record.direction)
+                        Label(direction.text, systemImage: direction.symbol)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .help(EvidenceRegisterRowPresentation.directionHelp(record.direction))
+                            .accessibilityLabel(EvidenceRegisterRowPresentation.directionHelp(record.direction))
+                            .contextMenu { recordContextMenu(for: record) }
+                    }
+                    .width(min: 60, ideal: 70)
+
+                    TableColumn("Výstup") { record in
+                        Text(ZakoConversionHeaderModel.outputChip(for: record.clientOutput) ?? "")
+                            .font(.callout)
+                            .lineLimit(1)
+                            .contextMenu { recordContextMenu(for: record) }
+                    }
+                    .width(min: 80, ideal: 120)
 
                     TableColumn("Dátum konverzie") { record in
                         Text(LocalEvidenceStore.csvDate(record.conversionTime))
@@ -86,26 +95,17 @@ struct EvidenceDashboardView: View {
                     }
                     .width(min: 120, ideal: 140)
 
-                    TableColumn("Pôvodný dokument") { record in
+                    TableColumn("Dokument") { record in
                         Text(record.originalName).lineLimit(1)
                             .help(record.originalName)
                             .contextMenu { recordContextMenu(for: record) }
                     }
 
-                    TableColumn("Strany / Listy") { record in
-                        Text(record.direction == .electronicToElectronic
-                             ? "E→E" : "\(record.totalPages) / \(record.totalSheets)")
-                            .font(.caption.monospacedDigit())
+                    TableColumn("Lehota EZZK") { record in
+                        deadlineLabel(record)
                             .contextMenu { recordContextMenu(for: record) }
                     }
-                    .width(90)
-
-                    TableColumn("SHA-256") { record in
-                        Text(String(record.fingerprintSHA256Hex.prefix(16)) + "…")
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .contextMenu { recordContextMenu(for: record) }
-                    }
+                    .width(min: 110, ideal: 170)
                 }
                 .onKeyPress(.return) {
                     guard selectedRecordID != nil else { return .ignored }
@@ -128,6 +128,16 @@ struct EvidenceDashboardView: View {
                 }
                 .pickerStyle(.menu)
                 .frame(minWidth: 130, idealWidth: 160)
+            }
+            ToolbarItem(placement: .automatic) {
+                Picker("Prostredie EZZK", selection: $environmentFilter) {
+                    ForEach(EvidenceRegisterFilter.Environment.allCases) { environment in
+                        Text(environment.label).tag(environment)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(minWidth: 130, idealWidth: 170)
+                .help("Zobraziť konverzie z jedného prostredia EZZK")
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
@@ -269,16 +279,15 @@ struct EvidenceDashboardView: View {
     private var summaryHeader: some View {
         let summary = EvidenceRegisterSummary(records: records)
         let overdue = records.filter { $0.isOverdue && $0.ezzkMode != .demo }.count
+        let tiles = EvidenceSummaryTile.tiles(summary: summary, overdue: overdue)
         return HStack(spacing: 12) {
-            SummaryCard(title: "Konverzií celkovo", value: "\(summary.total)", symbol: "archivebox", tint: .accentColor)
-            SummaryCard(title: "Zapísaných v EZZK", value: "\(summary.sent)", symbol: "checkmark.seal.fill", tint: .green)
-            SummaryCard(title: "Čaká na odoslanie", value: "\(summary.pending)", symbol: "tray.and.arrow.up", tint: summary.pending > 0 ? .orange : .secondary)
-            SummaryCard(title: "Odmietnuté alebo nepodpísané", value: "\(summary.failed)", symbol: "xmark.seal.fill", tint: summary.failed > 0 ? .red : .secondary)
-            SummaryCard(title: "Po lehote 24 h", value: "\(overdue)", symbol: "clock.badge.exclamationmark", tint: overdue > 0 ? .red : .secondary)
-            if summary.demo > 0 {
-                SummaryCard(title: "Skúšobný režim (mimo EZZK)", value: "\(summary.demo)", symbol: "theatermasks", tint: .secondary)
-                    .help("Konverzie v skúšobnom režime sú lokálna simulácia. Do EZZK sa nikdy neodoslali.")
+            // Full titles while they fit, then the value alone with the title in the tooltip:
+            // never truncated, and the last variant can shrink, so the window's minimum stays.
+            ViewThatFits(in: .horizontal) {
+                summaryTiles(tiles, compact: false)
+                summaryTiles(tiles, compact: true)
             }
+            .layoutPriority(1)
             Spacer()
             if let feedback = submitFeedback {
                 Text(feedback)
@@ -308,13 +317,63 @@ struct EvidenceDashboardView: View {
         .background(.bar)
     }
 
+    private func summaryTiles(_ tiles: [EvidenceSummaryTile], compact: Bool) -> some View {
+        HStack(spacing: compact ? 8 : 10) {
+            ForEach(tiles) { tile in
+                SummaryCard(title: tile.title, value: "\(tile.value)", symbol: tile.symbol,
+                            tint: Self.color(for: tile.tint), compact: compact)
+                    .help(tile.help)
+            }
+        }
+    }
+
+    static func color(for tint: EvidenceSummaryTile.Tint) -> Color {
+        switch tint {
+        case .accent: .accentColor
+        case .success: .green
+        case .attention: .orange
+        case .failure: .red
+        case .quiet: .secondary
+        }
+    }
+
+    @ViewBuilder
     private func deadlineLabel(_ record: EvidenceRecord) -> some View {
-        let deadline = EvidenceRegisterDetail.deadline(for: record, now: Date())
-        return Text(deadline.text)
-            .font(deadline.tone == .failure ? .caption.weight(.semibold) : .caption)
-            .foregroundStyle(Self.tint(for: deadline.tone))
-            .lineLimit(2)
-            .help(deadline.text)
+        if let deadline = EvidenceRegisterDetail.deadline(for: record, now: Date()) {
+            Text(deadline.text)
+                .font(deadline.tone == .failure ? .caption.weight(.semibold) : .caption)
+                .foregroundStyle(Self.tint(for: deadline.tone))
+                .lineLimit(1)
+                .help(record.status == .late ? EZZKRecordPresentation.lateWarning : deadline.text)
+        } else {
+            Text("")
+        }
+    }
+
+    /// The row's state; a conversion waiting for its clause signature offers "Dokončiť" right
+    /// there, the same action as the detail footer's "Dokončiť konverziu".
+    private func statusCell(_ record: EvidenceRecord) -> some View {
+        let row = EvidenceRegisterRowPresentation(record: record,
+                                                  pendingStage: settingsStore.recordFirstPendingStore
+                                                      .pending(id: record.id)?.stage,
+                                                  now: Date())
+        return HStack(spacing: 6) {
+            Label(row.tableStatusLabel, systemImage: row.status.symbol)
+                .foregroundStyle(Self.tint(for: row.status.tone))
+                .lineLimit(1)
+                .help(row.status.label)
+                .accessibilityLabel(row.status.label)
+            if row.canFinish {
+                Spacer(minLength: 0)
+                Button("Dokončiť") {
+                    onFinishPendingConversion(record.id)
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .help("Otvorí konverziu v Zaručenej konverzii, kde podpíšete doložku s dokumentom pre klienta kartou")
+                .accessibilityLabel("Dokončiť konverziu")
+            }
+        }
     }
 
     static func tint(for tone: EZZKRecordPresentation.Tone) -> Color {
@@ -327,37 +386,10 @@ struct EvidenceDashboardView: View {
     }
 
     private var hasActiveFilter: Bool {
-        statusFilter != nil || !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        EvidenceRegisterFilter.isActive(status: statusFilter, environment: environmentFilter, text: filterText)
     }
     private var filteredRecords: [EvidenceRecord] {
-        var result = records
-        if let statusFilter {
-            result = result.filter { $0.status == statusFilter }
-        }
-        guard !filterText.isEmpty else { return result }
-        let query = filterText.lowercased()
-        return result.filter {
-            $0.originalName.lowercased().contains(query) ||
-            $0.newDocumentName.lowercased().contains(query) ||
-            ($0.evidenceNumber ?? "").lowercased().contains(query)
-        }
-    }
-
-    /// A record-first conversion waiting in the background reads as such, not as its bare row state.
-    private func pendingState(_ record: EvidenceRecord) -> RecordFirstPendingPresentation.State? {
-        settingsStore.recordFirstPendingStore.pending(id: record.id).flatMap {
-            RecordFirstPendingPresentation.state(stage: $0.stage, rowStatus: record.status)
-        }
-    }
-
-    private func statusTint(_ status: EvidenceRecord.Status) -> Color {
-        switch status {
-        case .draft, .awaitingNumber, .recordUnsigned: return .secondary
-        case .readyToSign: return .blue
-        case .signed, .queuedForSubmission, .acceptedForProcessing, .outcomeUnknown, .late: return .orange
-        case .submitted, .processed: return .green
-        case .submissionFailed, .rejected: return .red
-        }
+        EvidenceRegisterFilter.apply(records, status: statusFilter, environment: environmentFilter, text: filterText)
     }
 
     private func reload() {
@@ -472,55 +504,60 @@ struct OverdueDot: View {
     }
 }
 
-/// Marks a row made in EZZK Demo mode: its state is a local simulation.
-struct DemoBadge: View {
-    var body: some View {
-        Text("DEMO")
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.16), in: Capsule())
-            .foregroundStyle(.secondary)
-            .help("Konverzia v skúšobnom režime: lokálna simulácia, do EZZK sa neodoslala.")
-            .accessibilityLabel("DEMO: skúšobný režim, mimo EZZK")
-    }
-}
-
 struct SummaryCard: View {
     let title: String
     let value: String
     let symbol: String
     let tint: Color
+    /// Symbol and value only; the title stays in the accessibility label (and the tooltip).
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 6 : 8) {
             Image(systemName: symbol)
-                .font(.title3)
+                .font(compact ? .callout : .body)
                 .foregroundStyle(tint.gradient)
-            VStack(alignment: .leading, spacing: 1) {
+            if compact {
                 Text(value)
-                    .font(.title3.monospacedDigit().weight(.bold))
-                Text(title)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.callout.monospacedDigit().weight(.bold))
+                    .lineLimit(1)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(value)
+                        .font(.callout.monospacedDigit().weight(.bold))
+                    Text(title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
 
 // MARK: - Record Detail Modal Sheet
 struct RecordDetailView: View {
+    /// Opened at this size, so the status, the submission and the facts show without scrolling;
+    /// still resizable down to the minimum, where the overview scrolls.
+    static let idealSize = CGSize(width: 720, height: 800)
+    static let minimumSize = CGSize(width: 560, height: 400)
+    static let padding: CGFloat = 22
+
     @Bindable var settingsStore: AppSettingsStore
     let recordID: UUID
     var onFinishPendingConversion: (UUID) -> Void = { _ in }
     let onClose: () -> Void
+    /// False only in layout tests, which measure the overview's full height.
+    var scrollsOverview = true
     @State private var copiedFingerprint = false
     @State private var showDeleteConfirm = false
     @State private var showResendConfirm = false
@@ -558,15 +595,13 @@ struct RecordDetailView: View {
                 Text("Záznam o konverzii (XML)").tag(1)
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
 
             if selectedTab == 0 {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        StatusTimeline(stages: EvidenceRegisterDetail.timeline(for: record)
-                            .map { (label: $0.label, done: $0.done, failed: $0.failed) })
-                        submissionCard(record)
-                        factsGrid(record)
-                    }
+                if scrollsOverview {
+                    ScrollView { overview(record) }
+                } else {
+                    overview(record)
                 }
             } else {
                 attestationPreview(record)
@@ -574,68 +609,29 @@ struct RecordDetailView: View {
 
             Spacer(minLength: 0)
 
-            HStack {
-                if let uri = record.evidenceURI {
-                    Link(destination: URL(string: "https://ezzk.iomo.sk")!) {
-                        Label("Overiť na portáli CEZZK", systemImage: "safari")
-                    }
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(uri, forType: .string)
-                    } label: {
-                        Image(systemName: "link.badge.plus")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Skopírovať URI záznamu")
-                    .help("Skopírovať URI záznamu (\(uri))")
-                }
-
-                Spacer()
-
-                if settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage == .signingClientContainer {
-                    Button {
-                        onFinishPendingConversion(record.id)
-                    } label: {
-                        Label("Dokončiť konverziu", systemImage: "signature")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .help("Otvorí konverziu v Zaručenej konverzii, kde podpíšete doložku s dokumentom pre klienta kartou")
-                }
-
-                if record.recordContainerPath != nil {
-                    Button {
-                        actionMessage = nil
-                        RecordContainerExport.save(record, from: settingsStore.evidenceStore) { actionMessage = $0 }
-                    } label: {
-                        Label("Uložiť záznam…", systemImage: "square.and.arrow.down")
-                    }
-                    .help("Uložiť podpísaný záznam o konverzii (ASiC-E), ktorý sa odosiela do EZZK")
-                }
-
-                if record.validationEvidencePath != nil {
-                    Button {
-                        actionMessage = nil
-                        ValidationEvidenceExport.save(record, from: settingsStore.evidenceStore) { actionMessage = $0 }
-                    } label: {
-                        Label("Uložiť správu o overení…", systemImage: "checkmark.seal")
-                    }
-                    .help("Uložiť výsledok overenia podpisov pôvodného dokumentu (E→E)")
-                }
-
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Label("Zmazať", systemImage: "trash")
-                }
-                .disabled(settingsStore.statusChecker.isBusy(record.id))
-
-                Button("Zavrieť") { onClose() }
-                    .keyboardShortcut(.defaultAction)
-            }
+            RecordDetailFooter(
+                evidenceURI: record.evidenceURI,
+                canFinish: EvidenceRegisterRowPresentation.canFinish(
+                    pendingStage: settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage),
+                canSaveRecord: record.recordContainerPath != nil,
+                canSaveValidation: record.validationEvidencePath != nil,
+                deleteDisabled: settingsStore.statusChecker.isBusy(record.id),
+                onFinish: { onFinishPendingConversion(record.id) },
+                onSaveRecord: {
+                    actionMessage = nil
+                    RecordContainerExport.save(record, from: settingsStore.evidenceStore) { actionMessage = $0 }
+                },
+                onSaveValidation: {
+                    actionMessage = nil
+                    ValidationEvidenceExport.save(record, from: settingsStore.evidenceStore) { actionMessage = $0 }
+                },
+                onDelete: { showDeleteConfirm = true },
+                onClose: onClose)
         }
-        .padding(22)
-        .frame(minWidth: 320, idealWidth: 600, maxWidth: .infinity,
-               minHeight: 400, idealHeight: 600, maxHeight: .infinity)
+        .padding(Self.padding)
+        .frame(minWidth: Self.minimumSize.width, idealWidth: Self.idealSize.width, maxWidth: .infinity,
+               minHeight: Self.minimumSize.height, idealHeight: scrollsOverview ? Self.idealSize.height : nil,
+               maxHeight: .infinity)
         .confirmationDialog("Naozaj chcete vymazať tento záznam?", isPresented: $showDeleteConfirm) {
             Button("Zmazať záznam", role: .destructive) {
                 if settingsStore.statusChecker.delete(id: record.id) {
@@ -648,6 +644,16 @@ struct RecordDetailView: View {
             Button("Zrušiť", role: .cancel) {}
         } message: {
             Text("Záznam bude natrvalo odstránený z lokálnej evidencie.")
+        }
+    }
+
+    private func overview(_ record: EvidenceRecord) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            StatusTimeline(stages: EvidenceRegisterDetail.timeline(
+                for: record, pendingStage: settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage)
+                .map { (label: $0.label, done: $0.done, failed: $0.failed) })
+            submissionCard(record)
+            factsGrid(record)
         }
     }
 
@@ -691,7 +697,9 @@ struct RecordDetailView: View {
         let verifyWaitsUntil = record.status == .outcomeUnknown ? nextCheck.flatMap { $0 > Date() ? $0 : nil } : nil
         return VStack(alignment: .leading, spacing: 10) {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                ForEach(EvidenceRegisterDetail.submissionFacts(for: record), id: \.label) { fact in
+                ForEach(EvidenceRegisterDetail.submissionFacts(
+                    for: record, pendingStage: settingsStore.recordFirstPendingStore.pending(id: record.id)?.stage),
+                    id: \.label) { fact in
                     GridRow {
                         Text(fact.label).foregroundStyle(.secondary)
                         Text(fact.value).textSelection(.enabled)
@@ -847,6 +855,85 @@ struct RecordDetailView: View {
     }
 }
 
+/// The detail sheet's footer: "Zmazať" apart on the left, the save and portal actions in one
+/// "Akcie" menu with their full labels, "Dokončiť konverziu" when the conversion waits for
+/// its clause signature, and the primary "Zavrieť" on the right. "Overiť v EZZK" stays in the
+/// submission card, next to the state it checks and its own waiting rules.
+struct RecordDetailFooter: View {
+    let evidenceURI: String?
+    let canFinish: Bool
+    let canSaveRecord: Bool
+    let canSaveValidation: Bool
+    let deleteDisabled: Bool
+    let onFinish: () -> Void
+    let onSaveRecord: () -> Void
+    let onSaveValidation: () -> Void
+    let onDelete: () -> Void
+    let onClose: () -> Void
+    @Environment(\.openURL) private var openURL
+
+    static let portalURL = URL(string: "https://ezzk.iomo.sk")!
+
+    private var hasActions: Bool { canSaveRecord || canSaveValidation || evidenceURI != nil }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Zmazať", systemImage: "trash")
+            }
+            .disabled(deleteDisabled)
+
+            Spacer(minLength: 12)
+
+            if hasActions {
+                Menu {
+                    if canSaveRecord {
+                        Button(action: onSaveRecord) {
+                            Label("Uložiť záznam…", systemImage: "square.and.arrow.down")
+                        }
+                        .help("Uložiť podpísaný záznam o konverzii (ASiC-E), ktorý sa odosiela do EZZK")
+                    }
+                    if canSaveValidation {
+                        Button(action: onSaveValidation) {
+                            Label("Uložiť správu o overení…", systemImage: "checkmark.seal")
+                        }
+                        .help("Uložiť výsledok overenia podpisov pôvodného dokumentu (E→E)")
+                    }
+                    if let evidenceURI {
+                        if canSaveRecord || canSaveValidation { Divider() }
+                        Button {
+                            openURL(Self.portalURL)
+                        } label: {
+                            Label("Overiť na portáli CEZZK", systemImage: "safari")
+                        }
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(evidenceURI, forType: .string)
+                        } label: {
+                            Label("Skopírovať URI záznamu", systemImage: "link")
+                        }
+                    }
+                } label: {
+                    Label("Akcie", systemImage: "ellipsis.circle")
+                }
+                .fixedSize()
+                .help("Uložiť záznam alebo správu o overení, overiť na portáli CEZZK")
+            }
+
+            if canFinish {
+                Button(action: onFinish) {
+                    Label("Dokončiť konverziu", systemImage: "signature")
+                }
+                .help("Otvorí konverziu v Zaručenej konverzii, kde podpíšete doložku s dokumentom pre klienta kartou")
+            }
+
+            Button("Zavrieť", action: onClose)
+                .keyboardShortcut(.defaultAction)
+        }
+        .lineLimit(1)
+    }
+}
+
 struct StatusTimeline: View {
     let stages: [(label: String, done: Bool, failed: Bool)]
 
@@ -872,7 +959,11 @@ struct StatusTimeline: View {
                     Text(stage.label)
                         .font(.caption2)
                         .foregroundStyle(stage.done ? .primary : .secondary)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(stage.label + ", " + (stage.failed ? "zlyhalo" : stage.done ? "hotovo" : "čaká"))
             }
         }
         .padding(.vertical, 6)
