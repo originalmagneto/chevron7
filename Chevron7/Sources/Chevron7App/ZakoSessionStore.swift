@@ -109,6 +109,13 @@ final class ZakoSessionStore {
     /// Whether any reader slot holds a card (CryptoTokenKit slot state, no card session), or
     /// nil when the slots cannot be read. The app sets it; tests substitute it.
     var readerSlotsHaveCard: () async -> Bool? = { nil }
+    /// Whether the drivers answered which card is in the reader since the identities were last
+    /// cleared (launch or a new session). Until then an empty identity list means "not known yet",
+    /// never "no card" (`cardReading`).
+    private(set) var readerAnswered = false
+    /// What the reader slots said last (`readerSlotsHaveCard`), or nil before the first read or
+    /// when they cannot be read.
+    private(set) var readerSlotsReportCard: Bool?
     /// The card step the view presents while a guarded action waits for it.
     var cardPrompt: ZakoCardPrompt?
     /// The action the card flow completes once the mandate certificate is confirmed.
@@ -1188,6 +1195,9 @@ final class ZakoSessionStore {
         isRefreshingIdentities = true
         defer { isRefreshingIdentities = false }
 
+        // The slots first: they answer at once, so an empty answer from the drivers is never
+        // shown as an empty reader while CryptoTokenKit sees a card.
+        readerSlotsReportCard = await readerSlotsHaveCard()
         applyReaderIdentities(await signingProvider.availableIdentities())
         if !identities.isEmpty, !signingPIN.isEmpty, !hasResolvedCertificate {
             await resolveCertificateForAuthorization()
@@ -1202,6 +1212,12 @@ final class ZakoSessionStore {
 
     func applyReaderIdentities(_ discovered: [SigningIdentityInfo]) {
         refreshMandateCardState()
+        readerAnswered = true
+        // The drivers list no card: ask the slots whether one is there all the same (a card
+        // without its driver), so the step never asks for a card that is already in.
+        if discovered.isEmpty {
+            Task { await refreshReaderSlotPresence() }
+        }
         // Whether a card is in the reader and what CryptoTokenKit sees on it, not the identity
         // list: resolving the PIN rewrites that list without any card changing.
         let card = ZakoReaderCard(hasCard: !discovered.isEmpty, mandate: mandateCardState)
@@ -1226,6 +1242,31 @@ final class ZakoSessionStore {
             selectedIdentityID = identities.first(where: { $0.isMandateCertificate })?.id
                 ?? identities.first?.id
         }
+    }
+
+    func refreshReaderSlotPresence() async {
+        readerSlotsReportCard = await readerSlotsHaveCard()
+    }
+
+    /// Whether the card line and the checklist may speak about the card yet (`cardReading`).
+    var cardReading: ZakoCardReading {
+        Self.cardReading(isDemo: signingProviderIsDemo, readerAnswered: readerAnswered,
+                         resolvingCertificate: isResolvingCertificate || cardPrompt == .checkingCard,
+                         hasIdentities: !identities.isEmpty, mandateKnown: mandateCardState != .noCard,
+                         slotsReportCard: readerSlotsReportCard)
+    }
+
+    /// A card that is known (identities, or CryptoTokenKit's mandate state) is settled. Without
+    /// one: before the drivers first answer, or while the card is being read, the state is not
+    /// known yet; a card the slots report but no driver lists is a card that cannot be read,
+    /// never an empty reader.
+    nonisolated static func cardReading(isDemo: Bool, readerAnswered: Bool, resolvingCertificate: Bool,
+                                        hasIdentities: Bool, mandateKnown: Bool,
+                                        slotsReportCard: Bool?) -> ZakoCardReading {
+        if isDemo || hasIdentities || mandateKnown { return .settled }
+        if !readerAnswered || resolvingCertificate { return .checking }
+        if slotsReportCard == true { return .unreadCard }
+        return .settled
     }
 
     var hasResolvedCertificate: Bool {
@@ -2165,6 +2206,7 @@ func resetSession(keepingProfile: Bool) {
         sheetMethod = .duplexEstimate
         manualSheetCount = nil
         identities = []
+        readerAnswered = false
         selectedIdentityID = nil
         allowNonMandateOverride = false
         mandateOverrideIdentityID = nil

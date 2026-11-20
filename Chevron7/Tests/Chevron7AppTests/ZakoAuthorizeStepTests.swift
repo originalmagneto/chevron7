@@ -77,9 +77,11 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         }
     }
 
-    func testCardItemsAskForTheCardOrSayTheyComeFromIt() throws {
+    func testCardItemsAskForTheCardOrSayTheyComeFromIt() async throws {
         let store = try makeStore()
         store.isLoadedPendingConversion = false
+        // The reader answered: no card in it.
+        await store.refreshIdentities()
 
         // An empty reader: the hint asks for the card.
         XCTAssertEqual(store.mandateGate, .insertCard)
@@ -94,6 +96,70 @@ final class ZakoAuthorizeStepTests: XCTestCase {
         XCTAssertEqual(unlocked.hint, "Načíta sa z karty pri autorizácii.")
 
         XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .noMandate), "Chýba na vloženej karte.")
+    }
+
+    // MARK: Before the card is known
+
+    /// Opening the step before the drivers answered (or while the certificates are read) is
+    /// neutral: no "insert the card", no refusal. A card the slots report is never called absent.
+    func testCardStateNotKnownYetIsNeutral() async throws {
+        let store = try makeStore()
+        store.isLoadedPendingConversion = false
+
+        XCTAssertEqual(store.mandateGate, .insertCard, "the card flow still keys off the gate")
+        XCTAssertEqual(store.cardReading, .checking)
+        XCTAssertEqual(store.tokenStatus, .checking)
+        XCTAssertEqual(store.tokenStatus.text, "Kontrolujem kartu…")
+        XCTAssertFalse(store.tokenStatus.isWarning)
+        XCTAssertNil(store.authorizeButtonNote, "no request for a card while it is checked")
+        let mandate = try XCTUnwrap(store.authorizeChecklist.items.first { $0.title == "Mandátny certifikát SAK pripravený" })
+        XCTAssertEqual(mandate.hint, "Kontrolujem kartu…")
+        for item in store.authorizeChecklist.items {
+            XCTAssertFalse((item.hint ?? "").contains("Vložte"), "\(item.title): \(item.hint ?? "")")
+        }
+
+        // The drivers list nothing, but CryptoTokenKit sees a card in a slot.
+        store.readerSlotsHaveCard = { true }
+        await store.refreshIdentities()
+        XCTAssertEqual(store.cardReading, .unreadCard)
+        XCTAssertEqual(store.tokenStatus, .unreadCard)
+        XCTAssertFalse(store.tokenStatus.text.contains("nie je detegovaná"))
+        XCTAssertNil(store.authorizeButtonNote)
+        let unread = try XCTUnwrap(store.authorizeChecklist.items.first { $0.title == "Mandátny certifikát SAK pripravený" })
+        XCTAssertFalse((unread.hint ?? "").contains("Vložte"))
+
+        // The slots are empty too: now the reader is known to be empty.
+        store.readerSlotsHaveCard = { false }
+        await store.refreshIdentities()
+        XCTAssertEqual(store.tokenStatus, .noCard)
+        XCTAssertEqual(store.authorizeButtonNote?.text, ZakoSessionStore.authorizeInsertCardNote)
+
+        // A new session forgets what the reader said: neutral again until it answers.
+        store.resetSession(keepingProfile: true)
+        XCTAssertEqual(store.cardReading, .checking)
+    }
+
+    func testCardReadingDecision() {
+        func reading(answered: Bool = true, resolving: Bool = false, identities: Bool = false,
+                     mandate: Bool = false, slots: Bool? = nil, demo: Bool = false) -> ZakoCardReading {
+            ZakoSessionStore.cardReading(isDemo: demo, readerAnswered: answered, resolvingCertificate: resolving,
+                                         hasIdentities: identities, mandateKnown: mandate, slotsReportCard: slots)
+        }
+        XCTAssertEqual(reading(answered: false), .checking)
+        XCTAssertEqual(reading(resolving: true), .checking)
+        XCTAssertEqual(reading(slots: true), .unreadCard)
+        XCTAssertEqual(reading(slots: false), .settled)
+        XCTAssertEqual(reading(slots: nil), .settled, "slots that cannot be read leave the drivers' answer")
+        XCTAssertEqual(reading(answered: false, identities: true), .settled)
+        XCTAssertEqual(reading(resolving: true, mandate: true), .settled)
+        XCTAssertEqual(reading(answered: false, demo: true), .settled)
+
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: false, hasIdentities: false, certificateTypePending: false,
+                                            gate: .insertCard, reading: .checking), .checking)
+        XCTAssertEqual(ZakoTokenStatus.make(isDemo: false, hasIdentities: false, certificateTypePending: false,
+                                            gate: .noMandate, reading: .checking), .noMandate)
+        XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .insertCard, reading: .checking), "Kontrolujem kartu…")
+        XCTAssertEqual(ZakoSessionStore.cardItemHint(for: .noMandate, reading: .checking), "Chýba na vloženej karte.")
     }
 
     // MARK: A card without a mandate

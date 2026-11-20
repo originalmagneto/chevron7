@@ -94,17 +94,22 @@ struct DetectorTrainingOverviewView: View {
     }
 
     private func kindRow(_ row: DetectorTrainingOverview.KindRow) -> some View {
-        HStack(spacing: 8) {
+        // Long kind names ("Trikolóra / viazacia šnúra") wrap to a second line instead of being
+        // cut off in the 680 pt window; the icon and the counts stay on the first line.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: row.symbol)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             Text(row.title)
                 .font(.callout)
-                .lineLimit(1)
+                .lineLimit(2)
                 .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 6)
             Text(row.countText)
                 .font(.callout.monospacedDigit())
+                // Never wrapped: the name gives way first.
+                .fixedSize()
             // A missing count after a middle dot: the "minus" symbol read as a dash.
             Group {
                 if row.isEnough {

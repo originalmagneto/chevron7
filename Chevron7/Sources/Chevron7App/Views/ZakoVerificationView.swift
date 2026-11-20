@@ -429,19 +429,11 @@ struct ZakoVerificationView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            switch original.plan {
-            case .keep:
-                Label(ZakoVerificationPresentation.keepNote(output: store.settings.zakoClientOutput),
-                      systemImage: "doc.on.doc")
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .convert(let reason):
-                Label(ZakoVerificationPresentation.convertNote(reason: reason,
-                                                               output: store.settings.zakoClientOutput),
-                      systemImage: "doc.badge.arrow.up")
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            let note = ZakoVerificationPresentation.newDocumentNote(plan: original.plan,
+                                                                    output: store.settings.zakoClientOutput)
+            Label(note.text, systemImage: note.symbol)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -875,9 +867,9 @@ struct E2EAttestationFormView: View {
     }
 }
 
-/// Wording of the verification screen for the new document. An original that is already a valid
-/// PDF/A is converted with the one-PDF output, because the clause becomes the last pages of a new
-/// PDF/A-3; an original that must be converted becomes a PDF/A-2b, or that PDF/A-3 for the one PDF.
+/// Wording of the verification screen for the new document. With the one-PDF output every original
+/// becomes a new PDF/A-3 with the clause attached; with the container a valid PDF/A original stays
+/// unchanged and any other becomes a PDF/A-2b.
 enum ZakoVerificationPresentation {
     /// A file of a container with several files: its format and its page count, or "Obrázok".
     static func fileFacts(_ file: ElectronicOriginal.File, original: ElectronicOriginal) -> String {
@@ -964,9 +956,37 @@ enum ZakoVerificationPresentation {
         }
     }
 
-    static func convertNote(reason: String, output: AppSettings.ZakoClientOutput) -> String {
-        "\(reason), preto vznikne \(convertedDocumentLine(output: output)). Podpisy klienta zostanú zapísané v doložke."
+    /// The note of the "Nový dokument" section: what the new document becomes for the remembered
+    /// client output. The one PDF always converts (pages appended after the client's signatures
+    /// would leave them changed), so it says PDF/A-3 with the clause whatever the original is;
+    /// the container keeps a PDF/A original unchanged and converts anything else to PDF/A-2b.
+    struct NewDocumentNote: Equatable {
+        let text: String
+        let symbol: String
     }
+
+    static func newDocumentNote(plan: ElectronicOriginal.NewDocumentPlan,
+                                output: AppSettings.ZakoClientOutput) -> NewDocumentNote {
+        switch plan {
+        case .keep:
+            return NewDocumentNote(text: keepNote(output: output),
+                                   symbol: output == .singlePDF ? "doc.badge.arrow.up" : "doc.on.doc")
+        case .convert(let reason):
+            return NewDocumentNote(text: convertNote(reason: reason, output: output), symbol: "doc.badge.arrow.up")
+        }
+    }
+
+    static let signaturesRecordedNote = "Podpisy klienta zostanú zapísané v doložke."
+
+    static func convertNote(reason: String, output: AppSettings.ZakoClientOutput) -> String {
+        output == .singlePDF
+            ? singlePDFNote
+            : "\(reason), preto vznikne \(convertedDocumentLine(output: output)). \(signaturesRecordedNote)"
+    }
+
+    /// The one PDF, for a PDF/A original and any other alike.
+    static let singlePDFNote =
+        "Pri výstupe ako jeden PDF vznikne nový PDF/A-3 s pripojenou doložkou. \(signaturesRecordedNote)"
 
     static func convertedDocumentLine(output: AppSettings.ZakoClientOutput) -> String {
         output == .singlePDF ? "nový PDF/A-3 s doložkou" : "nový PDF/A-2b"
@@ -974,7 +994,7 @@ enum ZakoVerificationPresentation {
 
     static func keepNote(output: AppSettings.ZakoClientOutput) -> String {
         output == .singlePDF
-            ? "Pri výstupe ako jeden PDF sa prevedie na nový PDF/A a doložka sa pripojí na koniec."
+            ? singlePDFNote
             : "Zostáva nezmenený aj s podpismi klienta: je to PDF/A bez príloh."
     }
 

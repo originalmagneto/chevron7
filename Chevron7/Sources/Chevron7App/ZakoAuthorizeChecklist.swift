@@ -34,9 +34,24 @@ struct ZakoAuthorizeNote: Equatable {
     let isRefusal: Bool
 }
 
+/// How far the app knows the card in the reader, for the wording only (`mandateGate` still
+/// decides the card flow).
+enum ZakoCardReading: Equatable {
+    /// The card (or the empty reader) is known.
+    case settled
+    /// The drivers have not answered yet, or the card is being read.
+    case checking
+    /// The reader slots hold a card, but no driver lists it.
+    case unreadCard
+}
+
 /// The card line above the authorize checklist. Pure value: the view only draws it.
 enum ZakoTokenStatus: Equatable {
     case demo
+    /// Not known yet: neutral, never a request for a card.
+    case checking
+    /// A card is in the reader, but no driver reads it.
+    case unreadCard
     case noCard
     case typePending
     /// A card is in, but it holds no mandate certificate: a warning, never a green line.
@@ -44,10 +59,11 @@ enum ZakoTokenStatus: Equatable {
     case loaded
 
     static func make(isDemo: Bool, hasIdentities: Bool, certificateTypePending: Bool,
-                     gate: ZakoMandateGate) -> ZakoTokenStatus {
+                     gate: ZakoMandateGate, reading: ZakoCardReading = .settled) -> ZakoTokenStatus {
         if isDemo { return .demo }
         if gate == .noMandate { return .noMandate }
-        if !hasIdentities { return .noCard }
+        if reading == .checking { return .checking }
+        if !hasIdentities { return reading == .unreadCard ? .unreadCard : .noCard }
         if certificateTypePending { return .typePending }
         return .loaded
     }
@@ -55,6 +71,8 @@ enum ZakoTokenStatus: Equatable {
     var text: String {
         switch self {
         case .demo: "Demo režim: kvalifikovaná karta nie je pripojená."
+        case .checking: ZakoSessionStore.checkingCardText
+        case .unreadCard: ZakoSessionStore.unreadCardText
         case .noCard: "Karta nie je detegovaná: vložte eID alebo advokátsky preukaz."
         case .typePending: "Karta je pripojená. Typ certifikátu sa overí po zadaní PIN."
         case .noMandate: "Na vloženej karte nie je mandátny certifikát SAK."
@@ -65,6 +83,7 @@ enum ZakoTokenStatus: Equatable {
     var symbol: String {
         switch self {
         case .demo, .noCard: "creditcard.and.123"
+        case .checking, .unreadCard: "creditcard"
         case .typePending, .loaded: "creditcard.fill"
         case .noMandate: "creditcard.trianglebadge.exclamationmark"
         }
@@ -137,13 +156,14 @@ extension ZakoSessionStore {
     var authorizeButtonNote: ZakoAuthorizeNote? {
         Self.authorizeButtonNote(cardRefusal: authorizeCardRefusal, rememberedPINNote: rememberedPINNoteText,
                                  checkingCard: cardPrompt == .checkingCard,
-                                 readerEmpty: mandateGate == .insertCard)
+                                 readerEmpty: mandateGate == .insertCard && cardReading == .settled)
     }
 
     /// The card line above the checklist.
     var tokenStatus: ZakoTokenStatus {
         ZakoTokenStatus.make(isDemo: signingProvider is DemoSigningProvider, hasIdentities: !identities.isEmpty,
-                             certificateTypePending: isCertificateTypePending, gate: mandateGate)
+                             certificateTypePending: isCertificateTypePending, gate: mandateGate,
+                             reading: cardReading)
     }
 
     /// A card flow is running ("Kontrolujem kartu…", the PIN or the card prompt): the step's
@@ -177,9 +197,22 @@ extension ZakoSessionStore {
     nonisolated static let insertMandateCardHint = "Vložte kartu s mandátnym certifikátom SAK."
     nonisolated static let missingOnCardHint = "Chýba na vloženej karte."
     nonisolated static let readAtAuthorizationHint = "Načíta sa z karty pri autorizácii."
+    /// While the card is not known yet: neutral, never a request for a card.
+    nonisolated static let checkingCardText = "Kontrolujem kartu…"
+    nonisolated static let unreadCardText =
+        "Karta je v čítačke, ale certifikáty sa z nej zatiaľ nenačítali. Skontrolujte ovládač karty."
+    nonisolated static let unreadCardHint = "Karta je v čítačke, certifikáty sa z nej zatiaľ nenačítali."
 
-    nonisolated static func cardItemHint(for gate: ZakoMandateGate) -> String {
-        switch gate {
+    nonisolated static func cardItemHint(for gate: ZakoMandateGate,
+                                         reading: ZakoCardReading = .settled) -> String {
+        if gate != .noMandate {
+            switch reading {
+            case .checking: return checkingCardText
+            case .unreadCard where gate == .insertCard: return unreadCardHint
+            default: break
+            }
+        }
+        return switch gate {
         case .noMandate: missingOnCardHint
         case .insertCard: insertMandateCardHint
         case .notRequired, .ready, .needsUnlock: readAtAuthorizationHint
@@ -187,7 +220,7 @@ extension ZakoSessionStore {
     }
 
     private var cardItemHint: String {
-        Self.cardItemHint(for: mandateGate)
+        Self.cardItemHint(for: mandateGate, reading: cardReading)
     }
 
     private var identityChecklistItem: ZakoChecklistItem {
