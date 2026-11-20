@@ -13,7 +13,7 @@ struct ZakoFlowView: View {
     @State private var isTargeted = false
 
     var body: some View {
-        stepContent
+        headedStepContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaPadding(.top)
             .background(Color(nsColor: .windowBackgroundColor))
@@ -46,6 +46,19 @@ struct ZakoFlowView: View {
                         .disabled(store.isAuthorizing)
                     }
             }
+        }
+    }
+
+    /// Every step after intake sits under the conversion header (document, steps, order,
+    /// output, EZZK environment); the window subtitle still names the step.
+    private var headedStepContent: some View {
+        VStack(spacing: 0) {
+            if store.step != .intake {
+                ZakoConversionHeader(model: store.conversionHeaderModel)
+                Divider()
+            }
+            stepContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

@@ -218,9 +218,7 @@ final class ZakoSessionStore {
     /// disables the phone button with this text; `authorizeAndSign` refuses on its own too.
     var mobileRefusalForClientOutput: String? {
         if settings.zakoClientOutput == .singlePDF { return ZakoSinglePDFDelivery.mobileRefusal }
-        if recordFirstPending != nil || ZakoRegime.resolve(conversionTime: Date(),
-                                                            mode: settingsStore.ezzkAccountController.mode,
-                                                            preview: settings.zakoRecordFirstPreview).regime == .recordFirst {
+        if isRecordFirstOrder {
             return Self.recordFirstMobileMessage
         }
         return nil
