@@ -183,10 +183,13 @@ struct RootView: View {
                         .font(.callout)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(row.evidenceNumber)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(row.evidenceNumber)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        EZZKEnvironmentBadge(mode: row.environment, form: .short)
+                    }
                 }
             }
             .padding(.vertical, 1)

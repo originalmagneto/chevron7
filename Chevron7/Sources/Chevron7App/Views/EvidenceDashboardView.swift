@@ -16,6 +16,7 @@ struct EvidenceDashboardView: View {
     @State private var records: [EvidenceRecord] = []
     @State private var filterText = ""
     @State private var statusFilter: EvidenceRecord.Status?
+    @State private var environmentFilter: EvidenceRegisterFilter.Environment = .all
     @State private var selectedRecordID: UUID?
     @State private var showDetail = false
     @State private var isSubmitting = false
@@ -52,11 +53,11 @@ struct EvidenceDashboardView: View {
                             if record.isOverdue, record.ezzkMode != .demo { OverdueDot() }
                             Text(record.evidenceNumber ?? "nezískané")
                                 .font(.callout.monospacedDigit().weight(.semibold))
-                            if record.ezzkMode == .demo { DemoBadge() }
+                            EZZKEnvironmentBadge(mode: record.ezzkMode, form: .list)
                         }
                         .contextMenu { recordContextMenu(for: record) }
                     }
-                    .width(min: 130, ideal: 170)
+                    .width(min: 130, ideal: 240)
 
                     TableColumn("Stav") { record in
                         Group {
@@ -128,6 +129,16 @@ struct EvidenceDashboardView: View {
                 }
                 .pickerStyle(.menu)
                 .frame(minWidth: 130, idealWidth: 160)
+            }
+            ToolbarItem(placement: .automatic) {
+                Picker("Prostredie EZZK", selection: $environmentFilter) {
+                    ForEach(EvidenceRegisterFilter.Environment.allCases) { environment in
+                        Text(environment.label).tag(environment)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(minWidth: 130, idealWidth: 170)
+                .help("Zobraziť konverzie z jedného prostredia EZZK")
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
@@ -327,20 +338,10 @@ struct EvidenceDashboardView: View {
     }
 
     private var hasActiveFilter: Bool {
-        statusFilter != nil || !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        EvidenceRegisterFilter.isActive(status: statusFilter, environment: environmentFilter, text: filterText)
     }
     private var filteredRecords: [EvidenceRecord] {
-        var result = records
-        if let statusFilter {
-            result = result.filter { $0.status == statusFilter }
-        }
-        guard !filterText.isEmpty else { return result }
-        let query = filterText.lowercased()
-        return result.filter {
-            $0.originalName.lowercased().contains(query) ||
-            $0.newDocumentName.lowercased().contains(query) ||
-            ($0.evidenceNumber ?? "").lowercased().contains(query)
-        }
+        EvidenceRegisterFilter.apply(records, status: statusFilter, environment: environmentFilter, text: filterText)
     }
 
     /// A record-first conversion waiting in the background reads as such, not as its bare row state.
@@ -469,20 +470,6 @@ struct OverdueDot: View {
             .fill(Color.red)
             .frame(width: 8, height: 8)
             .help("Záznam prekročil zákonnú lehotu 24 h na zápis do CEZZK")
-    }
-}
-
-/// Marks a row made in EZZK Demo mode: its state is a local simulation.
-struct DemoBadge: View {
-    var body: some View {
-        Text("DEMO")
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.16), in: Capsule())
-            .foregroundStyle(.secondary)
-            .help("Konverzia v skúšobnom režime: lokálna simulácia, do EZZK sa neodoslala.")
-            .accessibilityLabel("DEMO: skúšobný režim, mimo EZZK")
     }
 }
 
