@@ -100,6 +100,8 @@ final class ZakoSessionStore {
     /// Kept for the whole app run once typed (the owner's choice), only in memory; cleared
     /// when the card leaves the reader or the card refuses it, so it never reaches another card.
     var signingPIN = ""
+    /// The card the reader reported last (`applyReaderIdentities`), to tell when it changes.
+    @ObservationIgnored private var lastReaderCard: ZakoReaderCard?
     /// What CryptoTokenKit reports about the inserted card, read without a PIN.
     private(set) var mandateCardState: MandateCertificate.CardState = .noCard
     /// Reads `mandateCardState`; tests substitute it.
@@ -1188,7 +1190,18 @@ final class ZakoSessionStore {
 
     func applyReaderIdentities(_ discovered: [SigningIdentityInfo]) {
         refreshMandateCardState()
+        // Whether a card is in the reader and what CryptoTokenKit sees on it, not the identity
+        // list: resolving the PIN rewrites that list without any card changing.
+        let card = ZakoReaderCard(hasCard: !discovered.isEmpty, mandate: mandateCardState)
+        let cardChanged = lastReaderCard.map { $0 != card } ?? false
+        lastReaderCard = card
         guard !isAuthorizing, !isResolvingCertificate else { return }
+        // An error about the previous card no longer applies once it was taken out or swapped.
+        // Only on the authorize step and outside a card flow: the done step's error is about
+        // EZZK, and a running flow reports on the card it reads.
+        if cardChanged, step == .authorize, pendingCardAction == nil, lastError != nil {
+            lastError = nil
+        }
         if identities != discovered { identities = discovered }
         if identities.isEmpty {
             if !signingPIN.isEmpty { signingPIN = "" }

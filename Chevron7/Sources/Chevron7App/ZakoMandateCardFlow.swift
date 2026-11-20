@@ -94,6 +94,11 @@ extension ZakoSessionStore {
             await authorizeAndSign()
             return
         }
+        // The button is off for such a card; the flow refuses it the same way it always has.
+        guard authorizeCardRefusal == nil else {
+            lastError = Self.noMandateMessage
+            return
+        }
         await startCardFlow(.authorization)
     }
 
@@ -125,6 +130,8 @@ extension ZakoSessionStore {
     var canBeginAuthorization: Bool {
         if signingProviderIsDemo, selectedIdentityID == nil || requiresMandateOverride { return false }
         if ezzkSignInRefusal != nil { return false }
+        // A card known to hold no mandate certificate is refused before the card check starts.
+        if authorizeCardRefusal != nil { return false }
         // A stored conversion signs its stored clause and document; there is no form to check.
         // The sign-in check stays first: finishing it still sends and looks up the record in EZZK.
         if isLoadedPendingConversion, recordFirstPending != nil { return true }
@@ -239,4 +246,11 @@ extension ZakoSessionStore {
             recomputePreflight()
         }
     }
+}
+
+/// What the reader holds, as far as the authorize step's error goes: a card or none, and what
+/// CryptoTokenKit sees on it without a PIN.
+struct ZakoReaderCard: Equatable {
+    let hasCard: Bool
+    let mandate: MandateCertificate.CardState
 }
