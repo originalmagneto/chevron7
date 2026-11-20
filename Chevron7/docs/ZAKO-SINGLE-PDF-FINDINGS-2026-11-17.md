@@ -92,3 +92,7 @@ Step 3, Testovacia evidencia with a card (owner's Mac, mandate certificate):
 2. Upload one delivered PDF to the slovensko.sk validator and record whether the BOSA timestamp shows.
 3. Ask ORSR whether it accepts a PAdES PDF with an XML attachment (spec 5.8).
 4. Only then flip `SinglePDFProductionPolicy.enabled` for P→E in its own commit, with the release note for Ostrá evidencia.
+
+## Update 2026-11-20: readable clause pages
+
+The scale of 0.567 above came from the official form's fixed widths (`.layoutMain{width:900px}`, inline label widths up to 870 px, value boxes such as `.sirokyTextBox665px DIV{width:665px}`). The renderer now also injects `.layoutMain{width:auto !important} .layoutMain *{max-width:100% !important} .layoutMain .fieldContent,.layoutMain .fieldContent div{width:auto !important}` (layout only: text, order, XSLT, margins and offline safety unchanged). Measured with PDFKit: body text 6.8 to 9.6 pt (WebKit's print shrink of 0.8), captions 10.2 to 14.4 pt; the P→E test clause stays on 2 pages, the E→E clause with 6 signatures and 4 timestamps each goes from 5 to 7 pages. The new pages appended to `zako-p2e-final.pdf` with `clause-p2e.xdcf` pass the engine's PDF/A-3B check (`PdfClauseCheckRunner`). The committed engine fixtures still hold the old-layout pages.
