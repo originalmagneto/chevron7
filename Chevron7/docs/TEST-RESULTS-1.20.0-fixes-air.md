@@ -151,3 +151,7 @@ Zdroje v `~/Desktop/chevron7-test`: B1 = `B1-listina_podpisane.pdf` (PAdES T s Q
 ## Kontrola po 1.21.5 (20. 11. 2026)
 
 - **F15 neopravené v 1.21.5:** v zozname „Podpisy (3)“ mali všetky tri podpisy „Časovú pečiatku údajov“ 19. 11. 2026 22:13:31. Príčina je v engine, nie v aplikácii: `MachineInspectionService.signatureTimestamps` priraďovala podpisu len časové pečiatky dokumentu z `getDetachedTimestamps()`, no DSS vedie pečiatku pridanú po prvom podpise ako jeho archívnu pečiatku, takže druhý a tretí podpis ju nevideli. Oprava: zoznam všetkých časových pečiatok dokumentu PDF (samostatné aj tie, ktoré DSS priradí podpisom), zoradený podľa revízie. Overené sondou nad `B1-listina_podpisane_podpisane_podpisane.pdf`: podpis 2 pokrýva pečiatky 21:13:31Z a 05:12:19Z, podpis 3 aj 06:18:43Z; aplikácia z nich ukáže najnovšiu.
+
+## Kontrola po 1.21.6 (20. 11. 2026)
+
+- **F15 overené:** `B1-listina_podpisane_podpisane_podpisane.pdf`, zoznam „Podpisy (3)“, všetky tri podpisy platné KEP. Časová pečiatka údajov: podpis 1 19. 11. 2026 22:13:31, podpis 2 20. 11. 2026 06:12:19, podpis 3 20. 11. 2026 07:18:43. Každá je o sekundu staršia než časová pečiatka podpisu, ako má byť.
