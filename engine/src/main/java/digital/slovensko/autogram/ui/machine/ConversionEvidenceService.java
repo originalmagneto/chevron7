@@ -3,6 +3,7 @@ package digital.slovensko.autogram.ui.machine;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import digital.slovensko.autogram.core.PdfConversionFacts;
+import digital.slovensko.autogram.core.PdfPostSignatureChanges;
 import digital.slovensko.autogram.core.SignatureValidator;
 import digital.slovensko.autogram.util.DSSUtils;
 import eu.europa.esig.dss.diagnostic.CertificateWrapper;
@@ -418,7 +419,7 @@ public final class ConversionEvidenceService {
     private JsonObject pdfFacts(byte[] content, DiagnosticData diagnostic, JsonObject knownPdfFacts) {
         if (startsWith(content, "%PDF")) {
             var facts = knownPdfFacts != null ? knownPdfFacts.deepCopy() : PdfConversionFacts.read(content);
-            facts.add("changesAfterLastSignature", changesAfterLastSignature(diagnostic));
+            facts.add("changesAfterLastSignature", changesAfterLastSignature(diagnostic, content));
             return facts;
         }
         if (!startsWith(content, "PK")) {
@@ -669,9 +670,11 @@ public final class ConversionEvidenceService {
         }
     }
 
-    /// Kinds of change DSS found after the last PAdES signature's revision, other than
-    /// extension data (DSS dictionary, document timestamps): content nobody signed.
-    static JsonArray changesAfterLastSignature(DiagnosticData diagnostic) {
+    /// Kinds of change found after the last PAdES signature's revision, other than extension
+    /// data (DSS dictionary, document timestamps): content nobody signed. DSS names the kinds;
+    /// `PdfPostSignatureChanges` reads `pdf` itself and adds `UNDEFINED` for what DSS lets
+    /// through (a page relabelled as a signature, the document information dictionary, new XMP).
+    static JsonArray changesAfterLastSignature(DiagnosticData diagnostic, byte[] pdf) {
         SignatureWrapper last = null;
         BigInteger lastEnd = BigInteger.valueOf(-1);
         for (var signature : diagnostic.getSignatures()) {
@@ -695,6 +698,10 @@ public final class ConversionEvidenceService {
         if (!revision.getPdfUndefinedChanges().isEmpty()) changes.add("UNDEFINED");
         if (!revision.getPdfPageDifferenceConcernedPages().isEmpty()) changes.add("PAGE_DIFFERENCE");
         if (!revision.getPdfVisualDifferenceConcernedPages().isEmpty()) changes.add("VISUAL_DIFFERENCE");
+        if (revision.getPdfUndefinedChanges().isEmpty()
+                && !PdfPostSignatureChanges.find(pdf, lastEnd.longValueExact()).isEmpty()) {
+            changes.add("UNDEFINED");
+        }
         return changes;
     }
 
