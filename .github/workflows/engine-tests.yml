@@ -49,7 +49,8 @@ jobs:
         working-directory: engine
         env:
           AUTOGRAM_REQUIRE_QPDF: "1"
-        run: ./mvnw -B -Djlink.jdk.path="$JAVA_HOME" test
+        # system-jdk: test with the Zulu FX JDK set up above instead of downloading one
+        run: ./mvnw -B -Psystem-jdk test
 
       - name: Keep the test reports
         if: failure()
