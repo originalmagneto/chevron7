@@ -31,15 +31,26 @@ qpdf as an independent check of the PDFs the engine writes (idea A, 2026-11-21):
 - Without qpdf only that check is left out (a notice on stderr, the test's own assertions still run); `AUTOGRAM_REQUIRE_QPDF=1` turns a missing qpdf into a failure, `AUTOGRAM_QPDF` names the binary.
 - CI: `release.yml` builds with `-DskipTests`, so the owner chose a separate `engine-tests.yml` (2026-11-21) that runs every engine test on pull requests and main when `engine/` changes. The GitHub `xcode-27-arm64` image has Homebrew 7.0.15 but no qpdf, so the workflow installs it and sets `AUTOGRAM_REQUIRE_QPDF=1`. Locally the whole suite was 768 tests in about 4 minutes.
 
+PdfCraft's validator as a second opinion on our signatures (idea B, 2026-11-21, one-off, nothing added to the repository): `pdfcraft-cli` 0.21.1 (`pdfcraft-cli-0.21.1-macos-universal.zip` from their release, SHA-256 checked, notarized by Learning Machines LLC, unpacked in a scratch folder only) ran `doc_open`, `sign_list` and `doc_revisions` over PDFs the engine signed with the test keystore, a test CA key and the in-process test authority of `ContentTimestampTest` (temporary test methods, not committed).
+
+| File | PdfCraft's verdict |
+|---|---|
+| PAdES B | intact ("not modified since this signature"), signer unknown |
+| PAdES T | intact, embedded timestamp seen |
+| PAdES T with the content timestamp | the document timestamp (revision 2, `ETSI.RFC3161`) "modified, but permitted (signature, form fill)", the signature (revision 3) intact |
+| Signed again (T with content timestamp, twice) | every earlier timestamp and signature "permitted (signature, form fill)", the last signature intact; five revisions, each signed by the expected field |
+| One-PDF output | revisions 1 (PDF/A) and 2 (clause) unsigned, the one signature in revision 3 intact over the whole file |
+| Control: `/Info` changed after signing | "permitted (metadata)" |
+| Control: a page added after signing | invalid, "pages added or removed" |
+| Control: one signed byte flipped | invalid, "altered or corrupted" |
+
+- No disagreement on any file Chevron7 signed: every last signature intact, every earlier one changed only by later signatures and timestamps, and the revision list matches what the engine writes.
+- Every signer is "unknown" (no EU trusted lists), as expected; the expired test certificate is reported as not valid at signing time.
+- PdfCraft is more lenient than our `PdfPostSignatureChanges` on metadata: it allows a new `/Info` after a signature, which the engine refuses in a conversion since PR #128. Nothing to change on our side.
+- Small gaps on their side, not ours: the time of a signature timestamp inside CAdES is not shown (`timestamp_time` empty), only that one exists; a later signature is labelled "form fill" as well as "signature".
+- Not covered: a visible stamp, an E→E original, a real card signature with a qualified timestamp. Worth repeating with a real signed file when PdfCraft's change classification changes.
+
 ## Open ideas for Chevron7
-
-### B. PdfCraft's validator as a second opinion on our signatures
-
-The fixtures showed that two independent validators find what one misses. The other direction has not been tried: run PdfCraft's `sign_list` (through `pdfcraft-cli`) over PDFs signed by Chevron7 (PAdES B and T, with a content timestamp, the one-PDF output, a second signature on a signed PDF) and read what it says about later revisions.
-
-- A one-off experiment, not a test in the repository: it needs `pdfcraft-cli` (a macOS zip in their releases; the owner's Mac has only the GUI app).
-- Expect noise: it has no EU trusted lists, so every signer will be "unknown". Only the integrity and change verdicts are interesting.
-- Size: an afternoon.
 
 ### C. Review by confidence in the security element step
 
