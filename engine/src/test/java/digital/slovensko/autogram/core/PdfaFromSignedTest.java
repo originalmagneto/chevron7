@@ -408,6 +408,7 @@ class PdfaFromSignedTest {
                 ICC.getPath(), "Zlúčený", "--raster", first.toString(), "a.pdf", second.toString(), "b.png"});
 
         assertEquals(0, exit);
+        QpdfCheck.assertClean(output(), "PdfaFromSigned --merge (command line)");
         try (var document = Loader.loadPDF(output())) {
             assertEquals(3, document.getNumberOfPages());
         }

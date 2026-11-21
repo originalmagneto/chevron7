@@ -95,22 +95,28 @@ public final class QpdfCheck {
     }
 
     static Result run(String qpdf, Path file) throws IOException {
-        var process = new ProcessBuilder(qpdf, "--check", file.toString())
-                .redirectErrorStream(true)
-                .start();
+        // Output goes to a file, so a damaged PDF with many warnings cannot fill a pipe and stall qpdf.
+        var log = Files.createTempFile("qpdf-check-", ".txt");
         try {
-            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            var process = new ProcessBuilder(qpdf, "--check", file.toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(log.toFile())
+                    .start();
+            try {
+                if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    throw new IOException("qpdf did not finish within " + TIMEOUT_SECONDS + " s");
+                }
+            } catch (InterruptedException exception) {
                 process.destroyForcibly();
-                throw new IOException("qpdf did not finish within " + TIMEOUT_SECONDS + " s");
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted", exception);
             }
-        } catch (InterruptedException exception) {
-            process.destroyForcibly();
-            Thread.currentThread().interrupt();
-            throw new IOException("interrupted", exception);
+            var output = Files.readString(log, StandardCharsets.UTF_8).replace(file.toString(), "<file>");
+            return new Result(process.exitValue(), output);
+        } finally {
+            Files.deleteIfExists(log);
         }
-        var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
-                .replace(file.toString(), "<file>");
-        return new Result(process.exitValue(), output);
     }
 
     private static volatile boolean skipNoticePrinted;

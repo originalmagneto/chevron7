@@ -169,6 +169,7 @@ class PdfaNormalizeTest {
 
         var output = temporaryDirectory.resolve("normalized.pdf");
         PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+        QpdfCheck.assertClean(output.toFile(), "PdfaNormalize");
 
         assertTrue(Files.size(output) > 0);
     }
