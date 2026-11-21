@@ -25,16 +25,13 @@ Facts that decide how far to trust it:
 
 Attack fixtures for changes after the last PDF signature, after the change classes in PdfCraft's `crates/sign/src/pdf/changes.rs` and `revision_classification_tests.rs`: `PostSignatureChangeAttackTest` and the engine's own check `PdfPostSignatureChanges` (PR #128). DSS 6.5.1 missed three of the cases; they were reported to the DSS team by the owner.
 
+qpdf as an independent check of the PDFs the engine writes (idea A, 2026-11-21): `QpdfCheck` in the engine tests runs `qpdf --check` on the outputs of `PdfClauseAppender` (every append), the signed one-PDF output with three revisions (`MachineSigningServiceTest`), `PdfaFromSigned` (plain, `--raster` and `--merge`, every test), `PdfaNormalize` and `PdfFormAppearances`. The verdict is qpdf's exit code, so warnings fail too: what we write in full must be clean, and an incremental update of a source we did not write may keep the source's own warnings but add none (`assertNoNewFindings`). `QpdfCheckTest` proves the check fails on a damaged file.
+
+- What qpdf found: every engine output made from an intact input is clean, including a `PdfaNormalize` output whose source holds a stream it cannot decode. Two test fixtures were flagged. `PdfaNormalizeTest`'s hand-written incremental update redefined the page object `1 0` as a catalog, and the "collapsed" output carried that page typed `/Catalog`: `PdfaNormalize` rewrites the file but does not repair structural damage in its source (garbage in, garbage out; E→E sends client PDFs through it, and veraPDF judges the result there). The fixture is now a real PDFBox incremental update, and `QpdfCheckTest` keeps the damaged variant as its negative case. The `NeedAppearancesFixture` pages have no `/Resources`, which `PdfFormAppearances` rightly leaves as it is (the source stays a byte-exact prefix). The WebKit-printed clause page fixtures carry "object has offset 0" warnings; `PdfClauseAppender` writes those objects anew, and its output is clean.
+- Without qpdf only that check is left out (a notice on stderr, the test's own assertions still run); `AUTOGRAM_REQUIRE_QPDF=1` turns a missing qpdf into a failure, `AUTOGRAM_QPDF` names the binary.
+- CI: no workflow runs the engine tests today (`release.yml` builds with `-DskipTests`). The GitHub `xcode-27-arm64` image has Homebrew 7.0.15 but no qpdf, so a test workflow would need `brew install qpdf` and `AUTOGRAM_REQUIRE_QPDF=1`.
+
 ## Open ideas for Chevron7
-
-### A. qpdf as an independent check of the PDFs we write
-
-PdfCraft verifies every file it writes with qpdf in CI. We mention qpdf only in two findings documents.
-
-- Where it pays off: the one-PDF client output (three revisions, `PdfClauseAppender`), `PdfaFromSigned --merge`, `PdfaNormalize`, `PdfFormAppearances`. These are the places where the engine writes PDF structure itself.
-- Shape: a test helper that runs `qpdf --check` on the output and fails on errors and warnings; skipped with a clear message when qpdf is not installed, required in CI.
-- To decide: whether CI installs qpdf (Homebrew on the runner), and whether warnings fail the test.
-- Size: small.
 
 ### B. PdfCraft's validator as a second opinion on our signatures
 

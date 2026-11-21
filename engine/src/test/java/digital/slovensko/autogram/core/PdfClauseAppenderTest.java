@@ -80,7 +80,15 @@ class PdfClauseAppenderTest {
     }
 
     private static PdfClauseAppender.Result appendP2E() throws IOException {
-        return PdfClauseAppender.append(finalPdf(), p2ePages(), clause());
+        return append(finalPdf(), p2ePages(), clause());
+    }
+
+    /// Every appended file also passes qpdf, an independent parser of the whole file.
+    private static PdfClauseAppender.Result append(byte[] source, byte[] pages, PdfClauseAppender.Attachment attachment)
+            throws IOException {
+        var result = PdfClauseAppender.append(source, pages, attachment);
+        QpdfCheck.assertClean(result.pdf(), "PdfClauseAppender");
+        return result;
     }
 
     private static int pageCount(byte[] pdf) throws IOException {
@@ -116,7 +124,7 @@ class PdfClauseAppenderTest {
         var pages = p2ePages();
         var attachment = clause();
 
-        var result = PdfClauseAppender.append(source, pages, attachment);
+        var result = append(source, pages, attachment);
 
         assertEquals(1, countOf(result.pdf(), source.length, "%%EOF"), "exactly one revision after the source");
         var tail = result.pdf().length - source.length;
@@ -243,7 +251,7 @@ class PdfClauseAppenderTest {
                 "pdfaid:part=\"2\"\\s*pdfaid:conformance=\"B\"\\s*/>",
                 "><pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance></rdf:Description>"));
 
-        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+        var result = append(source, p2ePages(), clause());
 
         try (var document = Loader.loadPDF(result.pdf())) {
             var xmp = new String(document.getDocumentCatalog().getMetadata().toByteArray(), StandardCharsets.UTF_8);
@@ -274,7 +282,7 @@ class PdfClauseAppenderTest {
     void e2eClausePassesPdfa3b() throws Exception {
         var source = convertedSignedSample(false);
 
-        var result = PdfClauseAppender.append(source, resource("clause-pages-e2e.pdf"),
+        var result = append(source, resource("clause-pages-e2e.pdf"),
                 new PdfClauseAppender.Attachment("dolozka.xml.xdcf", XDC_MIME, resource("clause-p2e.xdcf")));
 
         assertEquals(pageCount(source) + pageCount(resource("clause-pages-e2e.pdf")), pageCount(result.pdf()));
@@ -292,7 +300,7 @@ class PdfClauseAppenderTest {
         }
         assertTrue(countOf(source, 0, "/XRef") > 0, "the source must end in a cross-reference stream");
 
-        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+        var result = append(source, p2ePages(), clause());
 
         assertTrue(Arrays.equals(result.pdf(), 0, source.length, source, 0, source.length));
         assertEquals(pageCount(source) + pageCount(p2ePages()), pageCount(result.pdf()));
@@ -304,7 +312,7 @@ class PdfClauseAppenderTest {
     void rasterSourcePassesPdfa3b() throws Exception {
         var source = convertedSignedSample(true);
 
-        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+        var result = append(source, p2ePages(), clause());
 
         assertTrue(Arrays.equals(result.pdf(), 0, source.length, source, 0, source.length));
         assertTrue(result.pdfaCompliant(), () -> String.join("\n", result.pdfaErrors()));
@@ -315,7 +323,7 @@ class PdfClauseAppenderTest {
     void sourceOutlineAndNamesSurvive() throws Exception {
         var source = withOutlineAndDestination(finalPdf());
 
-        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+        var result = append(source, p2ePages(), clause());
 
         try (var document = Loader.loadPDF(result.pdf())) {
             var catalog = document.getDocumentCatalog();
@@ -333,7 +341,7 @@ class PdfClauseAppenderTest {
     void sourceEmbeddedFileAndAssociatedFilesSurvive() throws Exception {
         var source = withEmbeddedFile(finalPdf());
 
-        var result = PdfClauseAppender.append(source, p2ePages(), clause());
+        var result = append(source, p2ePages(), clause());
 
         assertTrue(Arrays.equals(result.pdf(), 0, source.length, source, 0, source.length));
         try (var document = Loader.loadPDF(result.pdf())) {
@@ -353,7 +361,7 @@ class PdfClauseAppenderTest {
     /** Pages with fonts that are not embedded: veraPDF says no, and says why. */
     @Test
     void unembeddedFontPagesAreNotCompliant() throws Exception {
-        var result = PdfClauseAppender.append(finalPdf(), helveticaPages(), clause());
+        var result = append(finalPdf(), helveticaPages(), clause());
 
         assertFalse(result.pdfaCompliant());
         assertFalse(result.pdfaErrors().isEmpty());

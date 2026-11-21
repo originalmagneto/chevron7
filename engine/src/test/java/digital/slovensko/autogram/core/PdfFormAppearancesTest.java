@@ -38,6 +38,7 @@ class PdfFormAppearancesTest {
         var source = NeedAppearancesFixture.webForm(true);
 
         var prepared = PdfFormAppearances.withGeneratedAppearances(source);
+        QpdfCheck.assertNoNewFindings(source, prepared, "PdfFormAppearances");
 
         try (var document = Loader.loadPDF(prepared)) {
             var acroForm = document.getDocumentCatalog().getAcroForm(null);
