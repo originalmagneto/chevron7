@@ -48,7 +48,11 @@ class PdfaFromSignedTest {
 
     private PdfaFromSigned.Result convert(byte[] pdf, boolean raster) throws Exception {
         var input = Files.write(temporary.resolve("in.pdf"), pdf);
-        return PdfaFromSigned.convert(input.toFile(), temporary.resolve("out.pdf").toFile(), ICC, "Zmluva", raster);
+        var result = PdfaFromSigned.convert(input.toFile(), temporary.resolve("out.pdf").toFile(), ICC, "Zmluva", raster);
+        if (Files.exists(temporary.resolve("out.pdf"))) {
+            QpdfCheck.assertClean(temporary.resolve("out.pdf").toFile(), "PdfaFromSigned" + (raster ? " --raster" : ""));
+        }
+        return result;
     }
 
     private byte[] output() throws Exception {
@@ -173,7 +177,11 @@ class PdfaFromSignedTest {
             var file = Files.write(temporary.resolve("in-" + index), (byte[]) namesAndBytes[index + 1]);
             inputs.add(new PdfaFromSigned.Input(file.toFile(), name));
         }
-        return PdfaFromSigned.merge(inputs, temporary.resolve("out.pdf").toFile(), ICC, "Zlúčený", raster);
+        var result = PdfaFromSigned.merge(inputs, temporary.resolve("out.pdf").toFile(), ICC, "Zlúčený", raster);
+        if (Files.exists(temporary.resolve("out.pdf"))) {
+            QpdfCheck.assertClean(temporary.resolve("out.pdf").toFile(), "PdfaFromSigned --merge" + (raster ? " --raster" : ""));
+        }
+        return result;
     }
 
     /// Two A4 pages with only drawn rectangles, so no font can make the result non-compliant.

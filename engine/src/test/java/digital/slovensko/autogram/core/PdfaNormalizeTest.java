@@ -49,6 +49,7 @@ class PdfaNormalizeTest {
     private String normalizedText(Path source) throws Exception {
         var output = temporaryDirectory.resolve("normalized-" + System.nanoTime() + ".pdf");
         PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+        QpdfCheck.assertClean(output.toFile(), "PdfaNormalize");
         return new String(Files.readAllBytes(output), StandardCharsets.ISO_8859_1);
     }
 
@@ -93,9 +94,17 @@ class PdfaNormalizeTest {
     void collapsesAnIncrementallyUpdatedFileIntoOneCrossReferenceTable() throws Exception {
         var original = Files.readAllBytes(sample());
         var incremental = temporaryDirectory.resolve("incremental.pdf");
-        var appended = new String(original, StandardCharsets.ISO_8859_1)
-                + "\n% incremental update\n1 0 obj\n<< /Type /Catalog >>\nendobj\nstartxref\n0\n%%EOF\n";
-        Files.write(incremental, appended.getBytes(StandardCharsets.ISO_8859_1));
+        // A real incremental update (a changed title), not hand-written bytes: the earlier fixture
+        // redefined object 1 0, the page, as a catalog, which qpdf rightly reported in the output.
+        var updated = new ByteArrayOutputStream();
+        try (var document = Loader.loadPDF(original)) {
+            document.getDocumentInformation().setTitle("Aktualizované");
+            document.getDocumentInformation().getCOSObject().setNeedToBeUpdated(true);
+            document.getDocumentCatalog().getCOSObject().setNeedToBeUpdated(true);
+            document.saveIncremental(updated);
+        }
+        Files.write(incremental, updated.toByteArray());
+        var appended = new String(updated.toByteArray(), StandardCharsets.ISO_8859_1);
         assertEquals(2, countOf(appended, "%%EOF"), "the fixture must really be incrementally updated");
 
         var text = normalizedText(incremental);
@@ -118,6 +127,7 @@ class PdfaNormalizeTest {
 
         var output = temporaryDirectory.resolve("normalized.pdf");
         PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+        QpdfCheck.assertClean(output.toFile(), "PdfaNormalize");
 
         var bytes = Files.readAllBytes(output);
         assertEquals(0, interpolatingImages(bytes));
@@ -179,6 +189,7 @@ class PdfaNormalizeTest {
         Files.write(source, pdf);
         var output = temporaryDirectory.resolve("normalized.pdf");
         PdfaNormalize.normalize(source.toFile(), output.toFile(), new File(ICC), "Test");
+        QpdfCheck.assertClean(output.toFile(), "PdfaNormalize");
 
         var bytes = Files.readAllBytes(output);
         assertEquals(before.replace("/I true ", ""), pageTokens(bytes));

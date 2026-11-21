@@ -1316,6 +1316,7 @@ class MachineSigningServiceTest {
         var signed = retained.readAll();
         var validator = new MachineSigningService.PdfOutputValidator(new MachineInspectionService());
         var clausePages = pages(pages);
+        digital.slovensko.autogram.core.QpdfCheck.assertClean(signed, "signed one-PDF output (three revisions)");
 
         assertEquals(null, validator.appendedClauseFailure(signed, source, attachment, CLAUSE_NAME, clausePages, "PAdES_BASELINE_T"));
 
