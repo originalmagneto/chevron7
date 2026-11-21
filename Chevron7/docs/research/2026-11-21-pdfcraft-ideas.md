@@ -1,6 +1,6 @@
 # What to take from PdfCraft (ideas, 2026-11-21)
 
-Status: ideas and a rough spec, nothing here is decided or built. To be worked out in a later session.
+Status: ideas A and B are done, C and D were declined by the owner on 2026-11-21 (see Not taken). The LawOSS idea is still open.
 
 ## Source
 
@@ -50,20 +50,6 @@ PdfCraft's validator as a second opinion on our signatures (idea B, 2026-11-21, 
 - Small gaps on their side, not ours: the time of a signature timestamp inside CAdES is not shown (`timestamp_time` empty), only that one exists; a later signature is labelled "form fill" as well as "signature".
 - Not covered: a visible stamp, an E→E original, a real card signature with a qualified timestamp. Worth repeating with a real signed file when PdfCraft's change classification changes.
 
-## Open ideas for Chevron7
-
-### C. Review by confidence in the security element step
-
-PdfCraft's OCR Verify screen colours each word by the engine's confidence and jumps to the next suspect with one key. The same idea fits `AnalysisCanvasView`: order pending suggestions from the least certain and add a key for "next uncertain one".
-
-- We already have what it needs: `ElementJudgement`, the kNN distance and the model's sure or unsure answer.
-- To decide: whether it replaces or complements "Potvrdiť všetky" and "Odmietnuť návrhy" on a page.
-- Size: medium, UI only.
-
-### D. Searchable text layer in the P→E PDF/A (question, not a proposal)
-
-PdfCraft writes OCR results as invisible text over the scan. We run OCR for detection, and it was not checked whether the P→E PDF/A carries a text layer. Adding one to a guaranteed conversion is a legal question first: the text is a guess, not the original. Owner's decision before any work.
-
 ## Idea for LawOSS: PdfCraft as a second plugin beside Chevron7
 
 Chevron7 is already a LawOSS plugin for signing (`sign`, `validate`, `inspect` through the bundled `chevron7` CLI and MCP, see `Chevron7/docs/INTEGRATIONS.md`). PdfCraft could be a second one for what happens to a PDF before it is signed. Chevron7 itself would not change.
@@ -93,6 +79,8 @@ Not known yet (LawOSS code was not read for this note):
 
 ## Not taken
 
+- Review by confidence in the security element step (idea C: order pending suggestions from the least certain, a key for the next uncertain one). Declined by the owner on 2026-11-21: one more thing for the advocate to keep in mind in a step that already asks a lot, and a detector the advocate has trained proposes well enough on its own.
+- A searchable text layer in the P→E PDF/A (idea D). Declined by the owner on 2026-11-21: OCR text is a guess, not the original, so it does not belong in the new document of a guaranteed conversion; no separate searchable copy for the client either, and no check of today's output or question to MIRRI.
 - The signing crate (see Source).
 - Their PDF/A conversion and verification as a replacement for veraPDF.
 - `tool_search` and `--compact` for our MCP server: we expose a handful of tools, so there is nothing to shorten.
