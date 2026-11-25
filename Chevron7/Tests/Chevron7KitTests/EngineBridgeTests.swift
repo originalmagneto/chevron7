@@ -407,6 +407,16 @@ final class EngineBridgeSelectionTests: XCTestCase {
         XCTAssertFalse(mapped.contains("machine request"))
     }
 
+    /// The web panel showed the English helper sentence for a card the helper could not open
+    /// (2026-11-25). The code stays, because the PDF/A fallback looks for it.
+    func testUnavailableCardIsSlovakAndKeepsItsCode() {
+        let mapped = EngineBridgeSigningProvider.localizedEngineMessage(
+            "The machine request could not be completed. [SIGNING_UNAVAILABLE]")
+        XCTAssertTrue(mapped.contains("Kartu sa nepodarilo otvoriť"))
+        XCTAssertTrue(mapped.contains("SIGNING_UNAVAILABLE"))
+        XCTAssertFalse(mapped.contains("machine request"))
+    }
+
     /// tsl.belgium.be was down on 2026-10-02: a BOSA timestamp then cannot be shown
     /// qualified, and the person learns which country's list is missing and what to do.
     func testMissingNationalListNamesTheCountryAndAsksForAnotherAuthority() {

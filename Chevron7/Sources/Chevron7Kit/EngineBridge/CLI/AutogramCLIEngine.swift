@@ -372,6 +372,16 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         await validationSession.stop()
     }
 
+    /// Whether a v2 signature with this card ends its helper even when it succeeded. The eID
+    /// module refuses a second card login inside one helper: after a good signature the next
+    /// one failed 65 ms into the request, before any BOK window, with `LoginException <-
+    /// PKCS11Exception [CKR_FUNCTION_FAILED]`, and a fresh helper signed at once (KV DPH right
+    /// after DP DPH on pfseform.financnasprava.sk, 2026-11-25). Protocol v1 starts a helper
+    /// per signature anyway; other cards keep theirs, so a stamped batch is not slowed down.
+    static func retiresHelperAfterSigning(driverID: String) -> Bool {
+        driverID == EngineBridgeSigningProvider.driverID
+    }
+
     /// Machine protocol v2 signing. Carries the visible PAdES appearance and the
     /// eForm attributes, neither of which protocol v1 can express.
     private func signWithMachineV2(
@@ -409,6 +419,9 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
         do {
             events = try await runV2(SecureMachineV2Request(envelope: machineRequest, pin: request.pin,
                 timestampAuthentication: timestamp.authentication))
+            if Self.retiresHelperAfterSigning(driverID: request.driverID) {
+                await machineSession.stop()
+            }
         } catch MachineSessionProcessFailure.requestFailed(code: "SIGNING_UNAVAILABLE") {
             // The helper keeps its card driver loaded between requests. An eID it once
             // failed to open stayed unusable there (no BOK window, the same failure on
@@ -416,6 +429,11 @@ final class AutogramCLIEngine: SigningEngine, @unchecked Sendable {
             // next signature starts a new one.
             await machineSession.stop()
             throw MachineSessionProcessFailure.requestFailed(code: "SIGNING_UNAVAILABLE")
+        } catch {
+            if Self.retiresHelperAfterSigning(driverID: request.driverID) {
+                await machineSession.stop()
+            }
+            throw error
         }
         var completedFileIDs: [String] = []
         var qualifications: [String: TimestampQualification] = [:]
