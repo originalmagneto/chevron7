@@ -171,7 +171,49 @@ final class MachineSessionProcessTests: XCTestCase {
         await engine.cancel()
     }
 
+    /// The first eID signature in a helper worked, and the next one in the same helper failed
+    /// at the card login 65 ms after the request, before any BOK window, with
+    /// `LoginException <- PKCS11Exception [CKR_FUNCTION_FAILED]`; a fresh helper then signed
+    /// at once (pfseform.financnasprava.sk, KV DPH right after DP DPH, 2026-11-25). Protocol
+    /// v1 starts a helper per signature and never showed it, so every v2 eID signature gets
+    /// its own helper, also after a success.
+    func testEachEIDSignatureRunsOnAFreshHelper() async throws {
+        executionTimeAllowance = 60
+        let starts = try await signTwiceWithSucceedingHelper(driverID: "eid")
+        XCTAssertEqual(starts, 2, "the second eID signature must not reuse the helper of the first")
+    }
+
+    /// Other cards keep the helper, so a stamped batch does not start the engine for every file.
+    func testOtherCardsKeepTheHelperBetweenSignatures() async throws {
+        executionTimeAllowance = 60
+        let starts = try await signTwiceWithSucceedingHelper(driverID: "secure_store")
+        XCTAssertEqual(starts, 1)
+    }
+
     // MARK: - Helpers
+
+    private func signTwiceWithSucceedingHelper(driverID: String) async throws -> Int {
+        let source = directory.appending(path: "formular-\(driverID).xml")
+        try Data("<dokument/>".utf8).write(to: source)
+        let starts = directory.appending(path: "starts-\(driverID)")
+        let configuration = try makeHelper(script: """
+            echo started >> '\(starts.path)'
+            while IFS= read -r line; do
+              id=$(printf '%s' "$line" | /usr/bin/sed -E 's/.*"requestId":"([^"]+)".*/\\1/')
+              printf '{"protocolVersion":2,"requestId":"%s","type":"request.completed","emittedAt":"2026-11-25T16:40:00Z","payload":{}}\\n' "$id"
+            done
+            """)
+        let engine = AutogramCLIEngine(configuration: configuration)
+        for _ in 0..<2 {
+            let request = EngineSigningRequest(sessionID: UUID(), driverID: driverID, certificateSerial: "*",
+                                               pin: Secret("0"), files: [SigningFile(id: "form", sourceURL: source)],
+                                               outputFormat: .asiceXAdES, eform: EFormSigningAttributes(),
+                                               signatureLevelOverride: "XAdES_BASELINE_B")
+            for try await _ in engine.sign(request: request) {}
+        }
+        await engine.cancel()
+        return try String(contentsOf: starts, encoding: .utf8).split(separator: "\n").count
+    }
 
     private static func validate(_ requestID: String) -> MachineV2Request {
         MachineV2Request(protocolVersion: 2, requestID: requestID, operation: .validate, payload: [:])

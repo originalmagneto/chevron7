@@ -958,6 +958,11 @@ public final class EngineBridgeSigningProvider: QualifiedSigningProviding, @unch
         if code("OUTPUT_VALIDATION_FAILED") {
             return "Engine odmietol výsledok podpisu (výstupná validácia)."
         }
+        if code("SIGNING_UNAVAILABLE") {
+            // The code stays in the text: SigningSessionStore looks for it to retry without PDF/A.
+            return "Kartu sa nepodarilo otvoriť na podpis. Kliknite znova na Podpísať; ak sa chyba zopakuje, "
+                + "vyberte kartu z čítačky a vložte ju späť. [SIGNING_UNAVAILABLE]"
+        }
         return message
     }
 
